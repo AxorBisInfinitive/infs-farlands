@@ -197,6 +197,13 @@ public class FarlandsConfig {
             .build();
     public static final boolean logStageMetrics;
 
+    public static final ConfigEntry<Boolean> LOG_STAGE_COUNTERS = DEBUG.setBoolean("logStageCounters")
+            .comment("en_us", "Verify the per-chunk stage counters against a recount every 200 ticks")
+            .comment("zh_cn", "每 200 tick 用重数一遍的方式核对每 chunk 的段计数")
+            .define(false)
+            .build();
+    public static final boolean logStageCounters;
+
     public static final ConfigEntry<Boolean> LOG_INVERTED_BOUNDING_BOX = DEBUG
             .setBoolean("logInvertedBoundingBox")
             .comment("en_us", "Log inverted BoundingBox constructions, one line per call path per second")
@@ -236,6 +243,7 @@ public class FarlandsConfig {
         logSectionLookupTrim = LOG_SECTION_LOOKUP_TRIM.get();
         logAquiferLookupTrim = LOG_AQUIFER_LOOKUP_TRIM.get();
         logStageMetrics = LOG_STAGE_METRICS.get();
+        logStageCounters = LOG_STAGE_COUNTERS.get();
         logInvertedBoundingBox = LOG_INVERTED_BOUNDING_BOX.get();
         logInvertedBoundingBoxMove = LOG_INVERTED_BOUNDING_BOX_MOVE.get();
     }

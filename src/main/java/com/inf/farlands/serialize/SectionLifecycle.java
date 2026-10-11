@@ -26,6 +26,7 @@ import com.inf.farlands.util.network.ChunkDataSender;
 import com.inf.farlands.util.window.EntitySectionWindow;
 import com.inf.farlands.util.window.WindowedChunk;
 
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap;
 
 import net.minecraft.core.SectionPos;
@@ -232,6 +233,9 @@ public final class SectionLifecycle {
         DecorationFiller.clearChunk(level.dimension(), lc.getPos().pack());
         DecorationFiller.cellChanged(lc.getPos().pack());
         if (TerrainHooks.isChunkBusy(lc)) {
+            // 忙则跳过编码，但状态必须清：清掉身份之后，在途任务随后的写口会空转，不会给同坐标的
+            // 新一代 rebuild 出旧代的档位。跳过编码本身是既有取舍，重进时重生成兜底。
+            SectionStage.clear(lc);
             return;
         }
         ENCODE_TASKS_IN_FLIGHT.incrementAndGet();
@@ -247,7 +251,8 @@ public final class SectionLifecycle {
             });
         } catch (RejectedExecutionException e) {
             ENCODE_TASKS_IN_FLIGHT.decrementAndGet();
-            // 池关闭，编码丢弃，数据由重进重生成兜底
+            // 池关闭，编码丢弃，数据由重进重生成兜底；状态同样要清，否则留到关服才由 clearAll 收。
+            SectionStage.clear(lc);
         }
     }
 
@@ -826,6 +831,9 @@ public final class SectionLifecycle {
         WindowedChunk wc = (WindowedChunk) lc;
         wc.windowedAllSections().put(sy, decoded.section());
         wc.addActiveSection(sy);
+        // 读回是第三条物化路径，绕开 ChunkAccess.getSection，所以记账要在这里补一次。随后的
+        // setStage 会把该段从 UNPROCESSED 推到盘上档位，两侧合计只记一次。
+        ChunkCounters.onMaterialize(lc, sy);
         lc.getSection(lc.getSectionIndexFromSectionY(sy)); // 数组同步，get 内部会执行 arr[idx]=s
         if (lc.getLevel() instanceof ServerLevel sl) {
             LevelLightEngine le = sl.getChunkSource().getLightEngine();
@@ -856,6 +864,64 @@ public final class SectionLifecycle {
     }
 
     // ---- 工具 ----
+
+    /** 自检一行最多列几个失配 chunk。 */
+    private static final int VERIFY_LOG_LIMIT = 8;
+
+    /**
+     * 派生记账的自检：逐 chunk 重数一遍段状态与段容器，与 {@link ChunkCounters} 的记录比对。只报
+     * 失配，不给解读。
+     *
+     * <p>重数的口径是「段容器与段状态表的并集」，因为非噪声生成器的维度里档位会领先于段。比对的三
+     * 个量与记账的三个量一一对应：低于 SURFACE 的段数、低于 DECORATED 的段数、低于 TERRAIN 的
+     * 最高段号。
+     *
+     * <p>主线程调用，重数期间写点仍可能在池上推进，所以单次失配不等于错，按整窗的出现频率判断。
+     */
+    public static void verifyCounters(MinecraftServer server) {
+        int checked = 0;
+        int mismatched = 0;
+        for (ServerLevel level : server.getAllLevels()) {
+            for (ChunkHolder holder : getChunks(level)) {
+                ChunkAccess ca = holder.getLatestChunk();
+                if (!(ca instanceof LevelChunk lc)) {
+                    continue;
+                }
+                checked++;
+                IntOpenHashSet universe = new IntOpenHashSet();
+                universe.addAll(((WindowedChunk) lc).windowedAllSections().keySet());
+                SectionStage.forEachStage(lc, (sy, stage) -> universe.add(sy.intValue()));
+                int pendingSurface = 0;
+                int pendingDecorated = 0;
+                int cursor = ChunkCounters.NO_CURSOR;
+                for (int sy : universe) {
+                    int stage = SectionStage.getStage(lc, sy);
+                    if (stage < SectionStage.SURFACE) {
+                        pendingSurface++;
+                    }
+                    if (stage < SectionStage.DECORATED) {
+                        pendingDecorated++;
+                    }
+                    if (stage < SectionStage.TERRAIN && sy > cursor) {
+                        cursor = sy;
+                    }
+                }
+                ChunkCounters.Snapshot stored = ChunkCounters.snapshot(lc);
+                if (stored.pendingSurface() != pendingSurface || stored.pendingDecorated() != pendingDecorated
+                        || stored.terrainCursor() != cursor) {
+                    mismatched++;
+                    if (mismatched <= VERIFY_LOG_LIMIT) {
+                        InfsFarlands.LOGGER.info(
+                                "FLCOUNT mismatch chunk={},{} stored(sur={},dec={},cur={}) counted(sur={},dec={},cur={})",
+                                lc.getPos().x(), lc.getPos().z(),
+                                stored.pendingSurface(), stored.pendingDecorated(), stored.terrainCursor(),
+                                pendingSurface, pendingDecorated, cursor);
+                    }
+                }
+            }
+        }
+        InfsFarlands.LOGGER.info("FLCOUNT checked={} mismatched={}", checked, mismatched);
+    }
 
     @SuppressWarnings("unchecked")
     private static Iterable<ChunkHolder> getChunks(ServerLevel level) {

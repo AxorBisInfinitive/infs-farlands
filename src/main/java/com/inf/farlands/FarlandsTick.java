@@ -189,6 +189,10 @@ public class FarlandsTick {
             trimAquiferLookup(tickCount);
             // 就绪吞吐读数：与本周期同档，约 10 秒一行。只报读数，不报解读。
             StageMetrics.flush();
+            // 派生记账的自检：与重数一遍逐 chunk 比对。只报失配。
+            if (FarlandsConfig.logStageCounters) {
+                SectionLifecycle.verifyCounters(server);
+            }
         }
         // 装饰驱动：判门、认领、提交到 farlands-gen。排在光照配额之前，使取域与本拍那簇光照任务的放行
         // 错开：那簇任务一放行就取走半径 2 的锁并持有 1 到 3 毫秒，而装饰取域是整块成功或整块失败，撞上
