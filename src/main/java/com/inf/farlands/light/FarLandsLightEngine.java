@@ -2,6 +2,7 @@ package com.inf.farlands.light;
 
 import com.inf.farlands.FarlandsConfig;
 import com.inf.farlands.InfsFarlands;
+import com.inf.farlands.terrain.pipeline.OwnershipTable;
 import com.inf.farlands.util.pos.IntSectionPos;
 import com.inf.farlands.util.window.WindowedChunk;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
@@ -153,7 +154,7 @@ public class FarLandsLightEngine extends ThreadedLevelLightEngine {
 
     private final boolean serverSide;
     private final FarLandsLightQueue queue;
-    private final LightTaskLock taskLock;
+    private final OwnershipTable taskOwnership;
     private final ExecutorService lightPool;
     private final ArrayDeque<FarLandsSkyLightEngine> skyPool = new ArrayDeque<>();
     private final ArrayDeque<FarLandsBlockLightEngine> blockPool = new ArrayDeque<>();
@@ -178,7 +179,7 @@ public class FarLandsLightEngine extends ThreadedLevelLightEngine {
         this.skyEngine = skyLight ? new FarLandsSkyLightEngine(chunkSource, sharedSkyStorage, sharedSkyTopSections)
                 : null;
         this.queue = new FarLandsLightQueue();
-        this.taskLock = new LightTaskLock(((ServerLevel) chunkSource.getLevel()).dimension());
+        this.taskOwnership = new OwnershipTable(((ServerLevel) chunkSource.getLevel()).dimension());
         // 已由 FarlandsConfig 解析：显式值受 range(1,64) 约束，"auto" 由取值器算出，恒 >= 1
         int parallelism = FarlandsConfig.parallelLightThreads;
         this.lightPool = Executors.newFixedThreadPool(parallelism, r -> {
@@ -198,7 +199,7 @@ public class FarLandsLightEngine extends ThreadedLevelLightEngine {
         this.blockEngine = new FarLandsBlockLightEngine(chunkSource);
         this.skyEngine = hasSkyLight ? new FarLandsSkyLightEngine(chunkSource) : null;
         this.queue = null;
-        this.taskLock = null;
+        this.taskOwnership = null;
         this.lightPool = null;
         this.sharedSkyStorage = null;
         this.sharedBlockStorage = null;
@@ -378,18 +379,17 @@ public class FarLandsLightEngine extends ThreadedLevelLightEngine {
      * 装饰侧取光照域锁：半径 2，覆盖它的 3×3 写域。主线程调用，失败即放弃本次、留表重试。
      *
      * <p>
-     * 这把锁与 {@link LightTaskLock#tryLock} 共用同一份 per-chunk 锁：光照侧在那里的 25 格
-     * 循环里查装饰认领表，装饰侧直接取锁，于是两个方向互为排除。客户端构造下 taskLock 为 null，
-     * 装饰是纯服务端，返回假即可。
+     * 这份域由 {@link OwnershipTable} 承载，与光照侧在它的 25 格循环里查装饰认领表是同一份：装饰侧
+     * 直接取域，于是两个方向互为排除。客户端构造下 taskOwnership 为 null，装饰是纯服务端，返回 0 即可。
      */
     public long tryLockDomain(int chunkX, int chunkZ) {
-        return this.taskLock == null ? 0L : this.taskLock.tryLockDomain(chunkX, chunkZ);
+        return this.taskOwnership == null ? 0L : this.taskOwnership.tryLockDomain(chunkX, chunkZ);
     }
 
     /** 装饰侧释放光照域锁。与 {@link #tryLockDomain} 配对，收尾调用，必须带回取域时的编号。 */
     public void unlockDomain(int chunkX, int chunkZ, long owner) {
-        if (this.taskLock != null) {
-            this.taskLock.unlock(chunkX, chunkZ, owner);
+        if (this.taskOwnership != null) {
+            this.taskOwnership.unlock(chunkX, chunkZ, owner);
         }
     }
 
@@ -636,7 +636,7 @@ public class FarLandsLightEngine extends ThreadedLevelLightEngine {
                 }
                 int cx = tasks.chunkX();
                 int cz = tasks.chunkZ();
-                long lockOwner = taskLock.tryLock(cx, cz);
+                long lockOwner = taskOwnership.tryLock(cx, cz);
                 if (lockOwner == 0L) {
                     queue.requeue(tasks); // 相邻任务占用，重排队尾下轮重试
                     if (++retries >= limit) {
@@ -651,7 +651,7 @@ public class FarLandsLightEngine extends ThreadedLevelLightEngine {
                     // 池已关闭或提交被拒：锁必须还、任务必须放回。否则这个 ChunkWork 既不在
                     // workMap 也不在 pendingWork，没人执行也没人 requeue，onComplete 永不完成，
                     // LIGHT_IN_FLIGHT 永久为真，块锁也永远不释放。与 wakeConsumer 的处理对齐。
-                    taskLock.unlock(cx, cz, lockOwner);
+                    taskOwnership.unlock(cx, cz, lockOwner);
                     queue.requeue(tasks);
                     InfsFarlands.LOGGER.error("farlands: light submit failed chunk={},{}", cx, cz, t);
                     return;
@@ -723,7 +723,7 @@ public class FarLandsLightEngine extends ThreadedLevelLightEngine {
         } catch (Throwable t) {
             InfsFarlands.LOGGER.error("Light task exception chunk={},{}", cx, cz, t);
         } finally {
-            taskLock.unlock(cx, cz, lockOwner);
+            taskOwnership.unlock(cx, cz, lockOwner);
             tasks.onComplete.complete(null);
             // 任务完成补唤醒：防 drainLight 单例漏调度 残留任务由在跑任务的
             // 完成链式续接，light future 落地 -> 生成继续 -> getChunk 解除阻塞。

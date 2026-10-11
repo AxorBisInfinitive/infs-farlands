@@ -174,6 +174,9 @@ public abstract class SpawnPreloadMixin {
         while (ready < total) {
             cache.tick(() -> false, false);
             this.waitUntilNextTick();
+            // 调度器也在这里泵一次：它由每 tick 驱动，而预加载跑在 tick 循环之前，不补这一步
+            // 候选只进队列没人派发，生成永远不推进，退出条件等不到。与下面的装饰、结构两处同形。
+            GenQueue.tick(server);
             // 每轮补一次 FULL：出生区里已就绪的 chunk 越早拿到 FULL，入场前那次阻塞读越早不会撞上。
             ChunkReadiness.drive();
             for (int dx = -FARLANDS_PRELOAD_DRIVE_RADIUS; dx <= FARLANDS_PRELOAD_DRIVE_RADIUS; dx++) {

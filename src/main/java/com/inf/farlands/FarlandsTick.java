@@ -248,10 +248,9 @@ public class FarlandsTick {
         // 在途」挡回的单元的兜底唤醒来源，延迟上限一 tick。
         SectionLifecycle.tick();
 
-        // 地形管线：每 tick 唤醒生成消费，不超过 maxGenTasksPerTick。
-        GenQueue.tick();
-        // 动态扫描：每 tick 从玩家当前位置螺旋扫描视距内未生成的 chunk 补入队。
-        GenQueue.scanAndEnqueue(server);
+        // 地形管线：每 tick 唤醒调度器，事件 drain 与候选派发不超过 maxGenTasksPerTick；兜底重扫
+        // 按它自己的 200 tick 周期跑，取代了改造前每 tick 的螺旋扫描。
+        GenQueue.tick(server);
         // 结构相驱动：重试那些在等 ±8 壳齐的 chunk，过了就跑挂起的续作。
         StructureDriver.tick();
         // 数据就绪驱动：当 tick 变成就绪的 chunk 在同一 tick 放行 promotion 的两个 future。

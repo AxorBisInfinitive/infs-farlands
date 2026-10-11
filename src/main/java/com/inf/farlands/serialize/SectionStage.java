@@ -163,6 +163,9 @@ public final class SectionStage {
         CounterIdentities.unregister(identity);
         STAGES.remove(identity);
         ChunkCounters.clear(chunk);
+        // 所有权一并丢。卸载时若有作业正持有它，那一笔收尾的释放会落空，而不是把旧一代的认领留给同坐标
+        // 的新一代；少了这一步，在途卸载会让所有权表随探索单调增长。
+        com.inf.farlands.terrain.pipeline.OwnershipTable.clear(identity);
     }
 
     /**

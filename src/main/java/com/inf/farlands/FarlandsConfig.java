@@ -211,6 +211,13 @@ public class FarlandsConfig {
             .build();
     public static final boolean logStageDependencies;
 
+    public static final ConfigEntry<Boolean> LOG_SCHEDULER = DEBUG.setBoolean("logScheduler")
+            .comment("en_us", "Log the scheduler admit rejections, candidate depth and requeues every tick")
+            .comment("zh_cn", "每 tick 打印调度器的准入拒绝、候选深度与重排数")
+            .define(false)
+            .build();
+    public static final boolean logScheduler;
+
     public static final ConfigEntry<Boolean> LOG_INVERTED_BOUNDING_BOX = DEBUG
             .setBoolean("logInvertedBoundingBox")
             .comment("en_us", "Log inverted BoundingBox constructions, one line per call path per second")
@@ -252,6 +259,7 @@ public class FarlandsConfig {
         logStageMetrics = LOG_STAGE_METRICS.get();
         logStageCounters = LOG_STAGE_COUNTERS.get();
         logStageDependencies = LOG_STAGE_DEPENDENCIES.get();
+        logScheduler = LOG_SCHEDULER.get();
         logInvertedBoundingBox = LOG_INVERTED_BOUNDING_BOX.get();
         logInvertedBoundingBoxMove = LOG_INVERTED_BOUNDING_BOX_MOVE.get();
     }
