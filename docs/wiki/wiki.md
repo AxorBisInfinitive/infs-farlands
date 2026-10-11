@@ -12,5 +12,5 @@
 > 中文特供。
 
 - [边境之地 Wiki](../wiki.farlands/wiki.md)
-- [关于 $h(x,y,z) = P(y,z) \oplus H(x)$ 不存在非平凡四则运算恒等变换的证明](../math/hash.zip)
+- [关于 h(x,y,z) = P(y,z) ^ H(x) 不存在非平凡四则运算恒等变换的证明](../math/hash.zip)
 - [鱼](../text/fish.md)
