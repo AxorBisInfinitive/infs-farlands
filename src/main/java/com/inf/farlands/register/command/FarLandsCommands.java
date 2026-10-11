@@ -2,6 +2,7 @@ package com.inf.farlands.register.command;
 
 import com.inf.farlands.InfsFarlands;
 import com.inf.farlands.command.CommandRegistrationEvent;
+import com.inf.farlands.serialize.ChunkCounters;
 import com.inf.farlands.serialize.SectionLifecycle;
 import com.inf.farlands.serialize.SectionStage;
 import com.inf.farlands.terrain.registry.SystemsData;
@@ -335,10 +336,15 @@ public class FarLandsCommands {
             LevelChunkSection computed = new LevelChunkSection(wc.containerFactory());
             try {
                 wc.windowedAllSections().put(sec.y(), computed);
+                // 段容器的第三个写入点，必须与 getSection 和读回一样过记账钩子。今天这一处只做换出，
+                // 键集不变，钩子对计数是空转；留着它是为了让「任何容器写入都记账」这个不变式在下一处
+                // 写入出现时不必再想一遍。
+                ChunkCounters.onMaterialize(lc, sec.y());
                 lc.getSection(idx); // 数组同步：get 内部执行 arr[idx]=s
                 system.fillBiomes(level, lc, sec.y(), sec.y());
             } finally {
                 wc.windowedAllSections().put(sec.y(), stored);
+                ChunkCounters.onMaterialize(lc, sec.y());
                 lc.getSection(idx);
             }
             for (int y = 0; y < 4; y++) {
