@@ -12,6 +12,7 @@ import com.inf.farlands.terrain.decorationFiller.DecorationRegion;
 import com.inf.farlands.terrain.decorationFiller.ScopedStructureManager;
 import com.inf.farlands.terrain.pipeline.GenQueue;
 import com.inf.farlands.terrain.terrainFiller.TerrainSystemContext;
+import com.inf.farlands.util.world.WorldBounds;
 
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
@@ -123,6 +124,21 @@ public final class StructureDriver {
      */
     public static boolean structuresEnabled(ServerLevel level) {
         return level.structureManager().shouldGenerateStructures();
+    }
+
+    /**
+     * 该 chunk 是否在结构相的可及范围内，即含可玩方块。
+     *
+     * <p>
+     * 可玩界之外的 chunk 在 int 里没有可表示的方块坐标：{@code ChunkPos.getMinBlockX} 与
+     * {@code getMinBlockZ} 被本 port 饱和到 {@code Integer.MIN_VALUE + 15} 一侧，结构放置拿这个值推
+     * 高度锚，就会有坐标落进 {@code Integer.MIN_VALUE} 上方五格之内，而 vanilla 的网格锚点算式在那里
+     * 做 {@code posZ + -5} 的 int 加法，回绕到相反一侧，下标随即越过网格数组。这类 chunk 本来也没有
+     * 可玩方块，所以与结构关掉的世界走同一条捷径。
+     */
+    public static boolean inStructureRange(LevelChunk chunk) {
+        ChunkPos pos = chunk.getPos();
+        return WorldBounds.inChunkRange(pos.x(), pos.z());
     }
 
     /**

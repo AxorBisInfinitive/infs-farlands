@@ -179,7 +179,9 @@ public abstract class GenerationChunkHolderMixin {
             // forStructuresInChunk 对空起点表返回的就是 Beardifier.EMPTY。所以跳过起点相、门与 pin
             // 和照常跑完，交出来的是同一个对象。照调 forStructuresInChunk 而不是直接塞 EMPTY，是为了
             // 不让这里成为唯一算得出特例的地方。
-            if (!StructureDriver.structuresEnabled(level)) {
+            //
+            // 可玩界之外的 chunk 走同一支：它们没有可玩方块，起点相也不该跑，取到的是同一个 EMPTY。
+            if (!StructureDriver.structuresEnabled(level) || !StructureDriver.inStructureRange(levelchunk)) {
                 ((ChunkBeardifier) levelchunk).setBeardifier(
                         Beardifier.forStructuresInChunk(level.structureManager(), levelchunk.getPos()));
             } else {
