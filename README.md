@@ -4,9 +4,9 @@
 [![Fabric](https://img.shields.io/badge/Fabric-0.19.3-blue)](https://fabricmc.net/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-26.1.2-green)](https://minecraft.net)
 
-![@Overwrite](https://img.shields.io/endpoint?url=https%3A%2F%2Fgist.githubusercontent.com%2FInfGithub%2Fdc5cf49ced449ef6cda0c106718f8e53%2Fraw%2Foverwrite.json)
-![@Inject](https://img.shields.io/endpoint?url=https%3A%2F%2Fgist.githubusercontent.com%2FInfGithub%2Fdc5cf49ced449ef6cda0c106718f8e53%2Fraw%2Finject.json)
-![@Mixin](https://img.shields.io/endpoint?url=https%3A%2F%2Fgist.githubusercontent.com%2FInfGithub%2Fdc5cf49ced449ef6cda0c106718f8e53%2Fraw%2Fmixin.json)
+![@Overwrite](https://img.shields.io/endpoint?url=https%3A%2F%2Fgist.githubusercontent.com%2FAxorBisInfinitive%2Fdc5cf49ced449ef6cda0c106718f8e53%2Fraw%2Foverwrite.json)
+![@Inject](https://img.shields.io/endpoint?url=https%3A%2F%2Fgist.githubusercontent.com%2FAxorBisInfinitive%2Fdc5cf49ced449ef6cda0c106718f8e53%2Fraw%2Finject.json)
+![@Mixin](https://img.shields.io/endpoint?url=https%3A%2F%2Fgist.githubusercontent.com%2FAxorBisInfinitive%2Fdc5cf49ced449ef6cda0c106718f8e53%2Fraw%2Fmixin.json)
 
 [English](README.EN_US.md) / [Wiki](docs/wiki/wiki.md)
 
