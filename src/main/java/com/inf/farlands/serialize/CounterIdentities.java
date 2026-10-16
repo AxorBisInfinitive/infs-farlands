@@ -4,6 +4,8 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import com.inf.farlands.util.map.Long2ObjectStripedMap;
 
+import net.minecraft.world.level.chunk.LevelChunk;
+
 /**
  * 记账与段状态共用的身份注册表。
  *
@@ -35,6 +37,17 @@ public final class CounterIdentities {
     /** 该身份是否还活着。0 恒为假。 */
     public static boolean isLive(long identity) {
         return identity != 0L && LIVE.get(identity) != null;
+    }
+
+    /**
+     * 该 chunk 是否还持有活着的身份，即它的状态是否仍归本调度器管。
+     *
+     * <p>卸载流程先注销身份，再清段状态表与记账，而被清掉的 chunk 在 `visibleChunkMap` 的克隆快照
+     * 里还会露一阵。自检据此跳过它们：那些 chunk 的段容器可能还有内容，但记账已经按设计清掉了，
+     * 拿两者比对只会报出假失配。
+     */
+    public static boolean owned(LevelChunk chunk) {
+        return chunk instanceof CounterIdentity identity && isLive(identity.counterId());
     }
 
     /** 注销。卸载时调用，幂等。 */
