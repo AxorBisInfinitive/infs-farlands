@@ -12,6 +12,7 @@ import com.inf.farlands.terrain.surfaceFiller.SurfaceFiller;
 import com.inf.farlands.terrain.structure.StructureDriver;
 import com.inf.farlands.util.network.ChunkDataSender;
 import com.inf.farlands.util.window.EntitySectionWindow;
+import com.inf.farlands.util.window.PlayerSnapshot;
 import com.inf.farlands.util.window.WindowedChunk;
 import com.inf.farlands.util.world.WorldBounds;
 
@@ -20,7 +21,6 @@ import java.util.List;
 import java.util.function.IntConsumer;
 
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -69,19 +69,11 @@ public final class GenTask {
         this.priority = computePriority(this.chunk);
     }
 
-    /** 距最近玩家距离。无玩家时返回 0，退化为 FIFO。 */
+    /** 距该维度最近玩家的距离，读每 tick 的玩家快照。无玩家时返回 0，退化为 FIFO。 */
     private static int computePriority(LevelChunk chunk) {
         if (chunk.getLevel() instanceof ServerLevel sl) {
             ChunkPos cp = chunk.getPos();
-            int best = Integer.MAX_VALUE;
-            for (ServerPlayer p : sl.players()) {
-                ChunkPos pp = p.chunkPosition();
-                int d = Math.max(Math.abs(cp.x() - pp.x()), Math.abs(cp.z() - pp.z()));
-                if (d < best) {
-                    best = d;
-                }
-            }
-            return best == Integer.MAX_VALUE ? 0 : best;
+            return PlayerSnapshot.nearestDistance(sl.dimension(), cp.x(), cp.z());
         }
         return 0;
     }
@@ -244,7 +236,7 @@ public final class GenTask {
                 consider.accept(sy);
             }
         } else {
-            EntitySectionWindow.forEachSectionInAnyWindow(consider);
+            EntitySectionWindow.forEachSectionInAnyWindow(chunk.getLevel().dimension(), consider);
         }
         if (open[0]) {
             segments.add(new int[] { curMin[0], curMax[0] });

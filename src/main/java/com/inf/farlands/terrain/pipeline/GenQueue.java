@@ -275,7 +275,7 @@ public final class GenQueue {
      */
     private static boolean hasWorkInWindow(LevelChunk chunk) {
         boolean[] found = { false };
-        EntitySectionWindow.forEachSectionInAnyWindow(sy -> {
+        EntitySectionWindow.forEachSectionInAnyWindow(chunk.getLevel().dimension(), sy -> {
             if (!WorldBounds.inSection(sy)) {
                 return;
             }
@@ -392,7 +392,7 @@ public final class GenQueue {
     /** 该 chunk 在窗口并集内是否仍有未 TERRAIN 的 section。 */
     private static boolean hasUnprocessed(LevelChunk chunk) {
         boolean[] found = { false };
-        EntitySectionWindow.forEachSectionInAnyWindow(sy -> {
+        EntitySectionWindow.forEachSectionInAnyWindow(chunk.getLevel().dimension(), sy -> {
             if (!WorldBounds.inSection(sy)) {
                 return;
             }

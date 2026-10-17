@@ -18,6 +18,7 @@ import com.inf.farlands.util.maps.SectionUtil;
 import com.inf.farlands.util.network.ChunkDataSender;
 import com.inf.farlands.util.network.SystemsSender;
 import com.inf.farlands.util.window.EntitySectionWindow;
+import com.inf.farlands.util.window.PlayerSnapshot;
 
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -226,8 +227,11 @@ public class FarlandsTick {
                 }
             }
         }
+        // 玩家位置快照与窗口并集：两者读同一份玩家列表、同一时点落地，排序与准入都读快照。
+        List<ServerPlayer> windowPlayers = server.getPlayerList().getPlayers();
+        PlayerSnapshot.capture(windowPlayers);
         // 实体 section 窗口并集更新。terrain 的窗口段收集与 fsa 的清理判定都读它，必须先刷新。
-        EntitySectionWindow.update(server.getPlayerList().getPlayers());
+        EntitySectionWindow.update(windowPlayers);
         // 驱动面 ±8 邻域的保加载：玩家自己的票圈只到视距加 2，门要的那 289 格有约 94% 落在圈外。
         NeighborhoodTickets.tick(server);
 

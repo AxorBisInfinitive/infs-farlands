@@ -1,8 +1,10 @@
 package com.inf.farlands.mixin.terrain.surface;
 
 import java.lang.reflect.Constructor;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
+import com.inf.farlands.InfsFarlands;
 import com.inf.farlands.util.window.EntitySectionWindow;
 import com.inf.farlands.util.window.WindowedChunk;
 import com.inf.farlands.util.world.WorldBounds;
@@ -20,6 +22,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.BlockColumn;
 import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.level.levelgen.Heightmap;
@@ -106,6 +109,14 @@ import org.spongepowered.asm.mixin.Unique;
  */
 @Mixin(SurfaceSystem.class)
 public abstract class SurfaceSystemMixin {
+
+    /**
+     * 非 {@code LevelChunk} 走进地表窗口兜底的次数，只用于一次性日志。
+     *
+     * <p>窗口按维度分表之后，本方法拿不到 level 时只能退回全维度并集；真实路径上 {@code buildSurface}
+     * 收的都是 LevelChunk，所以这条一旦出现就说明有别的路径进来了。
+     */
+    private static final AtomicInteger PROTO_FALLBACK_LOGGED = new AtomicInteger();
 
     // ---- @Shadow：buildSurface 复制体实际使用的 SurfaceSystem 私有成员 ----
 
@@ -308,7 +319,17 @@ public abstract class SurfaceSystemMixin {
         // 夹到可玩段界而不是可表示段界，与 collectSegments、hasWorkInWindow、hasUnprocessed、seedSection
         // 四处判据面同宽。可表示段界下端 MIN_SECTION 左移四位正好是 Integer.MIN_VALUE，而下面的 Y 循环
         // 是 int 递减到 endY，走到 MIN_VALUE 时 y-- 会回绕到 MAX_VALUE，循环永不结束。
-        int[] ranges = EntitySectionWindow.ranges();
+        int[] ranges;
+        if (protoChunk instanceof LevelChunk levelChunk) {
+            ranges = EntitySectionWindow.ranges(levelChunk.getLevel().dimension());
+        } else {
+            // 拿不到维度：退回全维度并集，并打一条限流日志。每次调用都现合并，属低频兜底。
+            if (PROTO_FALLBACK_LOGGED.getAndIncrement() == 0) {
+                InfsFarlands.LOGGER.warn("farlands: surface window fallback on non-LevelChunk {}",
+                        protoChunk.getPos());
+            }
+            ranges = EntitySectionWindow.unionAllDimensions();
+        }
         if (ranges.length == 0) {
             return;
         }

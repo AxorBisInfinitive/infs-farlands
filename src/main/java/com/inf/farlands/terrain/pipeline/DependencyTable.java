@@ -6,13 +6,12 @@ import com.inf.farlands.serialize.SectionIO;
 import com.inf.farlands.serialize.SectionLifecycle;
 import com.inf.farlands.serialize.SectionStage;
 import com.inf.farlands.util.window.EntitySectionWindow;
+import com.inf.farlands.util.window.PlayerSnapshot;
 import com.inf.farlands.util.window.WindowedChunk;
 import com.inf.farlands.util.world.WorldBounds;
 
 import net.minecraft.server.level.ChunkLevel;
-import net.minecraft.server.level.ChunkTrackingView;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
@@ -152,28 +151,17 @@ public final class DependencyTable {
         return ChunkLevel.generationStatus(ticketLevel) == ChunkStatus.FULL ? 0 : 1;
     }
 
-    /** 该 chunk 到最近玩家的 Chebyshev 距离；无玩家时返回 0。排序键将来复用本方法，不许另写一份。 */
+    /**
+     * 该 chunk 到该维度最近玩家的 Chebyshev 距离，读每 tick 的玩家快照；无玩家时返回 0。
+     * 排序键复用本方法，不许另写一份。
+     */
     public static int nearestPlayerDistance(ServerLevel level, int cx, int cz) {
-        int best = Integer.MAX_VALUE;
-        for (ServerPlayer player : level.players()) {
-            ChunkPos pc = player.chunkPosition();
-            int d = Math.max(Math.abs(cx - pc.x()), Math.abs(cz - pc.z()));
-            if (d < best) {
-                best = d;
-            }
-        }
-        return best == Integer.MAX_VALUE ? 0 : best;
+        return PlayerSnapshot.nearestDistance(level.dimension(), cx, cz);
     }
 
-    /** 该 level 的有效视距，按玩家取；无玩家时回退 8。客户端选项与 ViewArea 在 Sodium 下都不可用。 */
+    /** 该维度的有效视距，读玩家快照；无玩家时回退 8。 */
     public static int viewDistance(ServerLevel level) {
-        int view = 0;
-        for (ServerPlayer player : level.players()) {
-            if (player.getChunkTrackingView() instanceof ChunkTrackingView.Positioned positioned) {
-                view = Math.max(view, positioned.viewDistance());
-            }
-        }
-        return view == 0 ? 8 : view;
+        return PlayerSnapshot.viewDistance(level.dimension());
     }
 
     /**
@@ -209,7 +197,8 @@ public final class DependencyTable {
                 }
             }
             case STAGE_MAP -> SectionStage.forEachStage(chunk, (sy, stage) -> consider.accept(sy));
-            case WINDOW_UNION -> EntitySectionWindow.forEachSectionInAnyWindow(consider);
+            case WINDOW_UNION -> EntitySectionWindow.forEachSectionInAnyWindow(
+                    chunk.getLevel().dimension(), consider);
             case NONE -> {
             }
         }

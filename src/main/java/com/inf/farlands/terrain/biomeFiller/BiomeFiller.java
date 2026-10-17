@@ -32,7 +32,7 @@ public final class BiomeFiller {
      */
     public static void fillChunkBiomes(ServerLevel level, LevelChunk chunk) {
         BiomeSystem sys = ((LevelSystems) level).biomeSystem();
-        EntitySectionWindow.forEachSectionInAnyWindow(sy -> seedSection(level, chunk, sys, sy));
+        EntitySectionWindow.forEachSectionInAnyWindow(level.dimension(), sy -> seedSection(level, chunk, sys, sy));
     }
 
     /** 窗口滑入补触发：单 section，stage 小于 BIOMES 才填。主线程。 */

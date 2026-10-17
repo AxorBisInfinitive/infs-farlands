@@ -375,7 +375,10 @@ public abstract class ChunkAccessMixin
     @Override
     public void forEachOutsideWindows(int margin, IntConsumer consumer) {
         IntSet collected = new IntOpenHashSet();
-        int[] ranges = EntitySectionWindow.ranges();
+        // 窗口按维度分表：调用点只有服务端清理，走 LevelChunk；拿不到维度时退回全维度并集。
+        int[] ranges = (Object) this instanceof LevelChunk lc
+                ? EntitySectionWindow.ranges(lc.getLevel().dimension())
+                : EntitySectionWindow.unionAllDimensions();
         synchronized (this.activeSectionYs) {
             for (int i = 0; i < ranges.length; i += 2) {
                 int min = ranges[i];

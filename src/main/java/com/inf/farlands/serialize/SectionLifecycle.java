@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ExecutorService;
@@ -18,6 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.inf.farlands.InfsFarlands;
+import com.inf.farlands.FarlandsConfig;
 import com.inf.farlands.light.FarLandsLightEngine;
 import com.inf.farlands.terrain.carverFiller.CarverFiller;
 import com.inf.farlands.terrain.debug.StageMetrics;
@@ -38,6 +40,8 @@ import net.minecraft.server.level.ChunkHolder;
 import net.minecraft.server.level.ChunkLevel;
 import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.util.Mth;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.chunk.ChunkAccess;
@@ -635,7 +639,7 @@ public final class SectionLifecycle {
 
     /** 删内存，包括 section、stage、脏标记与光照层，主线程执行。窗口内的不删。 */
     private static void removeFromMemory(LevelChunk lc, int sy) {
-        if (EntitySectionWindow.inAnyWindow(sy)) {
+        if (EntitySectionWindow.inAnyWindow(lc.getLevel().dimension(), sy)) {
             return;
         }
         WindowedChunk wc = (WindowedChunk) lc;
@@ -665,14 +669,22 @@ public final class SectionLifecycle {
         ChunkPos cp = lc.getPos();
         PalettedContainerFactory factory = ((WindowedChunk) lc).containerFactory();
         List<Integer> windowSy = new ArrayList<>();
-        EntitySectionWindow.forEachSectionInAnyWindow(windowSy::add);
+        EntitySectionWindow.forEachSectionInAnyWindow(lc.getLevel().dimension(), windowSy::add);
         if (windowSy.isEmpty()) {
-            // 窗口未建立。重进瞬间 ranges 为空就标记延迟读回，等窗口建立后由 retryPendingReads
-            // 重新触发。onDone 照常执行，此时生成侧收集到的窗口为空，不会生成，等待重试。
-            pendingWindowRead.add(lc);
-            SectionIO.unmarkReadingBatch(lc, windowSy);
-            onDone.run();
-            return;
+            if (level.players().isEmpty()) {
+                // 该维度确实没有玩家。重进瞬间窗口未建立就标记延迟读回，等窗口建立后由
+                // retryPendingReads 重新触发。onDone 照常执行，此时生成侧收集到的窗口为空，
+                // 不会生成，等待重试。
+                pendingWindowRead.add(lc);
+                SectionIO.unmarkReadingBatch(lc, windowSy);
+                onDone.run();
+                return;
+            }
+            // 该维度有玩家而窗口表为空：窗口在 tick 末尾才更新，而阻塞的 FULL 取数发生在 tick 之内，
+            // 玩家刚进入的维度此刻在表里还没有条目。这不能当成「等窗口建立」，那会落下
+            // pendingWindowRead，而它的解除点全部在 tickServer 的 RETURN 之后，被阻塞的取数却卡在
+            // RETURN 之前，于是这一 tick 必然自锁。这里按该维度自己的玩家就地算带，走正常读回。
+            windowSy.addAll(windowSectionsFromPlayers(level));
         }
         pendingWindowRead.remove(lc); // 读回已发起，幂等，可能本来就没标记过
         SectionIO.markReadingBatch(lc, windowSy);
@@ -716,15 +728,33 @@ public final class SectionLifecycle {
     }
 
     /**
+     * 本 tick 还没更新的维度的窗口带，按该维度自己的玩家就地算。
+     *
+     * <p>只在该维度有玩家、而窗口表里没有它的条目时调用，形状与 {@code EntitySectionWindow.update}
+     * 对单玩家算的那一段逐字相同，区别只是不写回表：表由 tick 末尾统一重建。
+     */
+    private static List<Integer> windowSectionsFromPlayers(ServerLevel level) {
+        int half = FarlandsConfig.verticalSimulationDistance;
+        TreeSet<Integer> sections = new TreeSet<>();
+        for (ServerPlayer player : level.players()) {
+            int center = Mth.floorDiv(player.getBlockY(), 16);
+            for (int sy = center - half; sy <= center + half; sy++) {
+                sections.add(sy);
+            }
+        }
+        return new ArrayList<>(sections);
+    }
+
+    /**
      * 每 tick 由 FarlandsTick 调用，重试那些加载时窗口还没建立的 chunk 读回。窗口已建立就
      * 重新 loadChunkSections，此时 windowSy 非空，会读回窗口内 section，包含重进瞬间漏读的。
      * 窗口仍为空则 loadChunkSections 内部会重新标记，下 tick 再试。已卸载则数据已落盘，
      * 不再处理。
      */
     public static void retryPendingReads(MinecraftServer server) {
-        if (pendingWindowRead.isEmpty() || EntitySectionWindow.ranges().length == 0) {
-            return; // 无 pending 或窗口未建立，即 Preparing 与玩家未注册期，零开销早退。
-                    // 只按 ranges 是否为空早退，不必全量重试；全量重试会让初次进入世界每 tick 巨量 stat。
+        if (pendingWindowRead.isEmpty() || !EntitySectionWindow.hasAnyWindow()) {
+            return; // 无 pending 或任何维度都没有窗口，即 Preparing 与玩家未注册期，零开销早退。
+                    // 只按窗口是否为空早退，不必全量重试；全量重试会让初次进入世界每 tick 巨量 stat。
         }
         int budget = 32; // 每 tick 最多重试 32 个，防单 tick 巨量 Files.exists stat
         for (LevelChunk lc : pendingWindowRead) {
