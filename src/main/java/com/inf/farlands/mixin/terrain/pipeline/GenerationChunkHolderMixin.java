@@ -245,7 +245,7 @@ public abstract class GenerationChunkHolderMixin {
      * 结构相之后照跑的那一支：biome、fsa 读回、入队。
      *
      * <p>它不依赖 {@code Beardifier}，所以结构相被延后时也照跑，加载期的 FULL 就靠它末尾那次
-     * {@code ChunkReadiness.drive()} 补上，而 {@code setInitialSpawn} 的阻塞读早于预加载循环。
+     * {@code ChunkReadiness.completeFull()} 补上，而 {@code setInitialSpawn} 的阻塞读早于预加载循环。
      */
     @Unique
     private void farlandsGenerateTail(ServerLevel level, LevelChunk levelchunk) {
@@ -284,7 +284,7 @@ public abstract class GenerationChunkHolderMixin {
                         // 缝，ChunkReadiness 会把这个缝判成就绪。
                         GenQueue.endBiomeFill(levelchunk);
                         // 群系标志清掉后，一个已读回且已点亮的 chunk 可能刚好就绪，这里补一次。
-                        ChunkReadiness.drive();
+                        ChunkReadiness.completeFull(levelchunk);
                         // fsa 读回：先查磁盘窗口内 section，有则读回恢复数据、光照、stage 并补发。
                         // 完成后才 enqueueChunk，collectSegments 的 isOrAfter(TERRAIN) 自动跳过已读回的，
                         // 磁盘没有的 section 正常入生成队列。

@@ -191,6 +191,8 @@ public class FarlandsTick {
             StageMetrics.flush();
             // 在途表的周期清扫：删掉身份已注销且值为假的条目。
             GenQueue.sweepDeadEntries();
+            // 就绪兜底重扫：收拾漏通知的 chunk，延迟上限 200 tick。信号点负责常态放行。
+            ChunkReadiness.rescan();
             // 派生记账的自检：与重数一遍逐 chunk 比对。只报失配。
             if (FarlandsConfig.logStageCounters) {
                 SectionLifecycle.verifyCounters(server);
@@ -252,8 +254,6 @@ public class FarlandsTick {
         GenQueue.scanAndEnqueue(server);
         // 结构相驱动：重试那些在等 ±8 壳齐的 chunk，过了就跑挂起的续作。
         StructureDriver.tick();
-        // 数据就绪驱动：当 tick 变成就绪的 chunk 在同一 tick 放行 promotion 的两个 future。
-        ChunkReadiness.drive();
         // 兼容层的每 tick 钩子，排在所有核心驱动之后：它只驱动本 port 之外的请求方，例如 Chunky 预生成。
         for (Consumer<MinecraftServer> sink : TICK_SINKS) {
             sink.accept(server);

@@ -13,12 +13,14 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
 /**
  * 每 chunk 的派生记账，供调度器的依赖判据 O(1) 取值。本节只记账，不改任何判据。
  *
- * <p>四项：
+ * <p>五项：
  * {@code pendingSurface}，已计入的段里档位低于 SURFACE 的个数，归零表示该 chunk 可以进 CARVERS；
  * {@code pendingDecorated}，档位低于 DECORATED 的个数，归零表示可以进 LIGHTED；
  * {@code terrainCursor}，已计入的段里档位低于 TERRAIN 的最高段号，空集取 {@link #NO_CURSOR}，
  * SURFACE(S) 的判据是 S 大于本值，即该段之上的已计入段都不欠地形；
- * {@code atDecorated}，档位正好等于 DECORATED 的个数，是 {@code SectionStage.hasAwaitingLight} 的判据。
+ * {@code atDecorated}，档位正好等于 DECORATED 的个数，是 {@code SectionStage.hasAwaitingLight} 的判据；
+ * {@code belowLighted}，档位落在 TERRAIN 到 LIGHTED 之间的个数，归零即数据就绪判据里「有做过但没
+ * 点亮的段」那一项不成立，是 {@code SectionStage.hasBelowLighted} 的判据。
  *
  * <p>游标按 chunk 而不是按列：档位是按段的，一个段覆盖它 16 乘 16 的全部列，所以「S 之上的段
  * 欠不欠地形」与列无关。
@@ -46,12 +48,14 @@ public final class ChunkCounters {
     private int pendingDecorated;
     private int terrainCursor = NO_CURSOR;
     private int atDecorated;
+    private int belowLighted;
 
     private ChunkCounters() {
     }
 
     /** 记账快照，供自检比对。 */
-    public record Snapshot(int pendingSurface, int pendingDecorated, int terrainCursor, int atDecorated) {
+    public record Snapshot(int pendingSurface, int pendingDecorated, int terrainCursor, int atDecorated,
+            int belowLighted) {
     }
 
     private static long identityOf(LevelChunk chunk) {
@@ -153,14 +157,30 @@ public final class ChunkCounters {
     public static Snapshot snapshot(LevelChunk chunk) {
         long identity = identityOf(chunk);
         if (identity == 0L) {
-            return new Snapshot(0, 0, NO_CURSOR, 0);
+            return new Snapshot(0, 0, NO_CURSOR, 0, 0);
         }
         ChunkCounters c = COUNTERS.get(identity);
         if (c == null) {
-            return new Snapshot(0, 0, NO_CURSOR, 0);
+            return new Snapshot(0, 0, NO_CURSOR, 0, 0);
         }
         synchronized (c) {
-            return new Snapshot(c.pendingSurface, c.pendingDecorated, c.terrainCursor, c.atDecorated);
+            return new Snapshot(c.pendingSurface, c.pendingDecorated, c.terrainCursor, c.atDecorated,
+                    c.belowLighted);
+        }
+    }
+
+    /** 读该 chunk 低于 LIGHTED 的段数；身份为 0 或从未记账过返回 0。 */
+    public static int belowLighted(LevelChunk chunk) {
+        long identity = identityOf(chunk);
+        if (identity == 0L) {
+            return 0;
+        }
+        ChunkCounters c = COUNTERS.get(identity);
+        if (c == null) {
+            return 0;
+        }
+        synchronized (c) {
+            return c.belowLighted;
         }
     }
 
@@ -195,6 +215,9 @@ public final class ChunkCounters {
         if (stage == SectionStage.DECORATED) {
             this.atDecorated++;
         }
+        if (SectionStage.isBelowLighted(stage)) {
+            this.belowLighted++;
+        }
         if (stage < SectionStage.TERRAIN && sectionY > this.terrainCursor) {
             this.terrainCursor = sectionY;
         }
@@ -212,6 +235,9 @@ public final class ChunkCounters {
             if (oldStage == SectionStage.DECORATED) {
                 this.atDecorated++;
             }
+            if (SectionStage.isBelowLighted(oldStage)) {
+                this.belowLighted++;
+            }
             if (oldStage < SectionStage.TERRAIN && sectionY > this.terrainCursor) {
                 this.terrainCursor = sectionY;
             }
@@ -227,6 +253,12 @@ public final class ChunkCounters {
         }
         if (oldStage == SectionStage.DECORATED && newStage != SectionStage.DECORATED) {
             this.atDecorated--;
+        }
+        if (SectionStage.isBelowLighted(oldStage) && !SectionStage.isBelowLighted(newStage)) {
+            this.belowLighted--;
+        }
+        if (!SectionStage.isBelowLighted(oldStage) && SectionStage.isBelowLighted(newStage)) {
+            this.belowLighted++;
         }
         if (oldStage < SectionStage.TERRAIN && newStage >= SectionStage.TERRAIN) {
             if (sectionY == this.terrainCursor) {
@@ -259,6 +291,9 @@ public final class ChunkCounters {
         }
         if (stage == SectionStage.DECORATED) {
             this.atDecorated--;
+        }
+        if (SectionStage.isBelowLighted(stage)) {
+            this.belowLighted--;
         }
         if (sectionY == this.terrainCursor) {
             this.terrainCursor = highestPendingBelow(chunk, sectionY);

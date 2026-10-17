@@ -383,6 +383,10 @@ public final class GenQueue {
             CHUNK_IN_FLIGHT.remove(key);
         }
         removeGenTicket(chunk);
+        // 生成在途落：该 chunk 可能就此就绪。本方法跑在 genPool 上，补 FULL 要回主线程，与撤票同形。
+        if (chunk.getLevel() instanceof ServerLevel serverLevel) {
+            SectionIO.runOnMainThread(() -> ChunkReadiness.completeFull(chunk), serverLevel);
+        }
     }
 
     /** 该 chunk 在窗口并集内是否仍有未 TERRAIN 的 section。 */
@@ -625,9 +629,10 @@ public final class GenQueue {
                                 // 所以必须在这里补一次内容变化标记：否则门一加，整包永远不发，客户端
                                 // 只能看到空壳。
                                 ChunkDataSender.markChunkChanged(chunk);
-                                // 光照完成是就绪翻转的主要时点，投一次 drive：主线程若正阻塞在某个等
-                                // FULL 的位置上，这一笔会在 managedBlock 的队列里执行，把等待解开。
-                                ChunkReadiness.drive();
+                                // 光照在途已落，且 DECORATED 段刚升到 LIGHTED：该 chunk 可能就此就绪，补一次 FULL。
+                                // 主线程上直调，主线程若正阻塞在某个等 FULL 的位置上，这一笔会在 managedBlock 的
+                                // 队列里执行，把等待解开。
+                                ChunkReadiness.completeFull(chunk);
                                 if (SectionStage.hasAwaitingLight(chunk)) {
                                     // 光照期间新到 DECORATED 的段未被这次播种覆盖，下一批。
                                     notifyGenerated(chunk);

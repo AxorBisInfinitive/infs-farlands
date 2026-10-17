@@ -174,8 +174,6 @@ public abstract class SpawnPreloadMixin {
         while (ready < total) {
             cache.tick(() -> false, false);
             this.waitUntilNextTick();
-            // 每轮补一次 FULL：出生区里已就绪的 chunk 越早拿到 FULL，入场前那次阻塞读越早不会撞上。
-            ChunkReadiness.drive();
             for (int dx = -FARLANDS_PRELOAD_DRIVE_RADIUS; dx <= FARLANDS_PRELOAD_DRIVE_RADIUS; dx++) {
                 for (int dz = -FARLANDS_PRELOAD_DRIVE_RADIUS; dz <= FARLANDS_PRELOAD_DRIVE_RADIUS; dz++) {
                     ChunkPos pos = new ChunkPos(spawnCx + dx, spawnCz + dz);
@@ -239,7 +237,6 @@ public abstract class SpawnPreloadMixin {
                 }
             }
         }
-        ChunkReadiness.drive();
         InfsFarlands.LOGGER.info("farlands: spawn preload {}/{} in {} ms", ready, total,
                 System.currentTimeMillis() - startedAt);
     }

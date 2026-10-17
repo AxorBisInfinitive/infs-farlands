@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import com.inf.farlands.InfsFarlands;
 import com.inf.farlands.light.FarLandsLightEngine;
+import com.inf.farlands.serialize.ChunkReadiness;
 import com.inf.farlands.serialize.SectionIO;
 import com.inf.farlands.serialize.SectionLifecycle;
 import com.inf.farlands.serialize.SectionStage;
@@ -648,6 +649,8 @@ public final class DecorationFiller {
             }
         }
         GenQueue.finishDecoration();
+        // 认领已撤：该 chunk 的「装饰写域被占」这一条落了，可能就此就绪。本方法在池线程上，转回主线程补。
+        SectionIO.runOnMainThread(() -> ChunkReadiness.completeFull(center), level);
     }
 
     /**
@@ -751,6 +754,8 @@ public final class DecorationFiller {
                 }
             }
             GenQueue.finishDecoration();
+            // 认领已撤：该 chunk 的「装饰写域被占」这一条落了，可能就此就绪。主线程上直调。
+            ChunkReadiness.completeFull(center);
         }
     }
 

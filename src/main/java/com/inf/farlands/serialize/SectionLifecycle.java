@@ -704,7 +704,7 @@ public final class SectionLifecycle {
                             SectionIO.unmarkReadingBatch(lc, windowSy);
                             promotePendingSections(lc, windowSy);
                             skySourcesReady(lc);
-                            ChunkReadiness.drive();
+                            ChunkReadiness.completeFull(lc);
                             onDone.run();
                         }
                     });
@@ -757,6 +757,8 @@ public final class SectionLifecycle {
      */
     public static void clearPendingWindowRead(LevelChunk lc) {
         pendingWindowRead.remove(lc);
+        // 窗口等待这一条落了：该 chunk 可能就此就绪。
+        ChunkReadiness.completeFull(lc);
     }
 
     /**
@@ -771,6 +773,8 @@ public final class SectionLifecycle {
         boolean exist = Files.exists(path);
         if (!exist) {
             SectionIO.unmarkReading(lc, sectionY);
+            // 读回在途这一条落了，且没有数据要恢复：该 chunk 可能就此就绪。预加载期没有 tick，不能等重扫。
+            ChunkReadiness.completeFull(lc);
             onDone.run();
             return;
         }
@@ -779,6 +783,8 @@ public final class SectionLifecycle {
                 SectionStorage.slotIndex(cp.x() & 31, cp.z() & 31, sectionY & 31), sectionY);
         if (ref == null) {
             SectionIO.unmarkReading(lc, sectionY);
+            // 同上：无槽位即无数据，读回在途这一条落，补一次。
+            ChunkReadiness.completeFull(lc);
             onDone.run();
             return;
         }
@@ -790,7 +796,7 @@ public final class SectionLifecycle {
             }
             promotePendingSections(lc, List.of(sectionY));
             skySourcesReady(lc);
-            ChunkReadiness.drive();
+            ChunkReadiness.completeFull(lc);
             onDone.run();
         });
     }
@@ -872,9 +878,9 @@ public final class SectionLifecycle {
      * 派生记账的自检：逐 chunk 重数一遍段状态与段容器，与 {@link ChunkCounters} 的记录比对。只报
      * 失配，不给解读。
      *
-     * <p>重数的口径是「段容器与段状态表的并集」，因为非噪声生成器的维度里档位会领先于段。比对的四
-     * 个量与记账的四个量一一对应：低于 SURFACE 的段数、低于 DECORATED 的段数、低于 TERRAIN 的
-     * 最高段号、等于 DECORATED 的段数。
+     * <p>重数的口径是「段容器与段状态表的并集」，因为非噪声生成器的维度里档位会领先于段。比对的五
+     * 个量与记账的五个量一一对应：低于 SURFACE 的段数、低于 DECORATED 的段数、低于 TERRAIN 的
+     * 最高段号、等于 DECORATED 的段数、低于 LIGHTED 的段数。
      *
      * <p>主线程调用，重数期间写点仍可能在池上推进，所以单次失配不等于错，按整窗的出现频率判断。
      */
@@ -906,6 +912,7 @@ public final class SectionLifecycle {
                 int cursor = ChunkCounters.NO_CURSOR;
                 int carversHere = 0;
                 int decoratedHere = 0;
+                int belowHere = 0;
                 for (int sy : universe) {
                     int stage = SectionStage.getStage(lc, sy);
                     if (stage < SectionStage.SURFACE) {
@@ -920,6 +927,9 @@ public final class SectionLifecycle {
                     if (stage == SectionStage.DECORATED) {
                         decoratedHere++;
                     }
+                    if (SectionStage.isBelowLighted(stage)) {
+                        belowHere++;
+                    }
                     if (stage < SectionStage.TERRAIN && sy > cursor) {
                         cursor = sy;
                     }
@@ -928,15 +938,16 @@ public final class SectionLifecycle {
                 decoratedTotal += decoratedHere;
                 ChunkCounters.Snapshot stored = ChunkCounters.snapshot(lc);
                 if (stored.pendingSurface() != pendingSurface || stored.pendingDecorated() != pendingDecorated
-                        || stored.terrainCursor() != cursor || stored.atDecorated() != decoratedHere) {
+                        || stored.terrainCursor() != cursor || stored.atDecorated() != decoratedHere
+                        || stored.belowLighted() != belowHere) {
                     mismatched++;
                     if (mismatched <= VERIFY_LOG_LIMIT) {
                         InfsFarlands.LOGGER.info(
-                                "FLCOUNT mismatch chunk={},{} stored(sur={},dec={},cur={},atDec={}) counted(sur={},dec={},cur={},atDec={})",
+                                "FLCOUNT mismatch chunk={},{} stored(sur={},dec={},cur={},atDec={},bel={}) counted(sur={},dec={},cur={},atDec={},bel={})",
                                 lc.getPos().x(), lc.getPos().z(),
                                 stored.pendingSurface(), stored.pendingDecorated(), stored.terrainCursor(),
-                                stored.atDecorated(),
-                                pendingSurface, pendingDecorated, cursor, decoratedHere);
+                                stored.atDecorated(), stored.belowLighted(),
+                                pendingSurface, pendingDecorated, cursor, decoratedHere, belowHere);
                     }
                 }
             }

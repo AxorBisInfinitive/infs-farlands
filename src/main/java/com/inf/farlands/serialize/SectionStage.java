@@ -259,17 +259,14 @@ public final class SectionStage {
     /**
      * 该 chunk 是否有做过但没点亮的段。
      *
+     * <p>判据由 {@link ChunkCounters#belowLighted} 的计数给出：它覆盖已计入段的并集，含只有档位没有
+     * 条目的段，所以比扫段状态表只会更保守，成本是一次查表。
+     *
      * <p>扫描路径也要带上这条判据：一个 stage 停在 CARVERS 的 chunk 没有任何 pending 步骤，
      * 光照失败一次就再没有下一次，它的段也永远不会写盘。
      */
     public static boolean hasBelowLighted(LevelChunk chunk) {
-        boolean[] found = { false };
-        forEachStage(chunk, (sy, stage) -> {
-            if (isBelowLighted(stage)) {
-                found[0] = true;
-            }
-        });
-        return found[0];
+        return ChunkCounters.belowLighted(chunk) > 0;
     }
 
     /** 遍历该 chunk 的 section 状态。无 key 或身份已死时什么都不做。 */
