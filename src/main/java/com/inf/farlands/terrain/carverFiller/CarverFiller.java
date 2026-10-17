@@ -10,10 +10,10 @@ import com.inf.farlands.util.window.WindowedChunk;
 import com.inf.farlands.util.world.WorldBounds;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.EnumSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import net.minecraft.server.level.ServerLevel;
@@ -99,20 +99,26 @@ public final class CarverFiller {
     // };
 
     /**
+     * 一段与它的对象。两遍之间必须用同一个对象：第二遍现取会被主线程的清理删成 null。
+     */
+    private record NonEmptySection(int sectionY, LevelChunkSection section) {
+    }
+
+    /**
      * 自研 prime：每列从非空 section 顶部向下找各类型的最高匹配行。
      * 对齐 vanilla primeHeightmaps 语义，opaque 判定，首个匹配行设 height 为 y 加 1，
      * 全列无匹配则不设，保持默认。列掩码位跳只访问非空行，复杂度是非空 section 数乘 256。
      */
     public static void primeFinalHeightmaps(LevelChunk chunk) {
         WindowedChunk wc = (WindowedChunk) chunk;
-        List<Integer> nonEmpty = new ArrayList<>();
-        for (Integer sy : wc.windowedAllSections().keySet()) {
-            LevelChunkSection s = wc.windowedAllSections().get(sy);
+        List<NonEmptySection> nonEmpty = new ArrayList<>();
+        for (Map.Entry<Integer, LevelChunkSection> e : wc.windowedAllSections().entrySet()) {
+            LevelChunkSection s = e.getValue();
             if (s != null && !s.hasOnlyAir()) {
-                nonEmpty.add(sy);
+                nonEmpty.add(new NonEmptySection(e.getKey(), s));
             }
         }
-        nonEmpty.sort(Collections.reverseOrder());
+        nonEmpty.sort((a, b) -> Integer.compare(b.sectionY(), a.sectionY()));
         for (int x = 0; x < 16; x++) {
             for (int z = 0; z < 16; z++) {
                 Set<Heightmap.Types> remaining = EnumSet.of(
@@ -120,11 +126,12 @@ public final class CarverFiller {
                         Heightmap.Types.WORLD_SURFACE,
                         Heightmap.Types.MOTION_BLOCKING,
                         Heightmap.Types.MOTION_BLOCKING_NO_LEAVES);
-                for (int sy : nonEmpty) {
+                for (NonEmptySection entry : nonEmpty) {
                     if (remaining.isEmpty()) {
                         break;
                     }
-                    LevelChunkSection s = wc.windowedAllSections().get(sy);
+                    int sy = entry.sectionY();
+                    LevelChunkSection s = entry.section();
                     short[] masks = ((IColumnMasks) s).farlands$ensureColumnMasks();
                     int m = masks[x + z * 16] & 0xFFFF;
                     while (m != 0 && !remaining.isEmpty()) {
