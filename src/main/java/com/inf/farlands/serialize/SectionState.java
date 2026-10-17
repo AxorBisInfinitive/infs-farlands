@@ -1,17 +1,26 @@
 package com.inf.farlands.serialize;
 
 /**
- * 单个 section 的调度状态。当前只承载档位，即 {@link SectionStage} 的七档。
+ * 单个 section 的调度状态：档位、标志与持有者。
  *
- * <p>载体从裸 int 换成对象，是为了让后续的所有权与在读标记落在同一处，而不是各开一张表。
- * 本节只换载体，不新增字段：多一个没人读的字段就是多一个没人维护的校验点。
+ * <p>档位与标志跨线程可见：编码池读档位与 DIRTY，下发侧读 DIRTY，读回侧读 READING。持有者是主线程
+ * 独占的普通字段，只由所有权表读写。
  *
- * <p>档位单调不减，唯一例外是读回按盘上值恢复。字段是 volatile：写点在 genPool、
- * backgroundExecutor 与主线程三处，而编码池的 drainEncode 会读它。
+ * <p>标志的读改写在实例锁内，读是 volatile 读。调度器接管之后写者收成主线程一个。
  */
 public final class SectionState {
 
+    /** 本段有未落盘的改动。 */
+    public static final int DIRTY = 1;
+
+    /** 本段正在从磁盘读回。 */
+    public static final int READING = 1 << 1;
+
     private volatile int stage;
+
+    private volatile int flags;
+
+    private long owner;
 
     public SectionState(int stage) {
         this.stage = stage;
@@ -23,5 +32,39 @@ public final class SectionState {
 
     public void setStage(int stage) {
         this.stage = stage;
+    }
+
+    public synchronized void markDirty() {
+        this.flags |= DIRTY;
+    }
+
+    public synchronized void clearDirty() {
+        this.flags &= ~DIRTY;
+    }
+
+    public boolean isDirty() {
+        return (this.flags & DIRTY) != 0;
+    }
+
+    public synchronized void markReading() {
+        this.flags |= READING;
+    }
+
+    public synchronized void clearReading() {
+        this.flags &= ~READING;
+    }
+
+    public boolean isReading() {
+        return (this.flags & READING) != 0;
+    }
+
+    /** 主线程独占。 */
+    public long owner() {
+        return this.owner;
+    }
+
+    /** 主线程独占。 */
+    public void setOwner(long owner) {
+        this.owner = owner;
     }
 }

@@ -316,9 +316,9 @@ public abstract class SurfaceSystemMixin {
         // 定义的集合在取数。段两端要先夹再移位，因为 EntitySectionWindow.update 不夹取，玩家在高位时
         // c + verticalSimulationDistance 会越过段界。
         //
-        // 夹到可玩段界而不是可表示段界，与 collectSegments、hasWorkInWindow、hasUnprocessed、seedSection
-        // 四处判据面同宽。可表示段界下端 MIN_SECTION 左移四位正好是 Integer.MIN_VALUE，而下面的 Y 循环
-        // 是 int 递减到 endY，走到 MIN_VALUE 时 y-- 会回绕到 MAX_VALUE，循环永不结束。
+        // 夹到可玩段界而不是可表示段界，与 collectSegments、seedSection 等判据面同宽。可表示段界下端
+        // MIN_SECTION 左移四位正好是 Integer.MIN_VALUE，而下面的 Y 循环是 int 递减到 endY，走到
+        // MIN_VALUE 时 y-- 会回绕到 MAX_VALUE，循环永不结束。
         int[] ranges;
         if (protoChunk instanceof LevelChunk levelChunk) {
             ranges = EntitySectionWindow.ranges(levelChunk.getLevel().dimension());

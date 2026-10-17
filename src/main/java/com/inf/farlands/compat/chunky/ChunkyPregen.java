@@ -9,8 +9,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import com.inf.farlands.FarlandsTick;
 import com.inf.farlands.serialize.SectionLifecycle;
 import com.inf.farlands.serialize.SectionStage;
-import com.inf.farlands.terrain.pipeline.GenQueue;
 import com.inf.farlands.terrain.pipeline.NeighborhoodTickets;
+import com.inf.farlands.terrain.pipeline.Scheduler;
 import com.inf.farlands.util.window.WindowedChunk;
 import com.inf.farlands.util.world.WorldBounds;
 
@@ -33,13 +33,12 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
  *
  * <p>
  * 而本 port 的 FULL 是「没有数据在等或在途」的意思：一个没有 stage 的空壳也满足。于是它会把空壳当成
- * 生成完毕跳过，进度走到 100% 而地形一格没跑；而票只让 chunk 加载成壳，够不到本 port 的生成入口，即
- * enqueueChunk 要玩家在视距内、螺旋扫描只到视距加一、farlandsStructureReady 的回投要非空 stage 表。
+ * 生成完毕跳过，进度走到 100% 而地形一格没跑；而票只让 chunk 加载成壳，够不到本 port 的生成入口。
  *
  * <p>
  * 本层把两边接上：把 {@code isChunkGenerated} 的结论换成「带内段全部 LIGHTED」，把
  * {@code getChunkAtAsync} 的返回 future 换成同一判据的完成信号；等待期间给该 chunk 的 ±8 铺票，见
- * {@link NeighborhoodTickets#hold}，并按段带周期性调 {@link GenQueue#preload} 驱动。
+ * {@link NeighborhoodTickets#hold}，并向调度器登记一个力面，由准入按面驱动。
  *
  * <p>
  * 驱动必须周期性，不能只做一次：第一轮任务常撞上「没有 Beardifier」那道门而早退，而这一项此后既不在
@@ -91,6 +90,8 @@ public final class ChunkyPregen {
         private final long since = System.currentTimeMillis();
         /** 本次请求自己铺下的票的位置。撤票只撤这些，别人的票不动。 */
         private final List<ChunkPos> held = new ArrayList<>();
+        /** 本次登记给调度器的力面，收尾时撤。 */
+        private Scheduler.Face face;
         /** 下次驱动的时刻。0 表示还没驱动过，第一次扫到即驱动。 */
         private long nextDriveAt;
 
@@ -156,6 +157,9 @@ public final class ChunkyPregen {
         if (NeighborhoodTickets.hold(level, pos)) {
             request.held.add(pos);
         }
+        // 登记力面：调度器的准入按面算驱动范围与段范围，本类不再自己驱动。
+        request.face = new Scheduler.Face(level.dimension(), pos.x(), pos.z(), 1, minSection, maxSection);
+        Scheduler.register(request.face);
         return request.done;
     }
 
@@ -215,8 +219,7 @@ public final class ChunkyPregen {
             int state = bandState(chunk);
             if (now >= request.nextDriveAt) {
                 request.nextDriveAt = now + DRIVE_RETRY_MS;
-                // 票与驱动都只做 1 环。两环铺票实测无效，已撤回：它瞄的是 gen，而 gen 只占一小截，装饰那边
-                // 才占大头。hold 记下「本次是自己加的」，撤票只撤自己加过的。
+                // 续票并把 3×3 提交给调度器：面只给几何，候选仍要有人提交。段带由面查出来交给作业。
                 for (int dx = -1; dx <= 1; dx++) {
                     for (int dz = -1; dz <= 1; dz++) {
                         ChunkPos target = new ChunkPos(request.pos.x() + dx, request.pos.z() + dz);
@@ -225,9 +228,8 @@ public final class ChunkyPregen {
                         }
                         LevelChunk loaded = dx == 0 && dz == 0 ? chunk
                                 : SectionLifecycle.latestChunk(request.level, target.x(), target.z());
-                        // 判据只在 preload 里，一处：带内全 ≥ CARVERS 的块它自己会挡掉。
                         if (loaded != null) {
-                            GenQueue.preload(loaded, minSection, maxSection);
+                            Scheduler.submit(loaded);
                         }
                     }
                 }
@@ -240,9 +242,12 @@ public final class ChunkyPregen {
         }
     }
 
-    /** 收尾：出表、撤本次自己铺的票、放行 future。 */
+    /** 收尾：出表、撤面、撤本次自己铺的票、放行 future。 */
     private static void finish(Key key, Request request) {
         WAITING.remove(key);
+        if (request.face != null) {
+            Scheduler.unregister(request.face);
+        }
         for (ChunkPos held : request.held) {
             NeighborhoodTickets.release(request.level, held);
         }

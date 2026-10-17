@@ -4,6 +4,7 @@ import com.inf.farlands.serialize.SectionStage;
 import com.inf.farlands.terrain.BiomeSystem;
 import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.debug.StageMetrics;
+import com.inf.farlands.terrain.pipeline.Scheduler;
 import com.inf.farlands.util.window.EntitySectionWindow;
 import com.inf.farlands.util.world.WorldBounds;
 
@@ -66,7 +67,7 @@ public final class BiomeFiller {
             long t0 = System.nanoTime();
             sys.fillBiomes(level, chunk, sectionY, sectionY);
             StageMetrics.stageWork(StageMetrics.STAGE_BIOMES, System.nanoTime() - t0);
-            SectionStage.setStage(chunk, sectionY, SectionStage.BIOMES);
+            Scheduler.stage(chunk, new int[] { sectionY }, SectionStage.BIOMES);
             StageMetrics.sectionsIn(1L);
             StageMetrics.stageSections(StageMetrics.STAGE_BIOMES, 1);
         }

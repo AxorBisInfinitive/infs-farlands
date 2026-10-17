@@ -4,6 +4,7 @@ import com.inf.farlands.serialize.SectionIO;
 import com.inf.farlands.serialize.SectionStage;
 import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.debug.StageMetrics;
+import com.inf.farlands.terrain.pipeline.Scheduler;
 import com.inf.farlands.util.window.WindowedChunk;
 import com.inf.farlands.util.world.WorldBounds;
 
@@ -19,10 +20,9 @@ import net.minecraft.world.level.chunk.LevelChunk;
  * surface 依赖 fill 产出的高度图，必须紧跟 fill 且同 chunk 串行，由 GenTask 内保证。
  *
  * 触发：GenTask fill 完成后调 applySurfaceIfNeeded，新 fill 的 section 必然是 TERRAIN 未
- * SURFACE。补触发：读回 stage 为 TERRAIN 的 section 由 GenQueue.scanAndEnqueue 的
- * hasSurfacePending 检查入队重试。
+ * SURFACE。补触发：读回 stage 为 TERRAIN 的 section 由调度器的准入重发整 chunk 作业。
  *
- * 失败策略：applySurface 异常由 GenTask 捕获，section 停留 TERRAIN，scanAndEnqueue 补触发重试。
+ * 失败策略：applySurface 异常由 GenTask 捕获，section 停留 TERRAIN，下一次提交的准入会重试。
  */
 public final class SurfaceFiller {
 
@@ -40,7 +40,7 @@ public final class SurfaceFiller {
             }
             if (SectionStage.isOrAfter(chunk, sy, SectionStage.TERRAIN)
                     && !SectionStage.isOrAfter(chunk, sy, SectionStage.SURFACE)
-                    && !SectionIO.isReading(chunk.getPos().pack(), sy)) {
+                    && !SectionIO.isReading(chunk, sy)) {
                 return true;
             }
         }
@@ -66,11 +66,10 @@ public final class SurfaceFiller {
         }
         int[] surfaced = new int[list.size()];
         for (int i = 0; i < list.size(); i++) {
-            int sy = list.get(i);
-            surfaced[i] = sy;
-            SectionStage.setStage(chunk, sy, SectionStage.SURFACE);
-            ((WindowedChunk) chunk).markSectionDirty(sy);
+            surfaced[i] = list.get(i);
         }
+        Scheduler.stage(chunk, surfaced, SectionStage.SURFACE);
+        Scheduler.dirty(chunk, surfaced, true);
         StageMetrics.stageSections(StageMetrics.STAGE_SURFACE, surfaced.length);
         return surfaced;
     }

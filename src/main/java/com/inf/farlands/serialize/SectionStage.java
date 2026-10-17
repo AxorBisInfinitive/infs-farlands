@@ -36,12 +36,13 @@ import net.minecraft.world.level.chunk.LevelChunk;
  *
  * 推进点。BIOMES 在 BiomeFiller，TERRAIN 在 GenTask 的 fill 之后，SURFACE 在 SurfaceFiller，
  * CARVERS 在 CarverFiller，DECORATED 在 DecorationFiller 的收尾，LIGHTED 在
- * GenQueue.triggerLight 的主线程那一笔里由 promoteAllGenToLighted 升段。
+ * GenQueue.triggerLight 的主线程那一笔里由 promoteAllGenToLighted 升段。六处都经调度器的落档体写，
+ * 落档体是档位与脏标记的唯一写入口。
  *
  * <p>光照会升的只有 DECORATED 一档，由 {@link #isAwaitingLight(int)} 一处给出：
- * promoteAllGenToLighted、hasAwaitingLight 与 GenTask 的补触发判据都走它，避免三处各写一份而
- * 失同步。TERRAIN 与 SURFACE 不在其中：它们的出路是同一个任务里的 surface 与 carve 两步，而光照
- * 回调是异步的，让回调把这两档升上去，那些段会被随后那两步放过，永不再被地表与雕刻处理。
+ * promoteAllGenToLighted 与调度器第六行的判据都走它，避免两处各写一份而失同步。TERRAIN 与 SURFACE
+ * 不在其中：它们的出路是同一个任务里的 surface 与 carve 两步，而光照回调是异步的，让回调把这两档升上去，
+ * 那些段会被随后那两步放过，永不再被地表与雕刻处理。
  *
  * 生命周期。chunk 卸载时由 SectionLifecycle.flushChunk 的每条出口调用 {@link #clear(LevelChunk)}，
  * 内存有界。
@@ -127,6 +128,65 @@ public final class SectionStage {
         ChunkCounters.onStageChange(chunk, sectionY, old, stage);
     }
 
+    /** 该段的状态，不存在则建；身份为 0 或已注销返回 null。 */
+    public static SectionState stateOf(LevelChunk chunk, int sectionY) {
+        ConcurrentHashMap<Integer, SectionState> m = open(chunk);
+        if (m == null) {
+            return null;
+        }
+        return m.computeIfAbsent(sectionY, k -> new SectionState(UNPROCESSED));
+    }
+
+    /** 该段的状态，不存在返回 null，不建条目。 */
+    public static SectionState stateOrNull(LevelChunk chunk, int sectionY) {
+        long identity = liveIdentity(chunk);
+        if (identity == 0L) {
+            return null;
+        }
+        ConcurrentHashMap<Integer, SectionState> m = STAGES.get(identity);
+        return m == null ? null : m.get(sectionY);
+    }
+
+    /** 标脏。身份为 0 的 chunk（ProtoChunk、客户端）没有状态，空转。 */
+    public static void markDirty(LevelChunk chunk, int sectionY) {
+        SectionState state = stateOf(chunk, sectionY);
+        if (state != null) {
+            state.markDirty();
+        }
+    }
+
+    /** 读脏标记。身份为 0 或没有该段时返回假。 */
+    public static boolean isDirty(LevelChunk chunk, int sectionY) {
+        SectionState state = stateOrNull(chunk, sectionY);
+        return state != null && state.isDirty();
+    }
+
+    /** 清脏标记。 */
+    public static void clearDirty(LevelChunk chunk, int sectionY) {
+        SectionState state = stateOrNull(chunk, sectionY);
+        if (state != null) {
+            state.clearDirty();
+        }
+    }
+
+    /** 该 chunk 是否有段在读回。 */
+    public static boolean anyReading(LevelChunk chunk) {
+        long identity = liveIdentity(chunk);
+        if (identity == 0L) {
+            return false;
+        }
+        ConcurrentHashMap<Integer, SectionState> m = STAGES.get(identity);
+        if (m == null) {
+            return false;
+        }
+        for (SectionState state : m.values()) {
+            if (state != null && state.isReading()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** 某阶段是否已做。无 key 时按 UNPROCESSED。 */
     public static boolean isOrAfter(LevelChunk chunk, int sectionY, int stage) {
         return getStage(chunk, sectionY) >= stage;
@@ -198,48 +258,24 @@ public final class SectionStage {
         if (m == null) {
             return;
         }
-        List<int[]> awaiting = new ArrayList<>();
+        List<Integer> awaiting = new ArrayList<>();
         for (Map.Entry<Integer, SectionState> e : m.entrySet()) {
             SectionState state = e.getValue();
             if (state != null && isAwaitingLight(state.stage())) {
-                awaiting.add(new int[] { e.getKey(), state.stage() });
+                awaiting.add(e.getKey());
             }
         }
-        int promoted = 0;
-        for (int[] awaited : awaiting) {
-            SectionState state = m.get(awaited[0]);
-            if (state == null) {
-                continue;
-            }
-            synchronized (state) {
-                if (!isAwaitingLight(state.stage())) {
-                    continue;
-                }
-                int old = state.stage();
-                state.setStage(LIGHTED);
-                ChunkCounters.onStageChange(chunk, awaited[0], old, LIGHTED);
-            }
-            promoted++;
+        if (awaiting.isEmpty()) {
+            return;
         }
-        if (promoted > 0) {
-            StageMetrics.lightedSections(promoted);
-            StageMetrics.lightedChunk();
+        int[] sections = new int[awaiting.size()];
+        for (int i = 0; i < sections.length; i++) {
+            sections[i] = awaiting.get(i);
         }
-    }
-
-    /**
-     * 该 chunk 是否还有光照能升、但还没升的 section，即停在 DECORATED 的段。光照完成后再检查，
-     * 驱动下一批。
-     *
-     * <p>判据由 {@link ChunkCounters#atDecorated} 的计数给出，与 {@link #promoteAllGenToLighted} 的
-     * 匹配面同源：两处都只认 DECORATED 一档。放宽到全体 belowLighted 会把 CARVERS 也算进来，
-     * 回调因此永远为真。
-     *
-     * <p>不再遍历段状态表：那次遍历的判据与升格同源却各写一份，正是两者失同步的来源；计数由
-     * {@link ChunkCounters} 在档位写点维护，读一次即得。
-     */
-    public static boolean hasAwaitingLight(LevelChunk chunk) {
-        return ChunkCounters.atDecorated(chunk) > 0;
+        // 升格改由落档体执行：档位与记账只能由主线程成对写，本方法因此可被池线程调用。
+        com.inf.farlands.terrain.pipeline.Scheduler.stage(chunk, sections, LIGHTED);
+        StageMetrics.lightedSections(sections.length);
+        StageMetrics.lightedChunk();
     }
 
     /** 段是否做过但没点亮，即 stage 落在 TERRAIN 到 LIGHTED 之间，含 DECORATED。 */
@@ -259,14 +295,19 @@ public final class SectionStage {
     /**
      * 该 chunk 是否有做过但没点亮的段。
      *
-     * <p>判据由 {@link ChunkCounters#belowLighted} 的计数给出：它覆盖已计入段的并集，含只有档位没有
-     * 条目的段，所以比扫段状态表只会更保守，成本是一次查表。
+     * <p>判据是扫段表，与 {@link #isBelowLighted} 同源：它覆盖段容器的并集，含只有档位没有条目的段。
      *
      * <p>扫描路径也要带上这条判据：一个 stage 停在 CARVERS 的 chunk 没有任何 pending 步骤，
      * 光照失败一次就再没有下一次，它的段也永远不会写盘。
      */
     public static boolean hasBelowLighted(LevelChunk chunk) {
-        return ChunkCounters.belowLighted(chunk) > 0;
+        boolean[] found = { false };
+        forEachStage(chunk, (sy, stage) -> {
+            if (isBelowLighted(stage)) {
+                found[0] = true;
+            }
+        });
+        return found[0];
     }
 
     /** 遍历该 chunk 的 section 状态。无 key 或身份已死时什么都不做。 */

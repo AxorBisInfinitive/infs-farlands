@@ -5,6 +5,7 @@ import com.inf.farlands.serialize.ChunkCounters;
 import com.inf.farlands.serialize.CounterIdentities;
 import com.inf.farlands.serialize.CounterIdentity;
 import com.inf.farlands.serialize.PendingBlockEntities;
+import com.inf.farlands.serialize.SectionStage;
 import com.inf.farlands.terrain.CarvingMaskStorage;
 import com.inf.farlands.terrain.ChunkBeardifier;
 import com.inf.farlands.util.window.EntitySectionWindow;
@@ -93,9 +94,6 @@ public abstract class ChunkAccessMixin
 
     @Unique
     private int lastPacketMaxY = Integer.MIN_VALUE;
-
-    @Unique
-    private final Map<Integer, Boolean> dirtySections = new ConcurrentHashMap<>();
 
     @Unique
     private final IntRBTreeSet activeSectionYs = new IntRBTreeSet();
@@ -345,17 +343,21 @@ public abstract class ChunkAccessMixin
 
     @Override
     public void markSectionDirty(int sectionY) {
-        this.dirtySections.put(sectionY, Boolean.TRUE);
+        if ((Object) this instanceof LevelChunk lc) {
+            SectionStage.markDirty(lc, sectionY);
+        }
     }
 
     @Override
     public boolean isSectionDirty(int sectionY) {
-        return this.dirtySections.containsKey(sectionY);
+        return (Object) this instanceof LevelChunk lc && SectionStage.isDirty(lc, sectionY);
     }
 
     @Override
     public void clearSectionDirty(int sectionY) {
-        this.dirtySections.remove(sectionY);
+        if ((Object) this instanceof LevelChunk lc) {
+            SectionStage.clearDirty(lc, sectionY);
+        }
     }
 
     @Override

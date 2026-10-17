@@ -89,7 +89,7 @@ import net.minecraft.world.ticks.ScheduledTick;
 public final class DecorationRegion implements WorldGenLevel {
 
     /**
-     * 写域半径。与 {@link DecorationClaim} 同源，两边都由 vanilla 的 blockStateWriteRadius(1) 定。
+     * 写域半径。与所有权表的 DECORATED 相同，两边都由 vanilla 的 blockStateWriteRadius(1) 定。
      */
     private static final int WRITE_RADIUS = 1;
 

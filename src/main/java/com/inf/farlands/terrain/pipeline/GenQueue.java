@@ -3,57 +3,43 @@ package com.inf.farlands.terrain.pipeline;
 import com.inf.farlands.FarlandsConfig;
 import com.inf.farlands.InfsFarlands;
 import com.inf.farlands.light.FarLandsLightEngine;
-import com.inf.farlands.serialize.ChunkReadiness;
 import com.inf.farlands.serialize.CounterIdentities;
 import com.inf.farlands.serialize.SectionIO;
 import com.inf.farlands.serialize.SectionLifecycle;
 import com.inf.farlands.serialize.SectionStage;
 import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.debug.StageMetrics;
-import com.inf.farlands.terrain.carverFiller.CarverFiller;
-import com.inf.farlands.terrain.decorationFiller.DecorationClaim;
-import com.inf.farlands.terrain.decorationFiller.DecorationFiller;
 import com.inf.farlands.terrain.terrainFiller.TerrainFiller;
-import com.inf.farlands.terrain.surfaceFiller.SurfaceFiller;
 import com.inf.farlands.util.network.ChunkDataSender;
-import com.inf.farlands.util.window.EntitySectionWindow;
+import com.inf.farlands.util.window.PlayerSnapshot;
 import com.inf.farlands.util.world.WorldBounds;
 
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Map;
-import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ChunkTrackingView;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.level.TicketType;
 import net.minecraft.world.level.ChunkPos;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.LevelChunk;
 
 /**
- * 地形管线生成任务队列。per-chunk 任务，全局并发队列，多个 worker 异步消费。
- * drainGen 仿光照 drainLight，调度单例用 CAS，任务 submit 到池。
+ * 地形侧的门面：票型、任务池、认领之后的作业提交、光照触发与关服等待。
  *
- * 每次唤醒 submit 不超过 maxGenTasksPerTick 个，宽松防风暴。唤醒源是 tick 与入队的 enqueue。
+ * <p>队列与扫描已删：谁该开工由 {@link Scheduler} 的准入判，本类只在准入通过后接管。三个入队入口
+ * 现在都退化成 {@link Scheduler#submit} 的别名，唯一的认领点是 {@link #enqueueTask}，它在
+ * {@link OwnershipTable} 的 TERRAIN 相上 CAS。
  *
- * 光照衔接按 chunk 级去重：GenTask 只推进到 TERRAIN，随后 notifyGenerated 触发一次 fillFrom 与
- * lightChunk。每 chunk 每批次一次，CAS 在途标志去重，不逐 section 重复播种。光照完成回调在主线程
- * 那一笔里把 SectionStage.isAwaitingLight 认的段升 LIGHTED，播种覆盖全 chunk，然后释放在途，
- * hasAwaitingLight 再检查驱动下一批。
+ * <p>光照衔接按 chunk 级去重，去重靠 LIGHTED 相的认领：{@code notifyGenerated} 取到认领才触发一次
+ * fillFrom 与 lightChunk，回调里升段、释放在途、再检查 DECORATED 段。每 chunk 每批次一次。
  */
+
 public final class GenQueue {
 
     /**
@@ -89,23 +75,6 @@ public final class GenQueue {
         return GEN_WORK_TICKET;
     }
 
-    /** 铺一张结构依赖票。主线程调用，票操作非线程安全，调用点负责，见 StructureDriver.pullDependencies。 */
-    public static void pinStructureDependency(ServerLevel level, ChunkPos pos) {
-        level.getChunkSource().addTicketWithRadius(STRUCTURE_PIN_TICKET, pos, 0);
-    }
-
-    /**
-     * 撤一张结构依赖票。票操作非线程安全，而本方法的调用点里有卸载线程，所以自己 marshal 回主线程，
-     * 形状与 {@link #removeGenTicket} 相同。半径必须与铺下去的那次逐字相同。
-     */
-    public static void unpinStructureDependency(ServerLevel level, ChunkPos pos) {
-        SectionIO.runOnMainThread(
-                () -> level.getChunkSource().removeTicketWithRadius(STRUCTURE_PIN_TICKET, pos, 0), level);
-    }
-
-    /** 生成任务队列，按距最近玩家距离排序，近先生成。PriorityQueue 非线程安全，用 QUEUE 自身同步。 */
-    private static final PriorityQueue<GenTask> QUEUE = new PriorityQueue<>(Comparator.comparingInt(GenTask::priority));
-
     // 规模在配置层已解析：显式值受 range(1,64) 约束，"auto" 由取值器算出，两者都 >= 1。
     // 这里不再解释 0 哨兵，它已由 "auto" 取代。
     private static final ExecutorService POOL = Executors.newFixedThreadPool(FarlandsConfig.genWorkerThreads, r -> {
@@ -113,18 +82,6 @@ public final class GenQueue {
         t.setDaemon(true);
         return t;
     });
-
-    private static final AtomicBoolean consumerActive = new AtomicBoolean();
-
-    /** 每 chunk 光照在途标志，键是记账身份，值为 CAS，由收尾回调移除。 */
-    private static final ConcurrentHashMap<Long, AtomicBoolean> LIGHT_IN_FLIGHT = new ConcurrentHashMap<>();
-
-    /**
-     * 每 chunk 生成在途标志，键是记账身份，值为 CAS，同 chunk 至多一个生成任务，防并发写高度图。
-     *
-     * <p>被门挡下那一支置假而不删，条目留在表里，等 {@link #sweepDeadEntries()} 在身份注销后收走。
-     */
-    private static final ConcurrentHashMap<Long, AtomicBoolean> CHUNK_IN_FLIGHT = new ConcurrentHashMap<>();
 
     /** 本 chunk 的记账身份。客户端 chunk 与 ProtoChunk 是 0。 */
     private static long identityOf(LevelChunk chunk) {
@@ -194,17 +151,14 @@ public final class GenQueue {
     // 主线程：触发入队
 
     /** fill 在途保加载。ticket 操作非线程安全，调用点保证主线程。 */
-    private static void addGenTicket(LevelChunk chunk) {
-        ServerLevel sl = (ServerLevel) chunk.getLevel();
-        sl.getChunkSource().addTicketWithRadius(GEN_WORK_TICKET, chunk.getPos(), 0);
+    static void addGenTicket(ServerLevel level, ChunkPos pos) {
+        level.getChunkSource().addTicketWithRadius(GEN_WORK_TICKET, pos, 0);
     }
 
-    /** genPool 线程移除 fill ticket，经 SectionIO.runOnMainThread 回主线程，异步延迟保守无害。 */
-    private static void removeGenTicket(LevelChunk chunk) {
-        ServerLevel sl = (ServerLevel) chunk.getLevel();
+    /** 撤 fill ticket，经 SectionIO.runOnMainThread 回主线程，异步延迟保守无害。 */
+    static void removeGenTicket(ServerLevel level, ChunkPos pos) {
         SectionIO.runOnMainThread(
-                () -> sl.getChunkSource().removeTicketWithRadius(GEN_WORK_TICKET, chunk.getPos(), 0),
-                sl);
+                () -> level.getChunkSource().removeTicketWithRadius(GEN_WORK_TICKET, pos, 0), level);
     }
 
     /**
@@ -216,74 +170,15 @@ public final class GenQueue {
      */
     public static void enqueue(LevelChunk chunk, int sectionY) {
         // fsa 读回在途：该 section 正在从磁盘恢复，完成回调会再调 enqueue。
-        if (SectionIO.isReading(chunk.getPos().pack(), sectionY)) {
+        if (SectionIO.isReading(chunk, sectionY)) {
             return;
         }
-        if (!hasWorkInWindow(chunk)) {
-            return;
-        }
-        // 键取身份，死身份不入队：客户端 chunk 与 ProtoChunk 是 0，已注销的旧对象也是 0。
-        long key = liveIdentity(chunk);
-        if (key == 0L) {
-            return;
-        }
-        if (CHUNK_IN_FLIGHT.computeIfAbsent(key, k -> new AtomicBoolean()).compareAndSet(false, true)) {
-            addGenTicket(chunk);
-            synchronized (QUEUE) {
-                QUEUE.add(new GenTask(chunk));
-            }
-            wakeConsumer();
-        }
-        // 已在途时不重复入队。在途任务 execute 会扫窗口并集，含此 section，execute 后新入队的
-        // 由 completeTask 再检查兜底。
+        Scheduler.submit(chunk);
     }
 
-    /**
-     * XZ 触发：chunk 在主线程短路完成，处于任一玩家视距或外圈内才入队。
-     * 距离判断直接按玩家坐标算，不依赖 tracking view，它每 tick 才更新，新加载 chunk 若此刻
-     * 不在其中会永远错过入队。
-     */
+    /** XZ 触发：chunk 在主线程短路完成。判据在调度器的准入，这里只提交。 */
     public static void enqueueChunk(LevelChunk chunk) {
-        if (!isNearPlayer(chunk)) {
-            return;
-        }
-        if (!hasWorkInWindow(chunk)) {
-            return;
-        }
-        // 键取身份，死身份不入队：客户端 chunk 与 ProtoChunk 是 0，已注销的旧对象也是 0。
-        long key = liveIdentity(chunk);
-        if (key == 0L) {
-            return;
-        }
-        if (CHUNK_IN_FLIGHT.computeIfAbsent(key, k -> new AtomicBoolean()).compareAndSet(false, true)) {
-            addGenTicket(chunk);
-            synchronized (QUEUE) {
-                QUEUE.add(new GenTask(chunk));
-            }
-            wakeConsumer();
-        }
-    }
-
-    /**
-     * 该 chunk 在窗口并集内是否还有生成侧的活：存在低于 CARVERS 的段。
-     *
-     * <p>与 {@link #preload} 的门同源，区别只在范围：preload 的范围是显式段带，这里是窗口并集。带内全
-     * ≥ CARVERS 时任务什么也做不了，逐条推导见 preload 的注释。
-     *
-     * <p>为什么不能只看本次要入队的那一段：窗口模式的任务扫整个窗口并集，另有一段仍在 TERRAIN 时它照样
-     * 有事可做，所以判据必须落在范围上，而不是落在触发它的那一段上。
-     */
-    private static boolean hasWorkInWindow(LevelChunk chunk) {
-        boolean[] found = { false };
-        EntitySectionWindow.forEachSectionInAnyWindow(chunk.getLevel().dimension(), sy -> {
-            if (!WorldBounds.inSection(sy)) {
-                return;
-            }
-            if (!SectionStage.isOrAfter(chunk, sy, SectionStage.CARVERS)) {
-                found[0] = true;
-            }
-        });
-        return found[0];
+        Scheduler.submit(chunk);
     }
 
     /**
@@ -315,36 +210,70 @@ public final class GenQueue {
         if (key == 0L) {
             return;
         }
-        if (CHUNK_IN_FLIGHT.computeIfAbsent(key, k -> new AtomicBoolean()).compareAndSet(false, true)) {
-            addGenTicket(chunk);
-            int[] range = new int[maxSy - minSy + 1];
-            for (int i = 0; i < range.length; i++) {
-                range[i] = minSy + i;
-            }
-            synchronized (QUEUE) {
-                QUEUE.add(new GenTask(chunk, range));
-            }
-            wakeConsumer();
+        int[] range = new int[maxSy - minSy + 1];
+        for (int i = 0; i < range.length; i++) {
+            range[i] = minSy + i;
         }
+        Scheduler.submit(chunk, range);
     }
 
     /**
-     * 该 chunk 是否在任一玩家的视距或外圈 1 内，即驱动面内。
+     * 调度器准入之后交作业：这里才是唯一的 chunk 级认领点，TERRAIN 认领的 CAS 兼作去重。
      *
-     * <p>入队与「要不要预填群系」共用它：视距之外加载的 chunk 不会被驱动，给它们铺群系的那笔气候采样
-     * 白做。判据在主线程取：players 是普通 List，后台线程不该遍历它。
+     * <p>准入的判据在 {@link Scheduler#tick()}，本方法不再过滤：调用方已判过 A、B、C。
+     */
+    static void enqueueTask(LevelChunk chunk, int[] preloadSections) {
+        if (!(chunk.getLevel() instanceof ServerLevel level)) {
+            return;
+        }
+        long owner = OwnershipTable.tryClaimChunk(level, OwnershipTable.TERRAIN, chunk.getPos());
+        if (owner == 0L) {
+            return; // 同 chunk 已有在途任务，去重
+        }
+        ACTIVE.incrementAndGet();
+        try {
+            GenTask task = new GenTask(chunk, preloadSections, owner);
+            if (FarlandsConfig.logScheduler) {
+                InfsFarlands.LOGGER.info("FLJOB start dim={} chunk={},{} owner={} preload={}",
+                        level.dimension().identifier(), chunk.getPos().x(), chunk.getPos().z(), owner,
+                        preloadSections != null);
+            }
+            POOL.submit(task::execute);
+        } catch (RejectedExecutionException e) {
+            ACTIVE.decrementAndGet();
+            OwnershipTable.releaseChunk(level, OwnershipTable.TERRAIN, chunk.getPos(), owner);
+        }
+    }
+
+    /** 在途任务计数：认领在作业里，作业可能还在池里没开跑，所以判空要用计数。 */
+    private static final AtomicInteger ACTIVE = new AtomicInteger();
+
+    /** 光照在途计数：LIGHTED 认领在回调里释放，判空要用它，所有权表不能枚举。 */
+    private static final AtomicInteger ACTIVE_LIGHT = new AtomicInteger();
+
+    /**
+     * 该 chunk 是否在驱动面内：任一玩家面内的切比雪夫距离不超过视距加一，或落在任一任务面的方阵内。
+     *
+     * <p>这是「面」的唯一查询，准入与「要不要预填群系」共用它。形状取切比雪夫加一，与依赖表那一行的
+     * 「距最近玩家 ≤ 视距加一」同源；预填因此比旧的圆盘加二少铺几圈，那只是省掉后来本来也不会被驱动的
+     * chunk，不影响正确性。
+     *
+     * <p>判据在主线程取：快照是每 tick 抓的 volatile 读。
      */
     public static boolean isNearPlayer(LevelChunk chunk) {
-        Level level = chunk.getLevel();
-        if (!(level instanceof ServerLevel sl)) {
+        if (!(chunk.getLevel() instanceof ServerLevel level)) {
             return false;
         }
         ChunkPos cp = chunk.getPos();
-        for (ServerPlayer p : sl.players()) {
-            ChunkTrackingView view = p.getChunkTrackingView();
-            int viewDistance = view instanceof ChunkTrackingView.Positioned pos ? pos.viewDistance() : 8;
-            if (ChunkTrackingView.isWithinDistance(
-                    p.chunkPosition().x(), p.chunkPosition().z(), viewDistance, cp.x(), cp.z(), true)) {
+        if (Scheduler.inAnyFace(level, cp)) {
+            return true;
+        }
+        for (PlayerSnapshot.Entry e : PlayerSnapshot.entries()) {
+            if (!e.dimension().equals(level.dimension())) {
+                continue;
+            }
+            int d = Math.max(Math.abs(cp.x() - e.chunkX()), Math.abs(cp.z() - e.chunkZ()));
+            if (d <= e.viewDistance() + 1) {
                 return true;
             }
         }
@@ -352,149 +281,22 @@ public final class GenQueue {
     }
 
     /**
-     * execute 完成回调：被门挡下的那一支不续任务，其余仍按窗口并集判。
+     * 收尾：释放 TERRAIN 认领、减在途计数、把该 chunk 交回准入。
      *
-     * <p>续任务的用途只有一个：覆盖 execute 期间新入队的段，所以判据是「窗口并集内仍有未 TERRAIN 的
-     * 段」。但被门挡下时这个判据恒为真，而任务此刻什么也做不了，因为没有 Beardifier 就不许 fill，
-     * 于是续任务成为一条不推进任何状态、却占满池与主线程的自旋。被挡的 chunk 改由两条路再触发：扫描
-     * 的有预算重试，以及 farlandsStructureReady 设好 Beardifier 之后的回投。
-     *
-     * <p>标志不在续任务时清：否则会留下标志已清、任务尚未入队的空窗，那期间 isChunkBusy 返回假，
-     * 读 section 的一方会与生成写并发。被挡那一支用 set(false) 而不是 remove：remove 会让并发的
-     * computeIfAbsent 造出第二个 AtomicBoolean，两个 CAS 都能成功，同 chunk 于是出现两个任务并发写
-     * 同一批高度图。工作做完那一支仍用 remove，任务链结束后条目不永存，防随探索单调增长。
+     * <p>续任务不再有单独判据：准入看依赖与段状态，扫过的活由扇出与重扫接住。
      */
-    static void completeTask(LevelChunk chunk, boolean blocked) {
-        // 键是本任务自己的身份：即便它已注销，字段仍在，所以收尾仍能寻址自己那一格。
-        long key = identityOf(chunk);
-        if (!blocked && hasUnprocessed(chunk)) {
-            synchronized (QUEUE) {
-                QUEUE.add(new GenTask(chunk));
-            }
-            wakeConsumer();
-            return;
-        }
-        if (blocked) {
-            AtomicBoolean inFlight = CHUNK_IN_FLIGHT.get(key);
-            if (inFlight != null) {
-                inFlight.set(false);
-            }
-        } else {
-            CHUNK_IN_FLIGHT.remove(key);
-        }
-        removeGenTicket(chunk);
-        // 生成在途落：该 chunk 可能就此就绪。本方法跑在 genPool 上，补 FULL 要回主线程，与撤票同形。
-        if (chunk.getLevel() instanceof ServerLevel serverLevel) {
-            SectionIO.runOnMainThread(() -> ChunkReadiness.completeFull(chunk), serverLevel);
-        }
-    }
-
-    /** 该 chunk 在窗口并集内是否仍有未 TERRAIN 的 section。 */
-    private static boolean hasUnprocessed(LevelChunk chunk) {
-        boolean[] found = { false };
-        EntitySectionWindow.forEachSectionInAnyWindow(chunk.getLevel().dimension(), sy -> {
-            if (!WorldBounds.inSection(sy)) {
-                return;
-            }
-            if (!SectionStage.isOrAfter(chunk, sy, SectionStage.TERRAIN)) {
-                found[0] = true;
-            }
-        });
-        return found[0];
-    }
-
-    /** onServerTick 每 tick 唤醒，submit 一批。 */
-    public static void tick() {
-        wakeConsumer();
-    }
-
-    /** 每 tick 扫描入队预算，渐进分批，不 burst。 */
-    private static final int SCAN_BUDGET = 32;
-
-    /**
-     * 动态扫描：每 tick 从每个玩家当前位置螺旋向外扫描视距及外圈内的 chunk，未生成的按当前
-     * 距离近先入队，生成顺序天然跟随玩家位置。budget 是 per-player 配额，多人下后遍历的玩家
-     * 不会饥饿。
-     */
-    public static void scanAndEnqueue(MinecraftServer server) {
-        int totalPlayers = 0;
-        for (ServerLevel level : server.getAllLevels()) {
-            totalPlayers += level.players().size();
-        }
-        int perPlayer = Math.max(1, SCAN_BUDGET / Math.max(1, totalPlayers));
-        for (ServerLevel level : server.getAllLevels()) {
-            for (ServerPlayer p : level.players()) {
-                int budget = perPlayer;
-                ChunkPos pc = p.chunkPosition();
-                ChunkTrackingView viewObj = p.getChunkTrackingView();
-                int view = viewObj instanceof ChunkTrackingView.Positioned pos ? pos.viewDistance() : 8;
-                for (int d = 0; d <= view + 1 && budget > 0; d++) {
-                    if (d == 0) {
-                        if (scanChunk(level, pc.x(), pc.z())) {
-                            budget--;
-                        }
-                        continue;
-                    }
-                    for (int x = -d; x <= d && budget > 0; x++) {
-                        if (scanChunk(level, pc.x() + x, pc.z() - d) && --budget <= 0) {
-                            break;
-                        }
-                        if (scanChunk(level, pc.x() + x, pc.z() + d) && --budget <= 0) {
-                            break;
-                        }
-                    }
-                    for (int z = -d + 1; z <= d - 1 && budget > 0; z++) {
-                        if (scanChunk(level, pc.x() - d, pc.z() + z) && --budget <= 0) {
-                            break;
-                        }
-                        if (scanChunk(level, pc.x() + d, pc.z() + z) && --budget <= 0) {
-                            break;
-                        }
-                    }
-                }
+    static void completeTask(GenTask task) {
+        LevelChunk chunk = task.chunk();
+        if (chunk.getLevel() instanceof ServerLevel level) {
+            OwnershipTable.releaseChunk(level, OwnershipTable.TERRAIN, chunk.getPos(), task.genOwner());
+            if (FarlandsConfig.logScheduler) {
+                InfsFarlands.LOGGER.info("FLJOB end dim={} chunk={},{} owner={} segs={} carved={}",
+                        level.dimension().identifier(), chunk.getPos().x(), chunk.getPos().z(), task.genOwner(),
+                        task.lastSegments(), task.lastCarved());
             }
         }
-    }
-
-    /**
-     * 扫描单个 chunk：已加载 LevelChunk 且窗口并集内有未 TERRAIN 的 section、surface 与 carvers
-     * 待处理，或仍有做过但没点亮的段，则 enqueueChunk，幂等。
-     */
-    private static boolean scanChunk(ServerLevel level, int cx, int cz) {
-        LevelChunk lc = SectionLifecycle.latestChunk(level, cx, cz);
-        if (lc == null) {
-            return false;
-        }
-        AtomicBoolean inflight = CHUNK_IN_FLIGHT.get(identityOf(lc));
-        if (inflight != null && inflight.get()) {
-            return false;
-        }
-        if (!hasUnprocessed(lc) && !SurfaceFiller.hasSurfacePending(lc)
-                && !CarverFiller.hasCarversPending(lc) && !SectionStage.hasBelowLighted(lc)) {
-            return false;
-        }
-        // 已过雕刻、还没装饰的 chunk 登记进装饰表。装饰有自己的门与驱动，这里只负责发现；
-        // 判据取 CARVERS，与 DecorationFiller.hasDecorationPending 同源。
-        if (DecorationFiller.hasDecorationPending(lc)) {
-            DecorationFiller.register(lc, null);
-        }
-        enqueueChunk(lc);
-        return true;
-    }
-
-    /** 玩家位置变化时全部在途任务按当前距离重排，修复入队快照旧。 */
-    public static void rebuildQueue() {
-        synchronized (QUEUE) {
-            if (QUEUE.isEmpty()) {
-                return;
-            }
-            List<GenTask> all = new ArrayList<>(QUEUE);
-            QUEUE.clear();
-            for (GenTask t : all) {
-                t.refreshPriority();
-                QUEUE.offer(t);
-            }
-        }
+        ACTIVE.decrementAndGet();
+        Scheduler.submit(chunk);
     }
 
     // 光照衔接：chunk 级去重
@@ -507,12 +309,8 @@ public final class GenQueue {
      */
     public static boolean isGeneratingOrLighting(LevelChunk chunk) {
         long key = identityOf(chunk);
-        AtomicBoolean gen = CHUNK_IN_FLIGHT.get(key);
-        if (gen != null && gen.get()) {
-            return true;
-        }
-        AtomicBoolean light = LIGHT_IN_FLIGHT.get(key);
-        return light != null && light.get();
+        return OwnershipTable.anyGenClaim(key)
+                || OwnershipTable.isLightedClaimed(chunk.getPos().x(), chunk.getPos().z());
     }
 
     /**
@@ -523,7 +321,7 @@ public final class GenQueue {
      */
     public static boolean isChunkBusy(LevelChunk chunk) {
         return isGeneratingOrLighting(chunk)
-                || DecorationClaim.isClaimed(chunk.getLevel().dimension(), chunk.getPos().pack());
+                || OwnershipTable.isDecoratedClaimed(chunk.getPos().pack());
     }
 
     /**
@@ -546,59 +344,32 @@ public final class GenQueue {
         return BIOME_FILLING.contains(chunk);
     }
 
-    /** 停服时清掉队列与三张在途标志。队列里持有的都是旧 LevelChunk。 */
+    /** 停服时清掉在途标志与计数。 */
     public static void clearWorldState() {
-        synchronized (QUEUE) {
-            QUEUE.clear();
-        }
-        CHUNK_IN_FLIGHT.clear();
-        LIGHT_IN_FLIGHT.clear();
         BIOME_FILLING.clear();
-        consumerActive.set(false);
+        ACTIVE.set(0);
+        ACTIVE_LIGHT.set(0);
     }
 
-    /**
-     * A：周期清扫，删掉「身份已注销且值为假」的条目。
-     *
-     * <p>谓词只用条目自身：键是身份，值是标志。值为假的条目不参与任何判据面的读数，删它不改变任何
-     * 读者的结果；值为真的条目留给它自己的收尾，所以清扫不会撤掉让路判据。
-     *
-     * <p>线程：认领只在三处 CAS，全在主线程，本方法也在主线程，所以与认领不交错，只与池线程上的
-     * 两条收尾出口并发。删除走 {@code remove(key, value)}，带值比对，不会误删同键换上的新实例；
-     * 收尾那一侧的 blocked 支先判空，做完支的 remove 幂等，条目已被删时两条出口都空转。
-     *
-     * <p>收敛上界一轮：死键上的假条目本轮删净；死键上的真条目留给其收尾，收尾若置假则下一轮删净。
-     */
-    public static void sweepDeadEntries() {
-        for (Map.Entry<Long, AtomicBoolean> e : CHUNK_IN_FLIGHT.entrySet()) {
-            if (e.getValue().get() || CounterIdentities.isLive(e.getKey())) {
-                continue;
-            }
-            CHUNK_IN_FLIGHT.remove(e.getKey(), e.getValue());
-        }
-    }
-
-    /** 报告某 section 已生成，触发光照，该 chunk 无在途光照时一次。 */
+    /** 报告某 section 已生成，触发光照，该 chunk 无在途光照时一次。认领兼作去重。 */
     public static void notifyGenerated(LevelChunk chunk) {
-        long key = liveIdentity(chunk);
-        if (key == 0L) {
+        if (!(chunk.getLevel() instanceof ServerLevel level)) {
             return;
         }
-        if (LIGHT_IN_FLIGHT.computeIfAbsent(key, k -> new AtomicBoolean()).compareAndSet(false, true)) {
-            triggerLight(chunk);
+        long owner = OwnershipTable.tryClaimChunk(level, OwnershipTable.LIGHTED, chunk.getPos());
+        if (owner != 0L) {
+            ACTIVE_LIGHT.incrementAndGet();
+            triggerLight(chunk, owner);
         }
     }
 
     /** 该 chunk 是否有光照任务在途，发包前检查，在途则留队列，等播种完成带正确光照。 */
     public static boolean isLightInFlight(LevelChunk chunk) {
-        long key = identityOf(chunk);
-        AtomicBoolean inFlight = LIGHT_IN_FLIGHT.get(key);
-        return inFlight != null && inFlight.get();
+        return OwnershipTable.isLightedClaimed(chunk.getPos().x(), chunk.getPos().z());
     }
 
-    /** 一次 fillFrom 与 lightChunk，完成回调里升段、释放、再检查。 */
-    private static void triggerLight(LevelChunk chunk) {
-        long key = identityOf(chunk);
+    /** 一次 fillFrom 与 lightChunk，完成回调里升段、释放认领、再检查。 */
+    private static void triggerLight(LevelChunk chunk, long lightOwner) {
         ServerLevel serverLevel = (ServerLevel) chunk.getLevel();
         if (serverLevel.getChunkSource().getLightEngine() instanceof FarLandsLightEngine lightEngine) {
             chunk.initializeLightSources();
@@ -618,7 +389,9 @@ public final class GenQueue {
                     SectionIO.runOnMainThread(
                             () -> {
                                 SectionStage.promoteAllGenToLighted(chunk);
-                                LIGHT_IN_FLIGHT.remove(key);
+                                OwnershipTable.releaseChunk(serverLevel, OwnershipTable.LIGHTED, chunk.getPos(),
+                                        lightOwner);
+                                ACTIVE_LIGHT.decrementAndGet();
                                 // 光照完成，该 chunk 脏 section 入队 PERSIST，此时 fill 与光照都已完成，数据完整。
                                 SectionLifecycle.persistChunkDirty(chunk);
                                 // 播种完成，主动广播该 chunk 全部光照，含空 section 的 15。增量包链依赖 chunk
@@ -629,59 +402,35 @@ public final class GenQueue {
                                 // 所以必须在这里补一次内容变化标记：否则门一加，整包永远不发，客户端
                                 // 只能看到空壳。
                                 ChunkDataSender.markChunkChanged(chunk);
-                                // 光照在途已落，且 DECORATED 段刚升到 LIGHTED：该 chunk 可能就此就绪，补一次 FULL。
-                                // 主线程上直调，主线程若正阻塞在某个等 FULL 的位置上，这一笔会在 managedBlock 的
-                                // 队列里执行，把等待解开。
-                                ChunkReadiness.completeFull(chunk);
-                                if (SectionStage.hasAwaitingLight(chunk)) {
-                                    // 光照期间新到 DECORATED 的段未被这次播种覆盖，下一批。
-                                    notifyGenerated(chunk);
-                                }
+                                // 光照在途已落，且 DECORATED 段刚升到 LIGHTED：扇出已在升格里发过一次提交。
+                                // 光照期间新到 DECORATED 的段交准入再发一批。
+                                Scheduler.submit(chunk);
                             }, serverLevel);
                     return;
                 }
                 InfsFarlands.LOGGER.error("farlands: light failed chunk={}", chunk.getPos(), t);
-                LIGHT_IN_FLIGHT.remove(key);
-                if (SectionStage.hasAwaitingLight(chunk)) {
-                    notifyGenerated(chunk);
-                }
+                OwnershipTable.releaseChunk(serverLevel, OwnershipTable.LIGHTED, chunk.getPos(), lightOwner);
+                ACTIVE_LIGHT.decrementAndGet();
+                Scheduler.submit(chunk);
             });
         } else {
-            // 防御：非本 port 光引擎，释放标志防卡死，理论上不走。
-            LIGHT_IN_FLIGHT.remove(key);
+            // 防御：非本 port 光引擎，释放认领防卡死，理论上不走。
+            OwnershipTable.releaseChunk(serverLevel, OwnershipTable.LIGHTED, chunk.getPos(), lightOwner);
+            ACTIVE_LIGHT.decrementAndGet();
         }
     }
 
     // 关服等待
 
-    /** 全局是否仍有生成、光照或装饰在途，任一标志为真或生成队列非空即为真。 */
+    /** 全局是否仍有生成、光照或装饰在途。认领在作业里，作业可能还在池里没开跑，所以用计数判空。 */
     public static boolean hasInflightWork() {
-        if (DECORATION_IN_FLIGHT.get() > 0) {
-            return true;
-        }
-        for (AtomicBoolean b : CHUNK_IN_FLIGHT.values()) {
-            if (b.get()) {
-                return true;
-            }
-        }
-        for (AtomicBoolean b : LIGHT_IN_FLIGHT.values()) {
-            if (b.get()) {
-                return true;
-            }
-        }
-        synchronized (QUEUE) {
-            return !QUEUE.isEmpty();
-        }
+        return DECORATION_IN_FLIGHT.get() > 0 || ACTIVE.get() > 0 || ACTIVE_LIGHT.get() > 0;
     }
 
-    /**
-     * 关服等待：等全局生成与光照在途收敛，有界。每轮唤醒消费，drainGen 消费不完不续唤醒，
-     * 超时由 shutdownSyncFlush 的 isChunkBusy 跳过兜底。
-     */
+    /** 关服等待：等全局生成与光照在途收敛，有界。超时由 shutdownSyncFlush 的 isChunkBusy 跳过兜底。 */
     public static void awaitIdle(MinecraftServer server, long timeoutMs) {
         long deadline = System.currentTimeMillis() + timeoutMs;
         while (System.currentTimeMillis() < deadline) {
-            wakeConsumer();
             // 关键：抽主执行器。群系填充收尾与读回完成都投回主线程跑，不抽它们，那些在途标志永远落不
             // 下来，本等待就只会等满 timeout。
             SectionIO.drainMainThreadTasks(server);
@@ -694,38 +443,6 @@ public final class GenQueue {
                 Thread.currentThread().interrupt();
                 return;
             }
-        }
-    }
-
-    // 调度
-
-    private static void wakeConsumer() {
-        if (consumerActive.compareAndSet(false, true)) {
-            try {
-                POOL.submit(GenQueue::drainGen);
-            } catch (RejectedExecutionException e) {
-                consumerActive.set(false);
-            }
-        }
-    }
-
-    private static void drainGen() {
-        try {
-            int budget = FarlandsConfig.maxGenTasksPerTick;
-            for (int i = 0; i < budget; i++) {
-                GenTask task;
-                synchronized (QUEUE) {
-                    task = QUEUE.poll();
-                }
-                if (task == null) {
-                    break;
-                }
-                POOL.submit(task::execute);
-            }
-        } catch (RejectedExecutionException e) {
-            // 池关闭时剩余任务丢弃，daemon 不主动关，理论不触发
-        } finally {
-            consumerActive.set(false);
         }
     }
 }

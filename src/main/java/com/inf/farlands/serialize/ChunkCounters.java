@@ -13,14 +13,14 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
 /**
  * 每 chunk 的派生记账，供调度器的依赖判据 O(1) 取值。本节只记账，不改任何判据。
  *
- * <p>五项：
+ * <p>三项与两个一次性标志：
  * {@code pendingSurface}，已计入的段里档位低于 SURFACE 的个数，归零表示该 chunk 可以进 CARVERS；
  * {@code pendingDecorated}，档位低于 DECORATED 的个数，归零表示可以进 LIGHTED；
  * {@code terrainCursor}，已计入的段里档位低于 TERRAIN 的最高段号，空集取 {@link #NO_CURSOR}，
- * SURFACE(S) 的判据是 S 大于本值，即该段之上的已计入段都不欠地形；
- * {@code atDecorated}，档位正好等于 DECORATED 的个数，是 {@code SectionStage.hasAwaitingLight} 的判据；
- * {@code belowLighted}，档位落在 TERRAIN 到 LIGHTED 之间的个数，归零即数据就绪判据里「有做过但没
- * 点亮的段」那一项不成立，是 {@code SectionStage.hasBelowLighted} 的判据。
+ * SURFACE(S) 的判据是 S 大于本值，即该段之上的已计入段都不欠地形。
+ *
+ * <p>两个标志：{@code windowReadDone} 是「窗口面读过一次盘」，{@code fullDone} 是「FULL 已补」。
+ * 后者是第七行的单次完成令牌：{@code completeFuture} 对已完成的 future 再调会抛。
  *
  * <p>游标按 chunk 而不是按列：档位是按段的，一个段覆盖它 16 乘 16 的全部列，所以「S 之上的段
  * 欠不欠地形」与列无关。
@@ -47,15 +47,18 @@ public final class ChunkCounters {
     private int pendingSurface;
     private int pendingDecorated;
     private int terrainCursor = NO_CURSOR;
-    private int atDecorated;
-    private int belowLighted;
+
+    /** 窗口内段读过一次盘即为真，一次性。 */
+    private boolean windowReadDone;
+
+    /** FULL 已补过，一次性。令牌：completeFuture 对已完成的 future 再调会抛。 */
+    private boolean fullDone;
 
     private ChunkCounters() {
     }
 
     /** 记账快照，供自检比对。 */
-    public record Snapshot(int pendingSurface, int pendingDecorated, int terrainCursor, int atDecorated,
-            int belowLighted) {
+    public record Snapshot(int pendingSurface, int pendingDecorated, int terrainCursor) {
     }
 
     private static long identityOf(LevelChunk chunk) {
@@ -157,45 +160,77 @@ public final class ChunkCounters {
     public static Snapshot snapshot(LevelChunk chunk) {
         long identity = identityOf(chunk);
         if (identity == 0L) {
-            return new Snapshot(0, 0, NO_CURSOR, 0, 0);
+            return new Snapshot(0, 0, NO_CURSOR);
         }
         ChunkCounters c = COUNTERS.get(identity);
         if (c == null) {
-            return new Snapshot(0, 0, NO_CURSOR, 0, 0);
+            return new Snapshot(0, 0, NO_CURSOR);
         }
         synchronized (c) {
-            return new Snapshot(c.pendingSurface, c.pendingDecorated, c.terrainCursor, c.atDecorated,
-                    c.belowLighted);
+            return new Snapshot(c.pendingSurface, c.pendingDecorated, c.terrainCursor);
         }
     }
 
-    /** 读该 chunk 低于 LIGHTED 的段数；身份为 0 或从未记账过返回 0。 */
-    public static int belowLighted(LevelChunk chunk) {
+    /** 置窗口读回闩。窗口内段读过一次盘即为真，一次性；卸载随实例消亡。 */
+    public static void markWindowReadDone(LevelChunk chunk) {
         long identity = identityOf(chunk);
         if (identity == 0L) {
-            return 0;
+            return;
         }
         ChunkCounters c = COUNTERS.get(identity);
-        if (c == null) {
-            return 0;
-        }
-        synchronized (c) {
-            return c.belowLighted;
+        if (c != null) {
+            synchronized (c) {
+                c.windowReadDone = true;
+            }
         }
     }
 
-    /** 读该 chunk 停在 DECORATED 的段数；身份为 0 或从未记账过返回 0。 */
-    public static int atDecorated(LevelChunk chunk) {
+    /** 窗口读回闩是否已置。身份为 0 或从未记账过返回假。 */
+    public static boolean isWindowReadDone(LevelChunk chunk) {
         long identity = identityOf(chunk);
         if (identity == 0L) {
-            return 0;
+            return false;
         }
         ChunkCounters c = COUNTERS.get(identity);
         if (c == null) {
-            return 0;
+            return false;
         }
         synchronized (c) {
-            return c.atDecorated;
+            return c.windowReadDone;
+        }
+    }
+
+    /** FULL 补发令牌是否已被领走。只读，供诊断行用。 */
+    public static boolean isFullDone(LevelChunk chunk) {
+        long identity = identityOf(chunk);
+        if (identity == 0L) {
+            return false;
+        }
+        ChunkCounters c = COUNTERS.get(identity);
+        if (c == null) {
+            return false;
+        }
+        synchronized (c) {
+            return c.fullDone;
+        }
+    }
+
+    /** FULL 补发令牌：取到才算本次补。身份为 0 返回假。 */
+    public static boolean claimFull(LevelChunk chunk) {
+        long identity = identityOf(chunk);
+        if (identity == 0L) {
+            return false;
+        }
+        ChunkCounters c = COUNTERS.get(identity);
+        if (c == null) {
+            return false;
+        }
+        synchronized (c) {
+            if (c.fullDone) {
+                return false;
+            }
+            c.fullDone = true;
+            return true;
         }
     }
 
@@ -212,12 +247,6 @@ public final class ChunkCounters {
         if (stage < SectionStage.DECORATED) {
             this.pendingDecorated++;
         }
-        if (stage == SectionStage.DECORATED) {
-            this.atDecorated++;
-        }
-        if (SectionStage.isBelowLighted(stage)) {
-            this.belowLighted++;
-        }
         if (stage < SectionStage.TERRAIN && sectionY > this.terrainCursor) {
             this.terrainCursor = sectionY;
         }
@@ -232,12 +261,6 @@ public final class ChunkCounters {
             if (oldStage < SectionStage.DECORATED) {
                 this.pendingDecorated++;
             }
-            if (oldStage == SectionStage.DECORATED) {
-                this.atDecorated++;
-            }
-            if (SectionStage.isBelowLighted(oldStage)) {
-                this.belowLighted++;
-            }
             if (oldStage < SectionStage.TERRAIN && sectionY > this.terrainCursor) {
                 this.terrainCursor = sectionY;
             }
@@ -247,18 +270,6 @@ public final class ChunkCounters {
         }
         if (oldStage < SectionStage.DECORATED && newStage >= SectionStage.DECORATED) {
             this.pendingDecorated--;
-        }
-        if (oldStage != SectionStage.DECORATED && newStage == SectionStage.DECORATED) {
-            this.atDecorated++;
-        }
-        if (oldStage == SectionStage.DECORATED && newStage != SectionStage.DECORATED) {
-            this.atDecorated--;
-        }
-        if (SectionStage.isBelowLighted(oldStage) && !SectionStage.isBelowLighted(newStage)) {
-            this.belowLighted--;
-        }
-        if (!SectionStage.isBelowLighted(oldStage) && SectionStage.isBelowLighted(newStage)) {
-            this.belowLighted++;
         }
         if (oldStage < SectionStage.TERRAIN && newStage >= SectionStage.TERRAIN) {
             if (sectionY == this.terrainCursor) {
@@ -288,12 +299,6 @@ public final class ChunkCounters {
         }
         if (stage < SectionStage.DECORATED) {
             this.pendingDecorated--;
-        }
-        if (stage == SectionStage.DECORATED) {
-            this.atDecorated--;
-        }
-        if (SectionStage.isBelowLighted(stage)) {
-            this.belowLighted--;
         }
         if (sectionY == this.terrainCursor) {
             this.terrainCursor = highestPendingBelow(chunk, sectionY);

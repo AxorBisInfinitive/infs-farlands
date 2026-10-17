@@ -9,8 +9,8 @@ import com.inf.farlands.serialize.SectionIO;
 import com.inf.farlands.serialize.SectionLifecycle;
 import com.inf.farlands.serialize.SectionStage;
 import com.inf.farlands.terrain.biomeFiller.BiomeFiller;
-import com.inf.farlands.terrain.decorationFiller.DecorationFiller;
 import com.inf.farlands.terrain.pipeline.GenQueue;
+import com.inf.farlands.terrain.pipeline.Scheduler;
 import com.inf.farlands.terrain.pipeline.SpawnPreload;
 import com.inf.farlands.terrain.structure.StructureDriver;
 import com.inf.farlands.util.world.WorldBounds;
@@ -20,10 +20,12 @@ import net.minecraft.core.SectionPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.progress.LevelLoadListener;
 import net.minecraft.util.Util;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.storage.LevelData;
+import net.minecraft.world.level.storage.ServerLevelData;
 
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
@@ -43,9 +45,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * 一次停滞明细，不早退，因为早退的结局同样是把玩家关在加载界面外，只是挂得更晚、更没有诊断。
  *
  * <p>
- * 预加载期间窗口并集为空，而生成与读回都按窗口驱动，所以这里走显式段范围：GenQueue.preload 绕过
- * tracking view 过滤，SectionLifecycle.preloadRange 用同一范围发起读回，并清掉窗口等待标记，否则
- * ChunkReadiness.isDataReady 里那一条恒假，FULL 补不出来，入场后连方块都放不下去。
+ * 预加载期间窗口并集为空，而生成与读回都按窗口驱动，所以这里走显式段范围：调度器的准入门认面，
+ * 本类把范围交给 {@code Scheduler.submit}；{@code SectionLifecycle.preloadRange}
+ * 用同一范围发起
+ * 读回并置窗口闩，否则第七行永远不成立，入场后连方块都放不下去。
  *
  * <p>
  * 范围内每段先种 biome 再入队：窗口并集为空时 BiomeFiller.fillChunkBiomes 什么都不会种，而
@@ -69,12 +72,15 @@ public abstract class SpawnPreloadMixin {
     /**
      * 驱动生成的半径。取判据半径 + 1，这是下界。
      *
-     * <p>门的判据是「中心所在 chunk 的 3×3 九格都过 CARVERS」。判据圈边界那格在偏移
-     * {@code FARLANDS_PRELOAD_RADIUS}，它的九格含偏移 {@code FARLANDS_PRELOAD_RADIUS + 1}，所以那一圈
+     * <p>
+     * 门的判据是「中心所在 chunk 的 3×3 九格都过 CARVERS」。判据圈边界那格在偏移
+     * {@code FARLANDS_PRELOAD_RADIUS}，它的九格含偏移
+     * {@code FARLANDS_PRELOAD_RADIUS + 1}，所以那一圈
      * 必须被驱动，即驱动半径至少比判据半径大 1。取成与判据相等时，9×9 边界那一列的门恒不过，那些段
      * 到不了 LIGHTED，退出条件永不满足，而它们的壳在场、邻域也齐，症状看着像卡在别处。
      *
-     * <p>被驱动的最外一圈自己的门会失败，它的九格含驱动圈之外；但那不影响判据圈：那一圈只需要到
+     * <p>
+     * 被驱动的最外一圈自己的门会失败，它的九格含驱动圈之外；但那不影响判据圈：那一圈只需要到
      * CARVERS 供判据圈的门使用，不需要到 LIGHTED。
      */
     @Unique
@@ -83,17 +89,14 @@ public abstract class SpawnPreloadMixin {
     /**
      * 铺票的半径，只用来让壳在场，不驱动生成。取驱动半径 + {@code STRUCTURE_READ_RADIUS}，这是下界。
      *
-     * <p>被驱动的 chunk 里最远的一个在驱动半径，而它的结构引用相要读 ±8，所以它的 ±8 邻域必须都在
-     * {@code visibleChunkMap} 里；落到铺票半径即二者之和。
-     *
-     * <p>原来这一圈靠 {@code StructureDriver.pullDependencies} 按需拉，而那个调用点在
-     * {@code GenTask} 的 {@code hasBeardifier} 早退分支里，即「要 Beardifier 才能触发拉依赖，而拉
-     * 依赖就是为了拿 Beardifier」：需要 ±8 的 chunk 恰恰是拿不到 Beardifier 的那个，于是它永不触发
-     * 拉取，预加载不收敛、退出条件永不满足。所以这一圈必须由本处铺票。
+     * <p>
+     * 被驱动的 chunk 里最远的一个在驱动半径，而它的结构引用相要读 ±8，所以它的 ±8 邻域必须都在
+     * {@code visibleChunkMap} 里；落到铺票半径即二者之和。结构相本身不再按需补钉，引用相由调度器的
+     * 准入调，准入门判 {@code referencesBuildable}，而这一圈票就是它成立的前提。
      */
     @Unique
-    private static final int FARLANDS_PRELOAD_TICKET_RADIUS =
-            FARLANDS_PRELOAD_DRIVE_RADIUS + StructureDriver.STRUCTURE_READ_RADIUS;
+    private static final int FARLANDS_PRELOAD_TICKET_RADIUS = FARLANDS_PRELOAD_DRIVE_RADIUS
+            + StructureDriver.STRUCTURE_READ_RADIUS;
 
     /** 竖直半高。 */
     @Unique
@@ -129,6 +132,32 @@ public abstract class SpawnPreloadMixin {
     @Shadow
     protected abstract void waitUntilNextTick();
 
+    /**
+     * 世界创建期的驱动面：`setInitialSpawn` 里的阻塞 FULL 取数发生在玩家进名单之前，此刻没有玩家
+     * 快照也没有任何力面，准入的面判据恒假，那个取数永远等不到。这里在它之前把出生区登记成一个面，
+     * 并铺一张足以覆盖驱动面 ±8 的大半径票；首个玩家入场时由 {@link SpawnPreload#release} 一并撤。
+     *
+     * <p>
+     * 中心与 vanilla 同源：它自己用 {@code findSpawnPosition} 算出生 chunk，这里重复算一次，
+     * 那是种子的纯函数。段带取出生高度上下 {@code FARLANDS_PRELOAD_HALF_Y}，与预加载循环同宽。
+     */
+    @Inject(method = "setInitialSpawn", at = @At("HEAD"))
+    private static void farlands$creationFace(ServerLevel level, ServerLevelData levelData, boolean spawnBonusChest,
+            boolean isDebug, LevelLoadListener levelLoadListener, CallbackInfo ci) {
+        ChunkPos spawnChunk = ChunkPos.containing(
+                level.getChunkSource().randomState().sampler().findSpawnPosition());
+        int spawnSy = level.getChunkSource().getGenerator().getSpawnHeight(level) >> 4;
+        int minSy = Math.max(spawnSy - FARLANDS_PRELOAD_HALF_Y, WorldBounds.MIN_SECTION);
+        int maxSy = Math.min(spawnSy + FARLANDS_PRELOAD_HALF_Y, WorldBounds.MAX_SECTION);
+        // 半径取判据半径：出生搜索的偏移在这一圈内。
+        Scheduler.Face face = new Scheduler.Face(level.dimension(), spawnChunk.x(), spawnChunk.z(),
+                FARLANDS_PRELOAD_RADIUS, minSy, maxSy);
+        Scheduler.register(face);
+        level.getChunkSource().addTicketWithRadius(GenQueue.STRUCTURE_PIN_TICKET, spawnChunk,
+                FARLANDS_PRELOAD_TICKET_RADIUS);
+        SpawnPreload.registerCreation(level.dimension(), face, spawnChunk, FARLANDS_PRELOAD_TICKET_RADIUS);
+    }
+
     @Inject(method = "prepareLevels", at = @At("TAIL"))
     private void farlands$preloadSpawnArea(CallbackInfo ci) {
         MinecraftServer server = (MinecraftServer) (Object) this;
@@ -162,7 +191,7 @@ public abstract class SpawnPreloadMixin {
         for (int dx = -FARLANDS_PRELOAD_TICKET_RADIUS; dx <= FARLANDS_PRELOAD_TICKET_RADIUS; dx++) {
             for (int dz = -FARLANDS_PRELOAD_TICKET_RADIUS; dz <= FARLANDS_PRELOAD_TICKET_RADIUS; dz++) {
                 ChunkPos pos = new ChunkPos(spawnCx + dx, spawnCz + dz);
-                cache.addTicketWithRadius(GenQueue.GEN_WORK_TICKET, pos, 0);
+                cache.addTicketWithRadius(GenQueue.STRUCTURE_PIN_TICKET, pos, 0);
                 SpawnPreload.register(level.dimension(), pos);
             }
         }
@@ -171,72 +200,72 @@ public abstract class SpawnPreloadMixin {
         long startedAt = System.currentTimeMillis();
         long lastProgressAt = startedAt;
         int lastReady = ready;
-        while (ready < total) {
-            cache.tick(() -> false, false);
-            this.waitUntilNextTick();
-            for (int dx = -FARLANDS_PRELOAD_DRIVE_RADIUS; dx <= FARLANDS_PRELOAD_DRIVE_RADIUS; dx++) {
-                for (int dz = -FARLANDS_PRELOAD_DRIVE_RADIUS; dz <= FARLANDS_PRELOAD_DRIVE_RADIUS; dz++) {
-                    ChunkPos pos = new ChunkPos(spawnCx + dx, spawnCz + dz);
-                    LevelChunk chunk = ChunkReadiness.chunkAt(level, pos);
-                    if (chunk == null) {
-                        continue;
-                    }
-                    SectionLifecycle.clearPendingWindowRead(chunk);
-                    if (issued.add(pos.pack())) {
-                        SectionLifecycle.preloadRange(chunk, minSy, maxSy);
-                        for (int sy = minSy; sy <= maxSy; sy++) {
-                            if (WorldBounds.inSection(sy)) {
-                                BiomeFiller.fillSectionBiomes(level, chunk, sy);
+        // 登记力面：此刻玩家还没进名单，准入的面查询只有靠它才为真。半径与驱动的方阵同宽，段范围与
+        // 范围读回同宽。
+        Scheduler.Face face = new Scheduler.Face(level.dimension(), spawnCx, spawnCz,
+                FARLANDS_PRELOAD_DRIVE_RADIUS, minSy, maxSy);
+        Scheduler.register(face);
+        try {
+            while (ready < total) {
+                cache.tick(() -> false, false);
+                this.waitUntilNextTick();
+                for (int dx = -FARLANDS_PRELOAD_DRIVE_RADIUS; dx <= FARLANDS_PRELOAD_DRIVE_RADIUS; dx++) {
+                    for (int dz = -FARLANDS_PRELOAD_DRIVE_RADIUS; dz <= FARLANDS_PRELOAD_DRIVE_RADIUS; dz++) {
+                        ChunkPos pos = new ChunkPos(spawnCx + dx, spawnCz + dz);
+                        LevelChunk chunk = ChunkReadiness.chunkAt(level, pos);
+                        if (chunk == null) {
+                            continue;
+                        }
+                        if (issued.add(pos.pack())) {
+                            SectionLifecycle.preloadRange(chunk, minSy, maxSy);
+                            for (int sy = minSy; sy <= maxSy; sy++) {
+                                if (WorldBounds.inSection(sy)) {
+                                    BiomeFiller.fillSectionBiomes(level, chunk, sy);
+                                }
                             }
                         }
-                    }
-                    if (!SectionIO.isReadingAny(pos.pack())) {
-                        GenQueue.preload(chunk, minSy, maxSy);
+                        if (!SectionIO.isReadingAny(chunk)) {
+                            int[] range = new int[maxSy - minSy + 1];
+                            for (int i = 0; i < range.length; i++) {
+                                range[i] = minSy + i;
+                            }
+                            Scheduler.submit(chunk, range);
+                        }
                     }
                 }
+                // 调度器在这里驱动：它由 tick 驱动，而预加载跑在 tick 之前。不补这一步，判据圈的段会永远停在
+                // CARVERS，而本循环的退出条件是范围内全部点亮，那就永远等不到。
+                Scheduler.tick();
+                // 抽一次主线程执行器。装饰的收尾把升段与撤认领投在这里，fsa 的编码提交也在这里，
+                // 而 prepareLevels 期间的 waitUntilNextTick 可能不再抽各 level 的 chunk 执行器，
+                // 与 GenQueue.awaitIdle 的同形处理一致。不抽它，收尾永远落不下来，认领被一直持有。
+                SectionIO.drainMainThreadTasks(server);
+                ready = farlands$countReady(level, spawnCx, spawnCz, minSy, maxSy);
+                long now = System.currentTimeMillis();
+                if (ready != lastReady) {
+                    lastReady = ready;
+                    lastProgressAt = now;
+                } else if (now - lastProgressAt >= FARLANDS_PRELOAD_STALL_MILLIS) {
+                    // 每个停滞窗口报一次：报完把基准推到现在，持续停滞才会每 30 秒再报一条。
+                    InfsFarlands.LOGGER.error("farlands: spawn preload stuck at {}/{} for {} ms, detail: {}",
+                            ready, total, now - lastProgressAt,
+                            farlands$stallDetail(level, spawnCx, spawnCz, minSy, maxSy, syCount));
+                    lastProgressAt = now;
+                }
+                this.nextTickTimeNanos = Util.getNanos() + PREPARE_LEVELS_DEFAULT_DELAY_NANOS;
+                // 与上面同一判据的另一半：mayHaveDelayedTasks 在 prepareLevels 期间会被 pollTask 置真，
+                // 之后 haveTime() 只读 delayedTasksMaxNextTickTimeNanos。不同步推它，haveTime() 恒假，
+                // waitUntilNextTick 既不抽 chunk 执行器，也不让出 tick，本循环退化成热自旋。
+                this.delayedTasksMaxNextTickTimeNanos = this.nextTickTimeNanos;
+                this.waitUntilNextTick();
             }
-            // 装饰在这里驱动：它由 tick 驱动，而预加载跑在 tick 之前。不补这一步，判据圈的段会永远停在
-            // CARVERS，而本循环的退出条件是范围内全部点亮，那就永远等不到。
-            DecorationFiller.tick();
-            // 抽一次主线程执行器。装饰的收尾把升段与撤认领投在这里，fsa 的编码提交也在这里，
-            // 而 prepareLevels 期间的 waitUntilNextTick 可能不再抽各 level 的 chunk 执行器，
-            // 与 GenQueue.awaitIdle 的同形处理一致。不抽它，收尾永远落不下来，认领被一直持有。
-            SectionIO.drainMainThreadTasks(server);
-            // 结构相驱动：与装饰同理，它由 tick 驱动，而预加载跑在 tick 之前。排在抽主线程之后，
-            // 本迭代里被 GenTask 投出的 pullDependencies 这一轮就能把挂起项提升掉。
-            StructureDriver.tick();
-            ready = farlands$countReady(level, spawnCx, spawnCz, minSy, maxSy);
-            long now = System.currentTimeMillis();
-            if (ready != lastReady) {
-                lastReady = ready;
-                lastProgressAt = now;
-            } else if (now - lastProgressAt >= FARLANDS_PRELOAD_STALL_MILLIS) {
-                // 每个停滞窗口报一次：报完把基准推到现在，持续停滞才会每 30 秒再报一条。
-                InfsFarlands.LOGGER.error("farlands: spawn preload stuck at {}/{} for {} ms, detail: {}",
-                        ready, total, now - lastProgressAt,
-                        farlands$stallDetail(level, spawnCx, spawnCz, minSy, maxSy, syCount));
-                lastProgressAt = now;
-            }
-            this.nextTickTimeNanos = Util.getNanos() + PREPARE_LEVELS_DEFAULT_DELAY_NANOS;
-            // 与上面同一判据的另一半：mayHaveDelayedTasks 在 prepareLevels 期间会被 pollTask 置真，
-            // 之后 haveTime() 只读 delayedTasksMaxNextTickTimeNanos。不同步推它，haveTime() 恒假，
-            // waitUntilNextTick 既不抽 chunk 执行器，也不让出 tick，本循环退化成热自旋。
-            this.delayedTasksMaxNextTickTimeNanos = this.nextTickTimeNanos;
-            this.waitUntilNextTick();
+        } finally {
+            Scheduler.unregister(face);
         }
 
-        // 存在流程派发的 loadChunkSections 可能晚于范围读回，落完队列再清一次窗口等待标记，
-        // 然后才放行 FULL。
+        // 存在流程派发的 loadChunkSections 可能晚于范围读回，落完队列再放行 FULL。
         cache.tick(() -> false, false);
         this.waitUntilNextTick();
-        for (int dx = -FARLANDS_PRELOAD_RADIUS; dx <= FARLANDS_PRELOAD_RADIUS; dx++) {
-            for (int dz = -FARLANDS_PRELOAD_RADIUS; dz <= FARLANDS_PRELOAD_RADIUS; dz++) {
-                LevelChunk chunk = ChunkReadiness.chunkAt(level, new ChunkPos(spawnCx + dx, spawnCz + dz));
-                if (chunk != null) {
-                    SectionLifecycle.clearPendingWindowRead(chunk);
-                }
-            }
-        }
         InfsFarlands.LOGGER.info("farlands: spawn preload {}/{} in {} ms", ready, total,
                 System.currentTimeMillis() - startedAt);
     }
@@ -296,8 +325,9 @@ public abstract class SpawnPreloadMixin {
                 sb.append(pos).append("[lighted=").append(done).append('/').append(perChunk)
                         .append(",busy=").append(GenQueue.isChunkBusy(chunk))
                         .append(",biome=").append(GenQueue.isBiomeFilling(chunk))
-                        .append(",reading=").append(SectionIO.isReadingAny(pos.pack()))
-                        .append(",pending=").append(SectionLifecycle.isPendingWindowRead(chunk))
+                        .append(",reading=").append(SectionIO.isReadingAny(chunk))
+                        .append(",pending=").append(!com.inf.farlands.serialize.ChunkCounters
+                                .isWindowReadDone(chunk))
                         .append(",belowLighted=").append(below[0])
                         .append("] ");
                 listed++;

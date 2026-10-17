@@ -6,6 +6,7 @@ import com.inf.farlands.serialize.SectionIO;
 import com.inf.farlands.serialize.SectionStage;
 import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.debug.StageMetrics;
+import com.inf.farlands.terrain.pipeline.Scheduler;
 import com.inf.farlands.util.window.WindowedChunk;
 import com.inf.farlands.util.world.WorldBounds;
 
@@ -29,7 +30,7 @@ import net.minecraft.world.level.levelgen.Heightmap;
  * 内保证。目标 chunk 为中心的 17x17 起点网格只查 biomeSource 与确定性随机，不依赖邻居生成状态。
  *
  * 触发：GenTask surface 完成后调 applyCarversIfNeeded。补触发：surface 成功但 carvers 失败的
- * section 停留 SURFACE，由 GenQueue.scanAndEnqueue 的 hasCarversPending 检查入队重试。
+ * section 停留 SURFACE，由调度器的准入在段全到 SURFACE 后重发整 chunk 作业。
  *
  * 失败策略同 SurfaceFiller：异常由 GenTask 捕获，不抛，section 停留 SURFACE 由补触发重试。
  */
@@ -51,7 +52,7 @@ public final class CarverFiller {
             }
             if (SectionStage.isOrAfter(chunk, sy, SectionStage.SURFACE)
                     && !SectionStage.isOrAfter(chunk, sy, SectionStage.CARVERS)
-                    && !SectionIO.isReading(chunk.getPos().pack(), sy)) {
+                    && !SectionIO.isReading(chunk, sy)) {
                 return true;
             }
         }
@@ -75,11 +76,10 @@ public final class CarverFiller {
         }
         int[] carved = new int[list.size()];
         for (int i = 0; i < list.size(); i++) {
-            int sy = list.get(i);
-            carved[i] = sy;
-            SectionStage.setStage(chunk, sy, SectionStage.CARVERS);
-            ((WindowedChunk) chunk).markSectionDirty(sy);
+            carved[i] = list.get(i);
         }
+        Scheduler.stage(chunk, carved, SectionStage.CARVERS);
+        Scheduler.dirty(chunk, carved, true);
         if (carved.length > 0) {
             primeFinalHeightmaps(chunk);
         }

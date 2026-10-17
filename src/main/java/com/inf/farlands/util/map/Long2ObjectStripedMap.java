@@ -98,7 +98,7 @@ public final class Long2ObjectStripedMap<V> {
         }
     }
 
-    /** 已存在则不重算，storage.getOrCreate / LightTaskLock 依赖此行为。mapping 轻量且不回调 map。 */
+    /** 已存在则不重算，storage.getOrCreate / OwnershipTable 依赖此行为。mapping 轻量且不回调 map。 */
     public V computeIfAbsent(long key, LongFunction<V> mapping) {
         StampedLock l = locks[seg(key)];
         long stamp = l.writeLock();

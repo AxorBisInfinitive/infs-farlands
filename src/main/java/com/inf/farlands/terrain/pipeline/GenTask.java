@@ -3,17 +3,14 @@ package com.inf.farlands.terrain.pipeline;
 import com.inf.farlands.InfsFarlands;
 import com.inf.farlands.serialize.SectionIO;
 import com.inf.farlands.serialize.SectionStage;
-import com.inf.farlands.terrain.ChunkBeardifier;
 import com.inf.farlands.terrain.biomeFiller.BiomeFiller;
 import com.inf.farlands.terrain.carverFiller.CarverFiller;
 import com.inf.farlands.terrain.debug.StageMetrics;
 import com.inf.farlands.terrain.decorationFiller.DecorationFiller;
 import com.inf.farlands.terrain.surfaceFiller.SurfaceFiller;
-import com.inf.farlands.terrain.structure.StructureDriver;
 import com.inf.farlands.util.network.ChunkDataSender;
 import com.inf.farlands.util.window.EntitySectionWindow;
 import com.inf.farlands.util.window.PlayerSnapshot;
-import com.inf.farlands.util.window.WindowedChunk;
 import com.inf.farlands.util.world.WorldBounds;
 
 import java.util.ArrayList;
@@ -33,8 +30,8 @@ import net.minecraft.world.level.chunk.LevelChunk;
  * 瞬态：触发即建，执行即毁。持 LevelChunk 强引用以防 GC。fill 在途由 GenQueue 的 ticket
  * 保加载，chunk 不卸载，光照播种对象始终正确。
  *
- * 并发：同 chunk 至多一个任务在途，GenQueue 的 CHUNK_IN_FLIGHT CAS 去重，因此 fill 无并发写
- * 高度图。不同 chunk 并行。
+ * 并发：同 chunk 至多一个任务在途，由 {@code OwnershipTable} 的 TERRAIN 认领去重，因此 fill 无并发
+ * 写高度图。不同 chunk 并行。
  */
 public final class GenTask {
 
@@ -44,20 +41,38 @@ public final class GenTask {
     /** 该 chunk 到最近玩家的 XZ Chebyshev 距离，入队时快照，玩家移动时 refreshPriority 重算。 */
     private int priority;
 
-    /**
-     * 本次执行是否停在门上，即缺 Beardifier。它决定 completeTask 走哪一支：被挡下的那一支不续任务，
-     * 由扫描的有预算重试与 farlandsStructureReady 的回投再触发。
-     */
-    private boolean blocked;
+    /** 本任务持有的 TERRAIN 认领编号，收尾时带回去释放。 */
+    private final long genOwner;
 
-    public GenTask(LevelChunk chunk) {
-        this(chunk, null);
-    }
+    /** 诊断用：本次收集到的段数与 carve 出的段数。 */
+    private int lastSegments;
+    private int lastCarved;
 
-    public GenTask(LevelChunk chunk, int[] preloadSections) {
+    public GenTask(LevelChunk chunk, int[] preloadSections, long genOwner) {
         this.chunk = chunk;
         this.preloadSections = preloadSections;
         this.priority = computePriority(chunk);
+        this.genOwner = genOwner;
+    }
+
+    /** 本任务的认领编号。 */
+    long genOwner() {
+        return this.genOwner;
+    }
+
+    /** 本任务的 chunk，诊断行用。 */
+    LevelChunk chunk() {
+        return this.chunk;
+    }
+
+    /** 诊断用：本次执行收集到的段数。 */
+    int lastSegments() {
+        return this.lastSegments;
+    }
+
+    /** 诊断用：本次执行 carve 出的段数。 */
+    int lastCarved() {
+        return this.lastCarved;
     }
 
     int priority() {
@@ -84,28 +99,15 @@ public final class GenTask {
             if (!(level instanceof ServerLevel serverLevel)) {
                 return;
             }
-            // 门查不变量本身：没有 Beardifier 就不许 fill。fill 会读它，未设即抛，读点在
-            // AbstractTerrainFiller.fill。只看 isAwaiting 不够：登记的落点晚于这个 chunk 对
-            // latestChunk 可见的那一刻，中间那道窗口里进池的任务会撞上未设的 Beardifier。这道门也
-            // 不能挪进就绪判据：FULL 若等结构相，setInitialSpawn 那条阻塞读会与造出 ±8 壳的那条链
-            // 互为条件死等。
-            if (!((ChunkBeardifier) chunk).hasBeardifier()) {
-                this.blocked = true;
-                // 拉依赖必须在主线程，票操作非线程安全，latestChunk 也只在主线程，而本任务在池上。
-                // 排一笔回主线程，早退保持即时。不是挂起项时 pullDependencies 自己会早退。
-                SectionIO.runOnMainThread(() -> StructureDriver.pullDependencies(serverLevel, chunk), serverLevel);
-                // 这里早退而不续任务：门能不能过只由 ±8 的壳决定，重试改变不了它，而重试消耗的恰是
-                // 解开自己要用的池与主线程。被挡的 chunk 交给扫描与 farlandsStructureReady 的回投。
-                return;
-            }
             List<int[]> segments = collectSegments();
+            this.lastSegments = segments.size();
             for (int[] seg : segments) {
                 // 先补 biome 再推 TERRAIN。本方法是全流程唯一把 stage 推到 TERRAIN 的地方，放这里就与
                 // 入队顺序无关；若让生成先跑，stage 越过 BIOMES，fillSectionBiomes 的 stage < BIOMES 门
                 // 会永假，该段 biome 永久停在 PalettedContainerFactory 的默认群系 plains，地表规则随之
                 // 按 plains 跑，密度依赖 biome 的系统连形状一起错。
                 //
-                // 不需要用 BIOME_FILLING 包住这一段：本任务全程持有 CHUNK_IN_FLIGHT，发送侧一律看到
+                // 不需要用 BIOME_FILLING 包住这一段：本任务全程持有 TERRAIN 认领，发送侧一律看到
                 // isChunkBusy 为真并返回空表，生成期间不会读这一段。那个标志是给短路完成后跑在
                 // backgroundExecutor 上的 biome 阶段用的，见 WindowSendState.sendableSections。
                 for (int sy = seg[0]; sy <= seg[1]; sy++) {
@@ -120,16 +122,17 @@ public final class GenTask {
                     throw e;
                 }
                 StageMetrics.stageWork(StageMetrics.STAGE_TERRAIN, System.nanoTime() - fillStart);
-                for (int sy = seg[0]; sy <= seg[1]; sy++) {
-                    SectionStage.setStage(chunk, sy, SectionStage.TERRAIN);
-                    // fsa 脏标记：fill 在 genPool 线程写 section 内容，CHM 安全
-                    ((WindowedChunk) chunk).markSectionDirty(sy);
+                int[] band = new int[seg[1] - seg[0] + 1];
+                for (int i = 0; i < band.length; i++) {
+                    band[i] = seg[0] + i;
                 }
-                StageMetrics.stageSections(StageMetrics.STAGE_TERRAIN, seg[1] - seg[0] + 1);
+                Scheduler.stage(chunk, band, SectionStage.TERRAIN);
+                Scheduler.dirty(chunk, band, true);
+                StageMetrics.stageSections(StageMetrics.STAGE_TERRAIN, band.length);
             }
             // SURFACE 独立于 segments，fill 后紧跟，因为依赖 fill 产出的高度图，也覆盖读回
-            // stage 为 TERRAIN 与 surface 失败残留。失败不抛，section 停留 TERRAIN 由 scanAndEnqueue
-            // 补触发重试。本步不触发光照：TERRAIN 的出路就是这里，升格只认 DECORATED。
+            // stage 为 TERRAIN 与 surface 失败残留。失败不抛，section 停留 TERRAIN，下一次提交的
+            // 准入会重试。本步不触发光照：TERRAIN 的出路就是这里，升格只认 DECORATED。
             try {
                 SurfaceFiller.applySurfaceIfNeeded(serverLevel, chunk);
             } catch (Exception e) {
@@ -145,12 +148,11 @@ public final class GenTask {
                 InfsFarlands.LOGGER.error("GENTASK carvers ex chunk={},{} {}",
                         chunk.getPos().x(), chunk.getPos().z(), e.toString());
             }
-            // 雕刻完成即登记装饰：这一步的段是 CARVERS，装饰的门要九宫格，判据与重试都在
-            // DecorationFiller。门没过只留表，不影响本任务收尾；扫描路径另有兜底登记。
+            this.lastCarved = carved.length;
+            // 雕刻完成即宣告写域就绪：这一格从低于 CARVERS 变成就绪，九格门要重判。装饰的发现与
+            // 提交由调度器在准入时做，本任务不再登记。
             if (carved.length > 0) {
-                DecorationFiller.register(chunk, carved);
-                // 这一格刚过雕刻：对它八个邻居的门来说，这一格从低于 CARVERS 变成就绪。
-                DecorationFiller.cellChanged(chunk.getPos().pack());
+                DecorationFiller.cellChanged((ServerLevel) chunk.getLevel(), chunk.getPos().pack());
             }
             // 光照触发条件：carvers 产出了东西，或已有段到 DECORATED。CARVERS 不在判据内：
             // 那一段的下一步是装饰而不是光照，promote 也不升它，算进来只会每 tick 白跑一次光照。
@@ -158,19 +160,18 @@ public final class GenTask {
             if (carved.length > 0 || awaitingLight.length > 0) {
                 // 恢复的段不脏，applyDecoded 只恢复 stage。不标脏则 persistChunkDirty 写不到它，
                 // stage 会一直停在盘上的旧值，每次重进都要重算一遍光照。
-                for (int sy : awaitingLight) {
-                    ((WindowedChunk) chunk).markSectionDirty(sy);
-                }
-                GenQueue.notifyGenerated(chunk);
+                // 这一处没有伴随档位变化，单独投一条脏事件，走落档体。
+                Scheduler.dirty(chunk, awaitingLight, true);
+                // 交准入：光照由调度器的第六行发，本任务只把该 chunk 推回候选表。
+                Scheduler.submit(chunk);
                 // fill、surface、carvers 直接写 section，没有 vanilla 广播；这里只标记该 chunk
-                // 内容已变，由 ChunkDataSender 每 tick 按玩家当前窗口物化后再发段包。放在
-                // notifyGenerated 之后，flush 时 LIGHT_IN_FLIGHT 必为真，于是留队列等光照完成，
-                // 方块与光照同到。
+                // 内容已变，由 ChunkDataSender 每 tick 按玩家当前窗口物化后再发段包。光照会先完成，
+                // flush 时 LIGHTED 认领为真，于是留队列等光照完成，方块与光照同到。
                 ChunkDataSender.markChunkChanged(chunk);
             }
         } finally {
-            // fill 异常也清理，清在途并释放 ticket。异常路径若不清理会让标志残留，chunk 永不卸载。
-            GenQueue.completeTask(chunk, this.blocked);
+            // fill 异常也清理：释放本任务持有的认领与票。异常路径若不清理会让认领残留，chunk 永不卸载。
+            GenQueue.completeTask(this);
         }
     }
 
@@ -202,8 +203,7 @@ public final class GenTask {
 
     /**
      * 收集该 chunk 的待生成 section 连续段，来源是窗口并集或预加载指定集合。
-     * 过滤已 TERRAIN 的 section 与可玩范围，clamp 段顶防溢出。
-     * 窗口模式额外跳过读回在途的 section，读回完成回调会入队。
+     * 过滤已 TERRAIN 的 section 与可玩范围，窗口模式额外跳过读回在途的 section。
      */
     private List<int[]> collectSegments() {
         List<int[]> segments = new ArrayList<>();
@@ -217,7 +217,7 @@ public final class GenTask {
             if (SectionStage.isOrAfter(chunk, sy, SectionStage.TERRAIN)) {
                 return;
             }
-            if (preloadSections == null && SectionIO.isReading(chunk.getPos().pack(), sy)) {
+            if (preloadSections == null && SectionIO.isReading(chunk, sy)) {
                 return;
             }
             if (open[0] && sy == curMax[0] + 1) {

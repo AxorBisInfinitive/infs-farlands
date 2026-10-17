@@ -5,10 +5,12 @@ import com.inf.farlands.serialize.ChunkReadiness;
 import com.inf.farlands.serialize.SectionIO;
 import com.inf.farlands.serialize.SectionLifecycle;
 import com.inf.farlands.serialize.SectionStage;
-import com.inf.farlands.terrain.decorationFiller.DecorationClaim;
 import com.inf.farlands.terrain.decorationFiller.DecorationFiller;
 import com.inf.farlands.terrain.pipeline.GenQueue;
 import com.inf.farlands.terrain.pipeline.NeighborhoodTickets;
+import com.inf.farlands.terrain.pipeline.OwnershipTable;
+import com.inf.farlands.terrain.pipeline.Scheduler;
+import com.inf.farlands.terrain.pipeline.SchedulerMetrics;
 import com.inf.farlands.terrain.pipeline.SpawnPreload;
 import com.inf.farlands.terrain.structure.StructureDriver;
 import com.inf.farlands.util.network.ChunkDataSender;
@@ -56,10 +58,9 @@ public abstract class MinecraftServerMixin {
      * 停服后清掉按世界的进程级状态。
      *
      * <p>必须挂在 RETURN 而不是 HEAD：HEAD 那一段要跑 shutdownSyncFlush，它依赖 SectionStage 的阶段；
-     * 而 ChunkReadiness 的关服标志也不能提前复位，否则 vanilla 在 saveAllChunks 里那次 chunk NBT 保存会走
-     * isDataReady 而不是 isChunkBusy，forceload 且无玩家那类 chunk 就写不出 NBT。RETURN 在 saveAllChunks、
-     * level.close 与几个 close 之后，线程随后才结束；客户端在 disconnect 里自旋等 isShutdown()，所以这里
-     * 既晚于所有需要这些状态的动作，又早于新世界开始。
+     * 而存盘门在关服期只判在途，否则 vanilla 在 saveAllChunks 里那次 chunk NBT 保存会挡掉 forceload
+     * 且无玩家那类 chunk。RETURN 在 saveAllChunks、level.close 与几个 close 之后，线程随后才结束；客户端
+     * 在 disconnect 里自旋等 isShutdown()，所以这里既晚于所有需要这些状态的动作，又早于新世界开始。
      *
      * <p>三张位置侧信道表不在这里清：它们在主源集两端共用，客户端那条收尾中的渲染链要到
      * updateLevelInEngines(null) 才释放 sectionNode 长键，清早了会把哈希当坐标。那三张表由客户端卸关卡时清。
@@ -69,7 +70,9 @@ public abstract class MinecraftServerMixin {
         SectionLifecycle.clearWorldState();
         GenQueue.clearWorldState();
         DecorationFiller.clearWorldState();
-        DecorationClaim.clearWorldState();
+        OwnershipTable.clearWorldState();
+        Scheduler.clearWorldState();
+        SchedulerMetrics.clearWorldState();
         StructureDriver.clearWorldState();
         ChunkDataSender.clearWorldState();
         SpawnPreload.clearAll();

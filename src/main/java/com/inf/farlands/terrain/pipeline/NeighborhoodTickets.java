@@ -22,21 +22,19 @@ import net.minecraft.world.level.Level;
  * 驱动面 ±8 邻域的保加载票。
  *
  * <p>门要求中心的 ±{@link StructureDriver#STRUCTURE_READ_RADIUS} 那 289 格都在
- * {@code visibleChunkMap} 里，而玩家自己的票圈只有视距那么大：{@code GenQueue.isNearPlayer} 的判据是
- * {@code ChunkTrackingView.isWithinDistance(..., includeNeighbors=true)}，它的缓冲是 2，所以驱动面是
- * 视距加 2 的一张圆盘。于是驱动面边缘那几圈的 ±8 落在票圈之外，门恒不过，只能靠
- * {@code StructureDriver.pullDependencies} 一格一格补钉：先撞门、再钉票、再等壳。量到的代价是
- * gate 失败约 92/s 与 pull 每样本约 2.5 s。
+ * {@code visibleChunkMap} 里，而玩家自己的票圈只有视距那么大：{@code GenQueue.isNearPlayer} 现在按
+ * 切比雪夫判「距最近玩家 ≤ 视距加一」，驱动面是那张方盘。于是驱动面边缘那几圈的 ±8 落在票圈之外，
+ * 门恒不过；这一圈票就是让门能过的前提。
  *
  * <p>本类给每个玩家在每个维度持一颗 {@code radius = 视距 + STRUCTURE_READ_RADIUS + 2} 的票，覆盖整个
  * 驱动面的 ±8。半径里的 2 就是上面那个 includeNeighbors 缓冲。
  *
  * <p>票型复用 {@link GenQueue#STRUCTURE_PIN_TICKET}：它是 {@code NO_TIMEOUT + FLAG_LOADING}，只加载不
- * simulate，所以多出来的圈不进 tick 与刷怪面。票位等级由半径决定，与 StructureDriver 那些 radius 0 的
- * pin 是各自独立的项，互不干扰。
+ * simulate，所以多出来的圈不进 tick 与刷怪面。票位等级由半径决定，与作业期由所有权表加的
+ * {@code GEN_WORK_TICKET} 是各自独立的项，互不干扰。
  *
- * <p>只加载不生成：多出来的圈里没有段被物化，因为视距外不铺群系，而 enqueueChunk、螺旋扫描与
- * farlandsStructureReady 的 preload 三条生成入口都够不着它们，所以它们是纯壳。
+ * <p>只加载不生成：多出来的圈里没有段被物化，因为视距外不铺群系，而 {@code Scheduler} 的准入、
+ * 扫描与 farlandsStructureReady 的回投三条生成入口都够不着它们，所以它们是纯壳。
  *
  * <p>撤票必须传同一个半径：{@code TicketStorage} 按「类型加票位等级」匹配删除，半径不符就删不掉，票会
  * 沿飞行路径累积。玩家退出与换维度都在本类里按上次记下的位置撤，不依赖外部登出钩子。
@@ -53,8 +51,8 @@ public final class NeighborhoodTickets {
      * 任务期持有：维度到 chunk 到票半径。与玩家那条路径各用一张表，互不干扰。
      *
      * <p>用途是「不以玩家为中心」的驱动面：预生成由 Chunky 之类的任务指定区块，那些区块离玩家很远，
-     * 玩家环票够不着，于是它们的 ±8 只能走 {@code StructureDriver.pullDependencies} 的补钉路，能跑通
-     * 但慢。持有方在驱动一块之前先 {@link #hold}，那块亮完或超时后 {@link #release}。
+     * 玩家环票够不着，所以它们的 ±8 由本类的 hold 保着。持有方在驱动一块之前先 {@link #hold}，
+     * 那块亮完或超时后 {@link #release}。
      */
     private static final Map<ResourceKey<Level>, Map<Long, Integer>> HOLDS = new ConcurrentHashMap<>();
 

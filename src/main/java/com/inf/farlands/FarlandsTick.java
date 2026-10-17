@@ -1,15 +1,13 @@
 package com.inf.farlands;
 
 import com.inf.farlands.light.FarLandsLightEngine;
-import com.inf.farlands.serialize.ChunkReadiness;
 import com.inf.farlands.serialize.SectionIO;
 import com.inf.farlands.serialize.SectionLifecycle;
 import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.debug.StageMetrics;
-import com.inf.farlands.terrain.decorationFiller.DecorationFiller;
-import com.inf.farlands.terrain.pipeline.GenQueue;
 import com.inf.farlands.terrain.pipeline.NeighborhoodTickets;
-import com.inf.farlands.terrain.structure.StructureDriver;
+import com.inf.farlands.terrain.pipeline.Scheduler;
+import com.inf.farlands.terrain.pipeline.SchedulerMetrics;
 import com.inf.farlands.terrain.system.terrain.noise.overworld.Beta173.Beta173NoiseSystem;
 import com.inf.farlands.terrain.system.terrain.noise.overworld.Vanilla.VanillaNoiseSystem;
 import com.inf.farlands.util.maps.AquiferUtil;
@@ -190,10 +188,8 @@ public class FarlandsTick {
             trimAquiferLookup(tickCount);
             // 就绪吞吐读数：与本周期同档，约 10 秒一行。只报读数，不报解读。
             StageMetrics.flush();
-            // 在途表的周期清扫：删掉身份已注销且值为假的条目。
-            GenQueue.sweepDeadEntries();
-            // 就绪兜底重扫：收拾漏通知的 chunk，延迟上限 200 tick。信号点负责常态放行。
-            ChunkReadiness.rescan();
+            // 调度器读数：与本周期同档。本行挪到这里，不再随每次派发打印。
+            SchedulerMetrics.flushIfEnabled();
             // 派生记账的自检：与重数一遍逐 chunk 比对。只报失配。
             if (FarlandsConfig.logStageCounters) {
                 SectionLifecycle.verifyCounters(server);
@@ -206,21 +202,12 @@ public class FarlandsTick {
         // 装饰驱动：判门、认领、提交到 farlands-gen。排在光照配额之前，使取域与本拍那簇光照任务的放行
         // 错开：那簇任务一放行就取走半径 2 的锁并持有 1 到 3 毫秒，而装饰取域是整块成功或整块失败，撞上
         // 要多等一个重试窗。代价是本拍由扫描新登记的项要等下一轮尝试。
-        DecorationFiller.tick();
-        // 光照引擎每 tick 的任务配额：真 tick 是唯一权威边界。
-        // 无 tick 阶段由引擎自己按 tick 间隔兜底，两个入口是 prepareLevels 建世界与 saveEverything 保存。
-        for (ServerLevel level : server.getAllLevels()) {
-            if (level.getChunkSource().getLightEngine() instanceof FarLandsLightEngine lightEngine) {
-                lightEngine.grantTickBudget();
-            }
-        }
         // 窗口差量与限量发包；返回值同时驱动 fsa 的窗口清理判定。
         boolean windowChanged = ChunkDataSender.tick(server);
         // 世界系统选择下发：玩家进服或换维度后补一次，客户端据此显示当前 level 用哪五族系统。
         SystemsSender.tick(server);
-        // 玩家跨 chunk 移动时，地形与光照队列按当前距离重排。
+        // 玩家跨 chunk 移动时，光照队列按当前距离重排。地形侧的候选表在准入时按快照排序，不需要重排。
         if (ChunkDataSender.consumePlayersMoved()) {
-            GenQueue.rebuildQueue();
             for (ServerLevel level : server.getAllLevels()) {
                 if (level.getChunkSource().getLightEngine() instanceof FarLandsLightEngine lightEngine) {
                     lightEngine.rebuildLightQueue();
@@ -248,20 +235,9 @@ public class FarlandsTick {
         if (windowChanged || cleanupOpen) {
             cleanupOpen = SectionLifecycle.cleanup(server);
         }
-        // 重进瞬间窗口未建立时加载的 chunk 读回兜底；内部 budget 32/tick、窗口空时零开销早退。
-        if (tickCount % 5 == 0) {
-            SectionLifecycle.retryPendingReads(server);
-        }
-        // 每 tick 唤醒编码消费者：编码在 ENCODE_POOL 上做，主线程只做唤醒与记账。这里同时是被「写入者
-        // 在途」挡回的单元的兜底唤醒来源，延迟上限一 tick。
-        SectionLifecycle.tick();
 
-        // 地形管线：每 tick 唤醒生成消费，不超过 maxGenTasksPerTick。
-        GenQueue.tick();
-        // 动态扫描：每 tick 从玩家当前位置螺旋扫描视距内未生成的 chunk 补入队。
-        GenQueue.scanAndEnqueue(server);
-        // 结构相驱动：重试那些在等 ±8 壳齐的 chunk，过了就跑挂起的续作。
-        StructureDriver.tick();
+        // 地形管线：调度器是地形侧唯一的每 tick 入口，准入、派发、重扫都在里面。
+        Scheduler.tick();
         // 兼容层的每 tick 钩子，排在所有核心驱动之后：它只驱动本 port 之外的请求方，例如 Chunky 预生成。
         for (Consumer<MinecraftServer> sink : TICK_SINKS) {
             sink.accept(server);

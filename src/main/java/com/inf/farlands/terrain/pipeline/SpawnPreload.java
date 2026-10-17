@@ -20,6 +20,15 @@ public final class SpawnPreload {
 
     private static final Map<ResourceKey<Level>, Set<Long>> CHUNKS = new ConcurrentHashMap<>();
 
+    /**
+     * 世界创建期的驱动面：`setInitialSpawn` 的阻塞取数发生在玩家进名单之前，面上必须有东西可查，
+     * 否则准入的面判据恒假。记下它的面与票，首个玩家入场时一并撤。
+     */
+    private record Creation(Scheduler.Face face, ChunkPos center, int radius) {
+    }
+
+    private static final Map<ResourceKey<Level>, Creation> CREATIONS = new ConcurrentHashMap<>();
+
     private SpawnPreload() {
     }
 
@@ -28,19 +37,32 @@ public final class SpawnPreload {
         CHUNKS.computeIfAbsent(dimension, k -> ConcurrentHashMap.newKeySet()).add(pos.pack());
     }
 
+    /** 登记创建期的面与那张大半径票。 */
+    public static void registerCreation(ResourceKey<Level> dimension, Scheduler.Face face, ChunkPos center,
+            int radius) {
+        CREATIONS.put(dimension, new Creation(face, center, radius));
+    }
+
     /** 停服时清空登记。票随进程结束即散，这里清的是内存里的条目。 */
     public static void clearAll() {
         CHUNKS.clear();
+        CREATIONS.clear();
     }
 
-    /** 该维度的第一个玩家入场时移除该维度的预加载票，幂等。主线程。 */
+    /** 该维度的第一个玩家入场时移除该维度的预加载票与创建期面，幂等。主线程。 */
     public static void release(ServerLevel level) {
         Set<Long> keys = CHUNKS.remove(level.dimension());
-        if (keys == null) {
-            return;
+        if (keys != null) {
+            for (long key : keys) {
+                level.getChunkSource().removeTicketWithRadius(GenQueue.STRUCTURE_PIN_TICKET, ChunkPos.unpack(key),
+                        0);
+            }
         }
-        for (long key : keys) {
-            level.getChunkSource().removeTicketWithRadius(GenQueue.GEN_WORK_TICKET, ChunkPos.unpack(key), 0);
+        Creation creation = CREATIONS.remove(level.dimension());
+        if (creation != null) {
+            level.getChunkSource().removeTicketWithRadius(GenQueue.STRUCTURE_PIN_TICKET, creation.center(),
+                    creation.radius());
+            Scheduler.unregister(creation.face());
         }
     }
 }
