@@ -4,6 +4,7 @@ import com.inf.farlands.FarlandsConfig;
 import com.inf.farlands.InfsFarlands;
 import com.inf.farlands.light.FarLandsLightEngine;
 import com.inf.farlands.serialize.ChunkReadiness;
+import com.inf.farlands.serialize.CounterIdentities;
 import com.inf.farlands.serialize.SectionIO;
 import com.inf.farlands.serialize.SectionLifecycle;
 import com.inf.farlands.serialize.SectionStage;
@@ -21,6 +22,7 @@ import com.inf.farlands.util.world.WorldBounds;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -114,11 +116,31 @@ public final class GenQueue {
 
     private static final AtomicBoolean consumerActive = new AtomicBoolean();
 
-    /** 每 chunk 光照在途标志，chunkKey 到 CAS。卸载残留接受，量小。 */
+    /** 每 chunk 光照在途标志，键是记账身份，值为 CAS，由收尾回调移除。 */
     private static final ConcurrentHashMap<Long, AtomicBoolean> LIGHT_IN_FLIGHT = new ConcurrentHashMap<>();
 
-    /** 每 chunk 生成在途标志，chunkKey 到 CAS，同 chunk 至多一个生成任务，防并发写高度图。 */
+    /**
+     * 每 chunk 生成在途标志，键是记账身份，值为 CAS，同 chunk 至多一个生成任务，防并发写高度图。
+     *
+     * <p>被门挡下那一支置假而不删，条目留在表里，等 {@link #sweepDeadEntries()} 在身份注销后收走。
+     */
     private static final ConcurrentHashMap<Long, AtomicBoolean> CHUNK_IN_FLIGHT = new ConcurrentHashMap<>();
+
+    /** 本 chunk 的记账身份。客户端 chunk 与 ProtoChunk 是 0。 */
+    private static long identityOf(LevelChunk chunk) {
+        return chunk instanceof com.inf.farlands.serialize.CounterIdentity identity ? identity.counterId() : 0L;
+    }
+
+    /**
+     * 活着的身份，死的返回 0，入队侧据此拒绝。
+     *
+     * <p>两张在途表的键是身份：同坐标的前后两代落在两个键上，旧代的收尾碰不到新一代的条目。
+     * 入队判活使死键成为终态，清扫因此上界一轮。
+     */
+    private static long liveIdentity(LevelChunk chunk) {
+        long identity = identityOf(chunk);
+        return CounterIdentities.isLive(identity) ? identity : 0L;
+    }
 
     /**
      * biome 阶段在途的 chunk，按 chunk 实例记，同坐标重载不互相牵连。
@@ -200,7 +222,11 @@ public final class GenQueue {
         if (!hasWorkInWindow(chunk)) {
             return;
         }
-        long key = chunk.getPos().pack();
+        // 键取身份，死身份不入队：客户端 chunk 与 ProtoChunk 是 0，已注销的旧对象也是 0。
+        long key = liveIdentity(chunk);
+        if (key == 0L) {
+            return;
+        }
         if (CHUNK_IN_FLIGHT.computeIfAbsent(key, k -> new AtomicBoolean()).compareAndSet(false, true)) {
             addGenTicket(chunk);
             synchronized (QUEUE) {
@@ -224,7 +250,11 @@ public final class GenQueue {
         if (!hasWorkInWindow(chunk)) {
             return;
         }
-        long key = chunk.getPos().pack();
+        // 键取身份，死身份不入队：客户端 chunk 与 ProtoChunk 是 0，已注销的旧对象也是 0。
+        long key = liveIdentity(chunk);
+        if (key == 0L) {
+            return;
+        }
         if (CHUNK_IN_FLIGHT.computeIfAbsent(key, k -> new AtomicBoolean()).compareAndSet(false, true)) {
             addGenTicket(chunk);
             synchronized (QUEUE) {
@@ -281,7 +311,10 @@ public final class GenQueue {
         if (!anyPending) {
             return;
         }
-        long key = chunk.getPos().pack();
+        long key = liveIdentity(chunk);
+        if (key == 0L) {
+            return;
+        }
         if (CHUNK_IN_FLIGHT.computeIfAbsent(key, k -> new AtomicBoolean()).compareAndSet(false, true)) {
             addGenTicket(chunk);
             int[] range = new int[maxSy - minSy + 1];
@@ -332,7 +365,8 @@ public final class GenQueue {
      * 同一批高度图。工作做完那一支仍用 remove，任务链结束后条目不永存，防随探索单调增长。
      */
     static void completeTask(LevelChunk chunk, boolean blocked) {
-        long key = chunk.getPos().pack();
+        // 键是本任务自己的身份：即便它已注销，字段仍在，所以收尾仍能寻址自己那一格。
+        long key = identityOf(chunk);
         if (!blocked && hasUnprocessed(chunk)) {
             synchronized (QUEUE) {
                 QUEUE.add(new GenTask(chunk));
@@ -427,8 +461,7 @@ public final class GenQueue {
         if (lc == null) {
             return false;
         }
-        long key = lc.getPos().pack();
-        AtomicBoolean inflight = CHUNK_IN_FLIGHT.get(key);
+        AtomicBoolean inflight = CHUNK_IN_FLIGHT.get(identityOf(lc));
         if (inflight != null && inflight.get()) {
             return false;
         }
@@ -469,7 +502,7 @@ public final class GenQueue {
      * 会撞调色板的检测；装饰的段写取那把锁，所以它不在此列。
      */
     public static boolean isGeneratingOrLighting(LevelChunk chunk) {
-        long key = chunk.getPos().pack();
+        long key = identityOf(chunk);
         AtomicBoolean gen = CHUNK_IN_FLIGHT.get(key);
         if (gen != null && gen.get()) {
             return true;
@@ -520,9 +553,33 @@ public final class GenQueue {
         consumerActive.set(false);
     }
 
+    /**
+     * A：周期清扫，删掉「身份已注销且值为假」的条目。
+     *
+     * <p>谓词只用条目自身：键是身份，值是标志。值为假的条目不参与任何判据面的读数，删它不改变任何
+     * 读者的结果；值为真的条目留给它自己的收尾，所以清扫不会撤掉让路判据。
+     *
+     * <p>线程：认领只在三处 CAS，全在主线程，本方法也在主线程，所以与认领不交错，只与池线程上的
+     * 两条收尾出口并发。删除走 {@code remove(key, value)}，带值比对，不会误删同键换上的新实例；
+     * 收尾那一侧的 blocked 支先判空，做完支的 remove 幂等，条目已被删时两条出口都空转。
+     *
+     * <p>收敛上界一轮：死键上的假条目本轮删净；死键上的真条目留给其收尾，收尾若置假则下一轮删净。
+     */
+    public static void sweepDeadEntries() {
+        for (Map.Entry<Long, AtomicBoolean> e : CHUNK_IN_FLIGHT.entrySet()) {
+            if (e.getValue().get() || CounterIdentities.isLive(e.getKey())) {
+                continue;
+            }
+            CHUNK_IN_FLIGHT.remove(e.getKey(), e.getValue());
+        }
+    }
+
     /** 报告某 section 已生成，触发光照，该 chunk 无在途光照时一次。 */
     public static void notifyGenerated(LevelChunk chunk) {
-        long key = chunk.getPos().pack();
+        long key = liveIdentity(chunk);
+        if (key == 0L) {
+            return;
+        }
         if (LIGHT_IN_FLIGHT.computeIfAbsent(key, k -> new AtomicBoolean()).compareAndSet(false, true)) {
             triggerLight(chunk);
         }
@@ -530,14 +587,14 @@ public final class GenQueue {
 
     /** 该 chunk 是否有光照任务在途，发包前检查，在途则留队列，等播种完成带正确光照。 */
     public static boolean isLightInFlight(LevelChunk chunk) {
-        long key = chunk.getPos().pack();
+        long key = identityOf(chunk);
         AtomicBoolean inFlight = LIGHT_IN_FLIGHT.get(key);
         return inFlight != null && inFlight.get();
     }
 
     /** 一次 fillFrom 与 lightChunk，完成回调里升段、释放、再检查。 */
     private static void triggerLight(LevelChunk chunk) {
-        long key = chunk.getPos().pack();
+        long key = identityOf(chunk);
         ServerLevel serverLevel = (ServerLevel) chunk.getLevel();
         if (serverLevel.getChunkSource().getLightEngine() instanceof FarLandsLightEngine lightEngine) {
             chunk.initializeLightSources();

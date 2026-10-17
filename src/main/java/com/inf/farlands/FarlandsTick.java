@@ -189,6 +189,8 @@ public class FarlandsTick {
             trimAquiferLookup(tickCount);
             // 就绪吞吐读数：与本周期同档，约 10 秒一行。只报读数，不报解读。
             StageMetrics.flush();
+            // 在途表的周期清扫：删掉身份已注销且值为假的条目。
+            GenQueue.sweepDeadEntries();
             // 派生记账的自检：与重数一遍逐 chunk 比对。只报失配。
             if (FarlandsConfig.logStageCounters) {
                 SectionLifecycle.verifyCounters(server);
