@@ -880,6 +880,7 @@ public final class SectionLifecycle {
      */
     public static void verifyCounters(MinecraftServer server) {
         int checked = 0;
+        int skipped = 0;
         int mismatched = 0;
         int carversTotal = 0;
         int decoratedTotal = 0;
@@ -887,6 +888,13 @@ public final class SectionLifecycle {
             for (ChunkHolder holder : getChunks(level)) {
                 ChunkAccess ca = holder.getLatestChunk();
                 if (!(ca instanceof LevelChunk lc)) {
+                    continue;
+                }
+                // 已交给卸载流程的 chunk：身份已注销、记账按设计清掉，而它的段容器还在。重数只会拿
+                // 「容器视为全 UNPROCESSED」去对「全零」，报出来的失配没有意义。判据用我们自己的存活位，
+                // 因为 26.1.2 没有 isLoaded() 读取口。
+                if (!CounterIdentities.owned(lc)) {
+                    skipped++;
                     continue;
                 }
                 checked++;
@@ -933,8 +941,8 @@ public final class SectionLifecycle {
                 }
             }
         }
-        InfsFarlands.LOGGER.info("FLCOUNT checked={} mismatched={} atCarvers={} atDecorated={}",
-                checked, mismatched, carversTotal, decoratedTotal);
+        InfsFarlands.LOGGER.info("FLCOUNT checked={} skipped={} mismatched={} atCarvers={} atDecorated={}",
+                checked, skipped, mismatched, carversTotal, decoratedTotal);
     }
 
     @SuppressWarnings("unchecked")
