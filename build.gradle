@@ -51,7 +51,7 @@ dependencies {
 
 	// Sodium: mc26.1.2-0.9.2-fabric
 	compileOnly "maven.modrinth:AANobbMI:tZQ3jqnf"
-	// localRuntime "maven.modrinth:AANobbMI:tZQ3jqnf"
+	localRuntime "maven.modrinth:AANobbMI:tZQ3jqnf"
 
 	// Chunky: 1.5.3
 	compileOnly "maven.modrinth:fALzjamp:4Eotm6ov"
