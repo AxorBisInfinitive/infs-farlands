@@ -11,11 +11,13 @@ import java.util.concurrent.atomic.AtomicLong;
 import com.inf.farlands.InfsFarlands;
 import com.inf.farlands.light.FarLandsLightEngine;
 import com.inf.farlands.serialize.ChunkReadiness;
+import com.inf.farlands.serialize.CounterIdentities;
 import com.inf.farlands.serialize.SectionIO;
 import com.inf.farlands.serialize.SectionLifecycle;
 import com.inf.farlands.serialize.SectionStage;
 import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.debug.StageMetrics;
+import com.inf.farlands.terrain.pipeline.DependencyTable;
 import com.inf.farlands.terrain.pipeline.GenQueue;
 import com.inf.farlands.terrain.structure.StructureDriver;
 import com.inf.farlands.terrain.terrainFiller.TerrainSystemContext;
@@ -781,5 +783,84 @@ public final class DecorationFiller {
         PENDING_SECTIONS.clear();
         LAST_EVAL_EPOCH.clear();
         CHUNK_EPOCH.clear();
+    }
+
+    // ---- 自检，只读 ----
+
+    /** 自检每轮每维度最多查几项待装饰。原先取 8，而待办表实测在一百到六百多项，覆盖不足百分之一。 */
+    private static final int VERIFY_SAMPLE = 32;
+
+    /** 自检一行最多列几条失配。 */
+    private static final int VERIFY_LOG_LIMIT = 8;
+
+    /** 采样的轮转起点。 */
+    private static int verifyStart;
+
+    /**
+     * 装饰两行的自检：把依赖表的求值与今天这两条判据各自的实现都算出来比对，只报失配。
+     *
+     * <p>落点在本类而不是自检的调用方，因为这两条判据都要读私有状态：待装饰的登记 section 表
+     * {@code PENDING_SECTIONS} 与九格门 {@link #neighborhood}。放在这里两侧就能各调一次真实现，
+     * 不必在别处再写第三份表达式。
+     *
+     * <p>采样：先按维度筛出本维度的键，再按步长取最多 {@link #VERIFY_SAMPLE} 项，起点逐轮推进。
+     * 先筛维度再去重是必要的：混着别的维度取，本维度一轮可能一项都取不到。表是哈希表，键序不稳定，
+     * 所以只保证长期覆盖，不保证一轮内不重复。主线程调用。
+     */
+    public static void verifyRows(ServerLevel level) {
+        List<Key> keys = new ArrayList<>();
+        for (Key key : PENDING.keySet()) {
+            if (key.dimension().equals(level.dimension())) {
+                keys.add(key);
+            }
+        }
+        int checked = 0;
+        int mismatched = 0;
+        int logged = 0;
+        if (!keys.isEmpty()) {
+            int step = Math.max(1, keys.size() / VERIFY_SAMPLE);
+            verifyStart++;
+            for (int index = Math.floorMod(verifyStart, step); index < keys.size(); index += step) {
+                Key key = keys.get(index);
+                LevelChunk center = SectionLifecycle.latestChunk(level, ChunkPos.getX(key.chunkPos()),
+                        ChunkPos.getZ(key.chunkPos()));
+                if (center == null) {
+                    continue;
+                }
+                // 已交给卸载流程的 chunk 不参与比对，判据同 SectionLifecycle 的自检。
+                if (!CounterIdentities.owned(center)) {
+                    continue;
+                }
+                checked++;
+
+                boolean decoratedLegacy = hasDecorationPending(center);
+                int decoratedTable = DependencyTable.pendingCount(center, DependencyTable.DECORATED);
+                if (decoratedLegacy != (decoratedTable > 0)) {
+                    mismatched++;
+                    if (logged++ < VERIFY_LOG_LIMIT) {
+                        InfsFarlands.LOGGER.info(
+                                "FLDEP mismatch dimension={} chunk={},{} row=DECORATED legacy={} table={} tableCount={}",
+                                level.dimension().identifier(), center.getPos().x(), center.getPos().z(),
+                                decoratedLegacy, decoratedTable > 0, decoratedTable);
+                    }
+                }
+
+                int readRadius = center.getAllReferences().isEmpty() ? DecorationRegion.READ_RADIUS
+                        : StructureDriver.STRUCTURE_READ_RADIUS;
+                boolean neighborLegacy = neighborhood(level, center, readRadius) != null;
+                boolean neighborTable = DependencyTable.neighborGate(center);
+                if (neighborLegacy != neighborTable) {
+                    mismatched++;
+                    if (logged++ < VERIFY_LOG_LIMIT) {
+                        InfsFarlands.LOGGER.info(
+                                "FLDEP mismatch dimension={} chunk={},{} row=NEIGHBOR legacy={} table={}",
+                                level.dimension().identifier(), center.getPos().x(), center.getPos().z(),
+                                neighborLegacy, neighborTable);
+                    }
+                }
+            }
+        }
+        InfsFarlands.LOGGER.info("FLDEP deco dimension={} pendingDim={} checked={} mismatched={}",
+                level.dimension().identifier(), keys.size(), checked, mismatched);
     }
 }

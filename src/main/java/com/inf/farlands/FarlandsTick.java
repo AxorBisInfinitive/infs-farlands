@@ -197,6 +197,10 @@ public class FarlandsTick {
             if (FarlandsConfig.logStageCounters) {
                 SectionLifecycle.verifyCounters(server);
             }
+            // 依赖表与票位的自检：表侧与今天的判据两侧都算，只报失配与读数。
+            if (FarlandsConfig.logStageDependencies) {
+                SectionLifecycle.verifyDependencies(server);
+            }
         }
         // 装饰驱动：判门、认领、提交到 farlands-gen。排在光照配额之前，使取域与本拍那簇光照任务的放行
         // 错开：那簇任务一放行就取走半径 2 的锁并持有 1 到 3 毫秒，而装饰取域是整块成功或整块失败，撞上
