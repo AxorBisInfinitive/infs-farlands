@@ -291,8 +291,8 @@ public final class GenQueue {
      *
      * <p>门取 CARVERS，也就是生成侧欠账的终点。带内全 ≥ CARVERS 时这个任务什么也做不了，可以逐条推：
      * collectSegments 只收未过 TERRAIN 的段，空；surface 与 carvers 的待处理判据都不认 CARVERS 段，空；
-     * 末尾的点亮触发只认 TERRAIN、SURFACE、DECORATED 三档，CARVERS 不在其中，也空。所以放它进去只是
-     * 一次空跑。而出生区预加载的循环每轮都对同一圈块重调本方法，空跑会被放大成每秒几百次。
+     * 末尾的点亮触发只认 DECORATED 一档，CARVERS 不在其中，也空。所以放它进去只是一次空跑。而出生区
+     * 预加载的循环每轮都对同一圈块重调本方法，空跑会被放大成每秒几百次。
      *
      * <p>低于 CARVERS 的档全部放行：缺席的段要建，BIOMES 要 fill，TERRAIN 要 surface，SURFACE 要 carve，
      * 这四件事都在 GenTask 里连着做完，也都需要这次入队。
