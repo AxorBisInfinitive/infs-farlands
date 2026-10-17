@@ -32,10 +32,19 @@ public final class EntitySectionWindow {
     /** 维度到该维度的有序不重叠区间 [min0, max0, min1, max1, ...]。 */
     private static final Map<ResourceKey<Level>, int[]> WINDOWS = new ConcurrentHashMap<>();
 
-    /** 上次查过的维度与它的区间，供热路径免掉一次 map 查表。 */
-    private static volatile ResourceKey<Level> lastDimension;
+    /**
+     * 上次查过的维度与它的区间，供热路径免掉一次 map 查表。
+     *
+     * <p>两者必须成对读写，所以收在一个引用里：分开成两个 volatile 字段时，读者可以在「维度仍命中」
+     * 与「读到区间」之间被另一个线程整对覆盖，拿到别的维度的带。
+     *
+     * <p>{@code null} 表示无缓存；{@code update} 与 {@code clear} 用它作废。{@code ranges} 内的数组
+     * 发布后不再被写：{@code merge} 每次产出新数组，四个读点只读。
+     */
+    private record Cache(ResourceKey<Level> dimension, int[] ranges) {
+    }
 
-    private static volatile int[] lastRanges = EMPTY;
+    private static volatile Cache cache;
 
     private EntitySectionWindow() {
     }
@@ -58,28 +67,26 @@ public final class EntitySectionWindow {
             WINDOWS.put(e.getKey(), merge(e.getValue()));
         }
         WINDOWS.keySet().retainAll(byDimension.keySet());
-        lastDimension = null;
+        cache = null;
     }
 
     /** 停服时清空窗口带。update 在玩家列表为空时本就会自清，这里只是把新世界启动到首个 tick 之间也覆盖掉。 */
     public static void clear() {
         WINDOWS.clear();
-        lastDimension = null;
-        lastRanges = EMPTY;
+        cache = null;
     }
 
     /** 该维度的窗口并集区间；该维度没有玩家时为空数组。 */
     public static int[] ranges(ResourceKey<Level> dimension) {
-        ResourceKey<Level> last = lastDimension;
-        if (last != null && last.equals(dimension)) {
-            return lastRanges;
+        Cache cached = cache;
+        if (cached != null && cached.dimension().equals(dimension)) {
+            return cached.ranges();
         }
         int[] ranges = WINDOWS.get(dimension);
         if (ranges == null) {
             ranges = EMPTY;
         }
-        lastDimension = dimension;
-        lastRanges = ranges;
+        cache = new Cache(dimension, ranges);
         return ranges;
     }
 
