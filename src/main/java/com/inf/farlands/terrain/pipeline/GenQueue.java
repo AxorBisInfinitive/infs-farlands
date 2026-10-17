@@ -50,8 +50,8 @@ import net.minecraft.world.level.chunk.LevelChunk;
  * 每次唤醒 submit 不超过 maxGenTasksPerTick 个，宽松防风暴。唤醒源是 tick 与入队的 enqueue。
  *
  * 光照衔接按 chunk 级去重：GenTask 只推进到 TERRAIN，随后 notifyGenerated 触发一次 fillFrom 与
- * lightChunk。每 chunk 每批次一次，CAS 在途标志去重，不逐 section 重复播种。光照完成回调把
- * SectionStage.isAwaitingLight 认的段升 LIGHTED，播种覆盖全 chunk，然后释放在途，
+ * lightChunk。每 chunk 每批次一次，CAS 在途标志去重，不逐 section 重复播种。光照完成回调在主线程
+ * 那一笔里把 SectionStage.isAwaitingLight 认的段升 LIGHTED，播种覆盖全 chunk，然后释放在途，
  * hasAwaitingLight 再检查驱动下一批。
  */
 public final class GenQueue {
@@ -605,14 +605,21 @@ public final class GenQueue {
             lightEngine.lightChunk(chunk, false).whenComplete((c, t) -> {
                 StageMetrics.stageWork(StageMetrics.STAGE_LIGHTED, System.nanoTime() - lightStart);
                 if (t == null) {
-                    SectionStage.promoteAllGenToLighted(chunk);
-                    // 光照完成，该 chunk 脏 section 入队 PERSIST，此时 fill 与光照都已完成，数据完整。
-                    SectionLifecycle.persistChunkDirty(chunk);
-                    // 播种完成，主动广播该 chunk 全部光照，含空 section 的 15。增量包链依赖 chunk
-                    // 达 ENTITY_TICKING，而空壳先发加光照后补的管线里播种时常常未达，主动广播绕开
-                    // 这个依赖，播种完成即发。
+                    // 升格搬在主线程那一笔里，与落盘入队、广播、标记、drive 同批，理由两条：池线程只投
+                    // 事件、不碰派生结构；升格又必须在 persistChunkDirty 之前，因为编码侧只放行不低于
+                    // LIGHTED 的段，先入队后升格会让那一批在编码时被拒。
+                    //
+                    // 释放在途标志与再检查也排进这一笔，且释放在升格之后：升格已可见，而再检查若在升格
+                    // 之前跑，会读到尚未升格的 DECORATED 计数，多触发一次完整光照。
                     SectionIO.runOnMainThread(
                             () -> {
+                                SectionStage.promoteAllGenToLighted(chunk);
+                                LIGHT_IN_FLIGHT.remove(key);
+                                // 光照完成，该 chunk 脏 section 入队 PERSIST，此时 fill 与光照都已完成，数据完整。
+                                SectionLifecycle.persistChunkDirty(chunk);
+                                // 播种完成，主动广播该 chunk 全部光照，含空 section 的 15。增量包链依赖 chunk
+                                // 达 ENTITY_TICKING，而空壳先发加光照后补的管线里播种时常常未达，主动广播绕开
+                                // 这个依赖，播种完成即发。
                                 ChunkDataSender.broadcastChunkLight(serverLevel, chunk);
                                 // 段在这一刻才升 LIGHTED，promote 在上一步已跑完，而下发与落盘同门，
                                 // 所以必须在这里补一次内容变化标记：否则门一加，整包永远不发，客户端
@@ -621,13 +628,16 @@ public final class GenQueue {
                                 // 光照完成是就绪翻转的主要时点，投一次 drive：主线程若正阻塞在某个等
                                 // FULL 的位置上，这一笔会在 managedBlock 的队列里执行，把等待解开。
                                 ChunkReadiness.drive();
+                                if (SectionStage.hasAwaitingLight(chunk)) {
+                                    // 光照期间新到 DECORATED 的段未被这次播种覆盖，下一批。
+                                    notifyGenerated(chunk);
+                                }
                             }, serverLevel);
-                } else {
-                    InfsFarlands.LOGGER.error("farlands: light failed chunk={}", chunk.getPos(), t);
+                    return;
                 }
+                InfsFarlands.LOGGER.error("farlands: light failed chunk={}", chunk.getPos(), t);
                 LIGHT_IN_FLIGHT.remove(key);
                 if (SectionStage.hasAwaitingLight(chunk)) {
-                    // 光照期间新到 TERRAIN 或 DECORATED 的段未被这次播种覆盖，下一批。
                     notifyGenerated(chunk);
                 }
             });

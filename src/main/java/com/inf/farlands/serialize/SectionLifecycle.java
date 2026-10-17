@@ -881,6 +881,8 @@ public final class SectionLifecycle {
     public static void verifyCounters(MinecraftServer server) {
         int checked = 0;
         int mismatched = 0;
+        int carversTotal = 0;
+        int decoratedTotal = 0;
         for (ServerLevel level : server.getAllLevels()) {
             for (ChunkHolder holder : getChunks(level)) {
                 ChunkAccess ca = holder.getLatestChunk();
@@ -894,6 +896,8 @@ public final class SectionLifecycle {
                 int pendingSurface = 0;
                 int pendingDecorated = 0;
                 int cursor = ChunkCounters.NO_CURSOR;
+                int carversHere = 0;
+                int decoratedHere = 0;
                 for (int sy : universe) {
                     int stage = SectionStage.getStage(lc, sy);
                     if (stage < SectionStage.SURFACE) {
@@ -902,25 +906,35 @@ public final class SectionLifecycle {
                     if (stage < SectionStage.DECORATED) {
                         pendingDecorated++;
                     }
+                    if (stage == SectionStage.CARVERS) {
+                        carversHere++;
+                    }
+                    if (stage == SectionStage.DECORATED) {
+                        decoratedHere++;
+                    }
                     if (stage < SectionStage.TERRAIN && sy > cursor) {
                         cursor = sy;
                     }
                 }
+                carversTotal += carversHere;
+                decoratedTotal += decoratedHere;
                 ChunkCounters.Snapshot stored = ChunkCounters.snapshot(lc);
                 if (stored.pendingSurface() != pendingSurface || stored.pendingDecorated() != pendingDecorated
-                        || stored.terrainCursor() != cursor) {
+                        || stored.terrainCursor() != cursor || stored.atDecorated() != decoratedHere) {
                     mismatched++;
                     if (mismatched <= VERIFY_LOG_LIMIT) {
                         InfsFarlands.LOGGER.info(
-                                "FLCOUNT mismatch chunk={},{} stored(sur={},dec={},cur={}) counted(sur={},dec={},cur={})",
+                                "FLCOUNT mismatch chunk={},{} stored(sur={},dec={},cur={},atDec={}) counted(sur={},dec={},cur={},atDec={})",
                                 lc.getPos().x(), lc.getPos().z(),
                                 stored.pendingSurface(), stored.pendingDecorated(), stored.terrainCursor(),
-                                pendingSurface, pendingDecorated, cursor);
+                                stored.atDecorated(),
+                                pendingSurface, pendingDecorated, cursor, decoratedHere);
                     }
                 }
             }
         }
-        InfsFarlands.LOGGER.info("FLCOUNT checked={} mismatched={}", checked, mismatched);
+        InfsFarlands.LOGGER.info("FLCOUNT checked={} mismatched={} atCarvers={} atDecorated={}",
+                checked, mismatched, carversTotal, decoratedTotal);
     }
 
     @SuppressWarnings("unchecked")

@@ -13,11 +13,12 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
 /**
  * 每 chunk 的派生记账，供调度器的依赖判据 O(1) 取值。本节只记账，不改任何判据。
  *
- * <p>三项：
+ * <p>四项：
  * {@code pendingSurface}，已计入的段里档位低于 SURFACE 的个数，归零表示该 chunk 可以进 CARVERS；
  * {@code pendingDecorated}，档位低于 DECORATED 的个数，归零表示可以进 LIGHTED；
  * {@code terrainCursor}，已计入的段里档位低于 TERRAIN 的最高段号，空集取 {@link #NO_CURSOR}，
- * SURFACE(S) 的判据是 S 大于本值，即该段之上的已计入段都不欠地形。
+ * SURFACE(S) 的判据是 S 大于本值，即该段之上的已计入段都不欠地形；
+ * {@code atDecorated}，档位正好等于 DECORATED 的个数，是 {@code SectionStage.hasAwaitingLight} 的判据。
  *
  * <p>游标按 chunk 而不是按列：档位是按段的，一个段覆盖它 16 乘 16 的全部列，所以「S 之上的段
  * 欠不欠地形」与列无关。
@@ -44,12 +45,13 @@ public final class ChunkCounters {
     private int pendingSurface;
     private int pendingDecorated;
     private int terrainCursor = NO_CURSOR;
+    private int atDecorated;
 
     private ChunkCounters() {
     }
 
     /** 记账快照，供自检比对。 */
-    public record Snapshot(int pendingSurface, int pendingDecorated, int terrainCursor) {
+    public record Snapshot(int pendingSurface, int pendingDecorated, int terrainCursor, int atDecorated) {
     }
 
     private static long identityOf(LevelChunk chunk) {
@@ -151,14 +153,29 @@ public final class ChunkCounters {
     public static Snapshot snapshot(LevelChunk chunk) {
         long identity = identityOf(chunk);
         if (identity == 0L) {
-            return new Snapshot(0, 0, NO_CURSOR);
+            return new Snapshot(0, 0, NO_CURSOR, 0);
         }
         ChunkCounters c = COUNTERS.get(identity);
         if (c == null) {
-            return new Snapshot(0, 0, NO_CURSOR);
+            return new Snapshot(0, 0, NO_CURSOR, 0);
         }
         synchronized (c) {
-            return new Snapshot(c.pendingSurface, c.pendingDecorated, c.terrainCursor);
+            return new Snapshot(c.pendingSurface, c.pendingDecorated, c.terrainCursor, c.atDecorated);
+        }
+    }
+
+    /** 读该 chunk 停在 DECORATED 的段数；身份为 0 或从未记账过返回 0。 */
+    public static int atDecorated(LevelChunk chunk) {
+        long identity = identityOf(chunk);
+        if (identity == 0L) {
+            return 0;
+        }
+        ChunkCounters c = COUNTERS.get(identity);
+        if (c == null) {
+            return 0;
+        }
+        synchronized (c) {
+            return c.atDecorated;
         }
     }
 
@@ -175,6 +192,9 @@ public final class ChunkCounters {
         if (stage < SectionStage.DECORATED) {
             this.pendingDecorated++;
         }
+        if (stage == SectionStage.DECORATED) {
+            this.atDecorated++;
+        }
         if (stage < SectionStage.TERRAIN && sectionY > this.terrainCursor) {
             this.terrainCursor = sectionY;
         }
@@ -189,6 +209,9 @@ public final class ChunkCounters {
             if (oldStage < SectionStage.DECORATED) {
                 this.pendingDecorated++;
             }
+            if (oldStage == SectionStage.DECORATED) {
+                this.atDecorated++;
+            }
             if (oldStage < SectionStage.TERRAIN && sectionY > this.terrainCursor) {
                 this.terrainCursor = sectionY;
             }
@@ -198,6 +221,12 @@ public final class ChunkCounters {
         }
         if (oldStage < SectionStage.DECORATED && newStage >= SectionStage.DECORATED) {
             this.pendingDecorated--;
+        }
+        if (oldStage != SectionStage.DECORATED && newStage == SectionStage.DECORATED) {
+            this.atDecorated++;
+        }
+        if (oldStage == SectionStage.DECORATED && newStage != SectionStage.DECORATED) {
+            this.atDecorated--;
         }
         if (oldStage < SectionStage.TERRAIN && newStage >= SectionStage.TERRAIN) {
             if (sectionY == this.terrainCursor) {
@@ -227,6 +256,9 @@ public final class ChunkCounters {
         }
         if (stage < SectionStage.DECORATED) {
             this.pendingDecorated--;
+        }
+        if (stage == SectionStage.DECORATED) {
+            this.atDecorated--;
         }
         if (sectionY == this.terrainCursor) {
             this.terrainCursor = highestPendingBelow(chunk, sectionY);

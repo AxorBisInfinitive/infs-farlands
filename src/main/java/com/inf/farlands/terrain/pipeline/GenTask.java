@@ -137,7 +137,7 @@ public final class GenTask {
             }
             // SURFACE 独立于 segments，fill 后紧跟，因为依赖 fill 产出的高度图，也覆盖读回
             // stage 为 TERRAIN 与 surface 失败残留。失败不抛，section 停留 TERRAIN 由 scanAndEnqueue
-            // 补触发重试。不触发光照，promoteAllGenToLighted 会把 TERRAIN 升 LIGHTED，抹掉待处理标志。
+            // 补触发重试。本步不触发光照：TERRAIN 的出路就是这里，升格只认 DECORATED。
             try {
                 SurfaceFiller.applySurfaceIfNeeded(serverLevel, chunk);
             } catch (Exception e) {
@@ -160,7 +160,7 @@ public final class GenTask {
                 // 这一格刚过雕刻：对它八个邻居的门来说，这一格从低于 CARVERS 变成就绪。
                 DecorationFiller.cellChanged(chunk.getPos().pack());
             }
-            // 光照触发条件：carvers 产出了东西，或已有光照能升、但还没升的段。CARVERS 不在判据内：
+            // 光照触发条件：carvers 产出了东西，或已有段到 DECORATED。CARVERS 不在判据内：
             // 那一段的下一步是装饰而不是光照，promote 也不升它，算进来只会每 tick 白跑一次光照。
             int[] awaitingLight = awaitingLightSections();
             if (carved.length > 0 || awaitingLight.length > 0) {
@@ -183,11 +183,12 @@ public final class GenTask {
     }
 
     /**
-     * 光照会升、但还没升的 section，即 SectionStage.isAwaitingLight 认的三档：TERRAIN、SURFACE、
-     * DECORATED。它是本任务补触发光照的判据；判据的出处只有 SectionStage 那一处，避免与
+     * 光照会升、但还没升的 section，即 SectionStage.isAwaitingLight 认的一档：DECORATED。
+     * 它是本任务补触发光照的判据；判据的出处只有 SectionStage 那一处，避免与
      * promoteAllGenToLighted 的匹配面失同步。
      *
-     * <p>CARVERS 不在判据内：它的出路是装饰，光照不会升它。UNPROCESSED 与 BIOMES 也不在：
+     * <p>CARVERS 不在判据内：它的出路是装饰，光照不会升它。TERRAIN 与 SURFACE 也不在：
+     * 它们的出路是本任务紧跟着的 surface 与 carve 两步。UNPROCESSED 与 BIOMES 更不在：
      * 窗口内的由生成收口，窗口外的永不处理。
      *
      * <p>按 stage 载体取，不按 allSections 取：非噪声生成器的维度里 fill 会早退、段没被建出来，

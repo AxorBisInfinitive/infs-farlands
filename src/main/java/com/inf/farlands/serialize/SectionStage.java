@@ -36,11 +36,12 @@ import net.minecraft.world.level.chunk.LevelChunk;
  *
  * 推进点。BIOMES 在 BiomeFiller，TERRAIN 在 GenTask 的 fill 之后，SURFACE 在 SurfaceFiller，
  * CARVERS 在 CarverFiller，DECORATED 在 DecorationFiller 的收尾，LIGHTED 在
- * GenQueue.triggerLight 的 whenComplete 里由 promoteAllGenToLighted 一次升段。
+ * GenQueue.triggerLight 的主线程那一笔里由 promoteAllGenToLighted 升段。
  *
- * <p>光照会升的三档由 {@link #isAwaitingLight(int)} 一处给出：promoteAllGenToLighted、
- * hasAwaitingLight 与 GenTask 的补触发判据都走它，避免三处各写一份而失同步。CARVERS 不在其中，
- * 它的出路是装饰；若光照回调把它一并升 LIGHTED，未装饰的段会被标成完成并落盘。
+ * <p>光照会升的只有 DECORATED 一档，由 {@link #isAwaitingLight(int)} 一处给出：
+ * promoteAllGenToLighted、hasAwaitingLight 与 GenTask 的补触发判据都走它，避免三处各写一份而
+ * 失同步。TERRAIN 与 SURFACE 不在其中：它们的出路是同一个任务里的 surface 与 carve 两步，而光照
+ * 回调是异步的，让回调把这两档升上去，那些段会被随后那两步放过，永不再被地表与雕刻处理。
  *
  * 生命周期。chunk 卸载时由 SectionLifecycle.flushChunk 的每条出口调用 {@link #clear(LevelChunk)}，
  * 内存有界。
@@ -166,19 +167,27 @@ public final class SectionStage {
     }
 
     /**
-     * 光照会升的三档：一次光照跑完，这三档的段都能升到 LIGHTED。CARVERS 不在其中，它的出路是
-     * 装饰；把它算进来会让光照回调升完段后仍判为还有活，无限续接下一轮。
+     * 光照会升的唯一一档：DECORATED。一次光照跑完，这一档的段升到 LIGHTED。
+     *
+     * <p>TERRAIN 与 SURFACE 不在其中：它们的出路是同一个生成任务里的 surface 与 carve 两步，而光照
+     * 回调是异步的，可能与那个任务并行。让回调把这两档升上去，那些段就会被随后那两步放过，永远不再
+     * 被地表与雕刻处理，而档位已经是 LIGHTED，fsa 还会按已完成写盘。
+     *
+     * <p>CARVERS 也不在其中：它的出路是装饰；把它算进来会让回调升完段后仍判为还有活，无限续接下一轮。
      */
     public static boolean isAwaitingLight(int stage) {
-        return stage == TERRAIN || stage == SURFACE || stage == DECORATED;
+        return stage == DECORATED;
     }
 
     /**
-     * 光照完成回调：该 chunk 全部在 {@link #isAwaitingLight(int)} 里的段升 LIGHTED。光照覆盖
-     * 全 chunk，含已地表、已雕刻与已装饰的 section。
+     * 光照完成回调：该 chunk 全部在 {@link #isAwaitingLight(int)} 里的段，即停在 DECORATED 的段，
+     * 升到 LIGHTED。逐段判前置就是判「这一段已装饰」，两侧同源，所以不会漏判也不会多升。
      *
      * <p>实现是先收集再升，不在 replaceAll 的回调里记账：那是持着段状态表桶锁的时刻，而记账要扫
      * 段容器。第二遍对每段重新判一次前置，与旧写法逐条重估的语义一致。
+     *
+     * <p>调用点只有一个，且在 triggerLight 的主线程那一笔里，先于 persistChunkDirty：编码侧只放行
+     * 不低于 LIGHTED 的段，先入队后升格会让那一批在编码时被拒。
      */
     public static void promoteAllGenToLighted(LevelChunk chunk) {
         long identity = liveIdentity(chunk);
@@ -219,26 +228,18 @@ public final class SectionStage {
     }
 
     /**
-     * 该 chunk 是否还有光照能升、但还没升的 section。光照完成后再检查，驱动下一批。
+     * 该 chunk 是否还有光照能升、但还没升的 section，即停在 DECORATED 的段。光照完成后再检查，
+     * 驱动下一批。
      *
-     * <p>判据与 {@link #promoteAllGenToLighted} 的匹配面同源，两处都由 {@link #isAwaitingLight(int)}
-     * 给出。放宽到全体 belowLighted 会把 CARVERS 也算进来，回调因此永远为真。
+     * <p>判据由 {@link ChunkCounters#atDecorated} 的计数给出，与 {@link #promoteAllGenToLighted} 的
+     * 匹配面同源：两处都只认 DECORATED 一档。放宽到全体 belowLighted 会把 CARVERS 也算进来，
+     * 回调因此永远为真。
+     *
+     * <p>不再遍历段状态表：那次遍历的判据与升格同源却各写一份，正是两者失同步的来源；计数由
+     * {@link ChunkCounters} 在档位写点维护，读一次即得。
      */
     public static boolean hasAwaitingLight(LevelChunk chunk) {
-        long identity = liveIdentity(chunk);
-        if (identity == 0L) {
-            return false;
-        }
-        ConcurrentHashMap<Integer, SectionState> m = STAGES.get(identity);
-        if (m == null) {
-            return false;
-        }
-        for (SectionState state : m.values()) {
-            if (state != null && isAwaitingLight(state.stage())) {
-                return true;
-            }
-        }
-        return false;
+        return ChunkCounters.atDecorated(chunk) > 0;
     }
 
     /** 段是否做过但没点亮，即 stage 落在 TERRAIN 到 LIGHTED 之间，含 DECORATED。 */
