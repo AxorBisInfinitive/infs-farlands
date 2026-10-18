@@ -27,8 +27,9 @@ import net.minecraft.world.level.block.state.BlockState;
  * 面内带符号距离与该处半角的正余弦，运行时逐格只做查表与几次比较。端部与交叉点因此共用同一条判据。
  *
  * <p>
- * 每列必须存两层：两条带子在交叉点附近共用同一批列，而它们的法向不同，只存最近的一层会把另一条
- * 带子在那一片整段丢掉，表现为交叉处缺方块。
+ * 每列必须存两层，而且按半周分槽：交叉点那两条带子共用同一批列而法向不同，只存一层会把另一条在
+ * 那一片整段丢掉，表现为交叉处缺方块。分槽不能按距离取次近，同一条分支的相邻采样只隔不到 0.2 格，
+ * 会把两个槽都占满；按 t 是否小于 π 分就没有这个问题。
  *
  * <p>
  * 颜色按 t 分八段，红起于交叉点的下左臂 `t = π/2`，品红止于走完一圈。段与段之间不是硬分界：每段的最后
@@ -97,14 +98,18 @@ public final class Inf32768BlockSystem implements BlockSystem {
 
     private final double widthSq;
 
-    /** 每列到中线的带符号距离，正无穷表示该列不在带内。第一层是最近点。 */
+    /** 每列到中线的带符号距离，正无穷表示该列不在带内。第一层只收上半周 t < π 的采样。 */
     private final float[] distance;
     private final float[] halfSin;
     private final float[] halfCos;
     /** 每列的颜色相位，取值 0 到 1，乘段数即色号位置。 */
     private final float[] phase;
 
-    /** 次近的一层。两条带子在交叉点附近共用同一批列，只存最近的一层会把另一条整段丢掉。 */
+    /**
+     * 第二层只收下半周 t >= π 的采样。交叉点那两条分支分别在 t = π/2 与 3π/2，一上一下，按半周
+     * 分槽才能让它们各占一层；按距离取次近不行，同一条分支的相邻采样只隔不到 0.2 格，会把两个槽
+     * 都占满，另一条分支一次都进不来。
+     */
     private final float[] distance2;
     private final float[] halfSin2;
     private final float[] halfCos2;
@@ -125,10 +130,13 @@ public final class Inf32768BlockSystem implements BlockSystem {
             throw new IllegalArgumentException("farlands: inf32768 outer edge " + outer
                     + " exceeds the playable limit " + WorldBounds.MAX_PLAYABLE_BLOCK);
         }
+        // 中线在 z 方向的最远点是 a/2，radius 为奇数时它是 x.5，整数除法会截掉半格并把最外侧裁掉，
+        // 所以这里向上取整。
+        int halfZ = (this.radius + 1) / 2;
         this.minX = -(int) outer;
-        this.minZ = -(this.radius / 2 + this.halfWidth);
+        this.minZ = -(halfZ + this.halfWidth);
         this.sizeX = 2 * (int) outer + 1;
-        this.sizeZ = 2 * (this.radius / 2 + this.halfWidth) + 1;
+        this.sizeZ = 2 * (halfZ + this.halfWidth) + 1;
         long cells = (long) this.sizeX * this.sizeZ;
         if (cells > MAX_CELLS) {
             throw new IllegalArgumentException("farlands: inf32768 lookup needs " + cells
@@ -147,7 +155,7 @@ public final class Inf32768BlockSystem implements BlockSystem {
     }
 
     /**
-     * 扫一遍中线，把每列最近与次近的两个点的参数与距离写进表。
+     * 扫一遍中线，按半周分槽写进两张表。
      *
      * <p>
      * 距离在列中心上重新算，而不是用涂表的步长：步长只是用来找出哪些列落在法向的带宽里，真正写进
@@ -173,6 +181,11 @@ public final class Inf32768BlockSystem implements BlockSystem {
             float hs = (float) Math.sin(t * 0.5);
             float hc = (float) Math.cos(t * 0.5);
             float ph = phaseOf(t);
+            boolean upper = t < Math.PI;
+            float[] dists = upper ? this.distance : this.distance2;
+            float[] sins = upper ? this.halfSin : this.halfSin2;
+            float[] coss = upper ? this.halfCos : this.halfCos2;
+            float[] phases = upper ? this.phase : this.phase2;
             for (double s = -this.halfWidth; s <= this.halfWidth; s += PAINT_STEP) {
                 int cx = (int) Math.round(px + nx * s);
                 int cz = (int) Math.round(pz + nz * s);
@@ -187,20 +200,11 @@ public final class Inf32768BlockSystem implements BlockSystem {
                 if (ad > this.halfWidth) {
                     continue;
                 }
-                if (ad < Math.abs(this.distance[idx])) {
-                    this.distance2[idx] = this.distance[idx];
-                    this.halfSin2[idx] = this.halfSin[idx];
-                    this.halfCos2[idx] = this.halfCos[idx];
-                    this.phase2[idx] = this.phase[idx];
-                    this.distance[idx] = (float) d;
-                    this.halfSin[idx] = hs;
-                    this.halfCos[idx] = hc;
-                    this.phase[idx] = ph;
-                } else if (ad < Math.abs(this.distance2[idx])) {
-                    this.distance2[idx] = (float) d;
-                    this.halfSin2[idx] = hs;
-                    this.halfCos2[idx] = hc;
-                    this.phase2[idx] = ph;
+                if (ad < Math.abs(dists[idx])) {
+                    dists[idx] = (float) d;
+                    sins[idx] = hs;
+                    coss[idx] = hc;
+                    phases[idx] = ph;
                 }
             }
         }
