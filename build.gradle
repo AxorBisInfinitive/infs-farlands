@@ -51,7 +51,7 @@ dependencies {
 
 	// Sodium: mc26.1.2-0.9.2-fabric
 	compileOnly "maven.modrinth:AANobbMI:tZQ3jqnf"
-	// localRuntime "maven.modrinth:AANobbMI:tZQ3jqnf"
+	localRuntime "maven.modrinth:AANobbMI:tZQ3jqnf"
 
 	// Chunky: 1.5.3
 	compileOnly "maven.modrinth:fALzjamp:4Eotm6ov"
@@ -61,7 +61,7 @@ dependencies {
 	localRuntime "net.fabricmc.fabric-api:fabric-api:0.155.2+26.1.2"
 
     // Iris: 1.11.4+26.1-fabric
-	// localRuntime "maven.modrinth:YL57xq9U:sZbVsl2Q"
+	localRuntime "maven.modrinth:YL57xq9U:sZbVsl2Q"
 
 	// Spark: 1.10.187-fabric
 	localRuntime "maven.modrinth:l6YH9Als:e3hsPc1o"

@@ -20,6 +20,7 @@ import com.inf.farlands.terrain.system.terrain.block.misc.Sierpinski.SierpinskiP
 import com.inf.farlands.terrain.system.terrain.block.misc.TheFourthDimension.TheFourthDimensionBlockSystem;
 import com.inf.farlands.terrain.system.terrain.block.overworld.Infdev.Infdev20100226BlockSystem;
 import com.inf.farlands.terrain.system.terrain.noise.misc.Hex.HexNoiseSystem;
+import com.inf.farlands.terrain.system.terrain.noise.misc.SkyGirl.SkyGirlNoiseSystem;
 import com.inf.farlands.terrain.system.terrain.noise.misc.Void.VoidNoiseSystem;
 import com.inf.farlands.terrain.system.terrain.noise.misc.Weierstrass.WeierstrassNoiseSystem;
 import com.inf.farlands.terrain.system.terrain.noise.overworld.Beta173.Beta173NoiseSystem;
@@ -72,7 +73,7 @@ public class FarlandsRegister {
         }
     }
 
-    /** 20 个内置系统按五族登记，id 与实现类的对应关系集中在此。 */
+    /** 21 个内置系统按五族登记，id 与实现类的对应关系集中在此。 */
     private static void registerSystems() {
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_VOID_NOISE_SYSTEM, VoidNoiseSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_OVERWORLD_VANILLA_NOISE_SYSTEM,
@@ -93,6 +94,8 @@ public class FarlandsRegister {
                 CwgNoiseSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_OVERWORLD_VANILLA_263_NOISE_SYSTEM,
                 Vanilla263NoiseSystem.class);
+        SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_SKY_GIRL_NOISE_SYSTEM,
+                SkyGirlNoiseSystem.class);
 
         SystemRegistries.registerBiome(SystemRegistries.BIOME_MISC_VOID_BIOME_SYSTEM, VoidBiomeSystem.class);
         SystemRegistries.registerBiome(SystemRegistries.BIOME_OVERWORLD_VANILLA_BIOME_SYSTEM,
