@@ -26,6 +26,7 @@ import com.inf.farlands.terrain.system.terrain.noise.overworld.Beta173.Beta173No
 import com.inf.farlands.terrain.system.terrain.noise.overworld.Cwg.CwgNoiseSystem;
 import com.inf.farlands.terrain.system.terrain.noise.overworld.Oct.OctNoiseSystem;
 import com.inf.farlands.terrain.system.terrain.noise.overworld.Vanilla.VanillaNoiseSystem;
+import com.inf.farlands.terrain.system.terrain.noise.overworld.Vanilla263.Vanilla263NoiseSystem;
 
 public class FarlandsRegister {
 
@@ -71,7 +72,7 @@ public class FarlandsRegister {
         }
     }
 
-    /** 19 个内置系统按五族登记，id 与实现类的对应关系集中在此。 */
+    /** 20 个内置系统按五族登记，id 与实现类的对应关系集中在此。 */
     private static void registerSystems() {
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_VOID_NOISE_SYSTEM, VoidNoiseSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_OVERWORLD_VANILLA_NOISE_SYSTEM,
@@ -90,6 +91,8 @@ public class FarlandsRegister {
                 TheFourthDimensionBlockSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_OVERWORLD_CWG_NOISE_SYSTEM,
                 CwgNoiseSystem.class);
+        SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_OVERWORLD_VANILLA_263_NOISE_SYSTEM,
+                Vanilla263NoiseSystem.class);
 
         SystemRegistries.registerBiome(SystemRegistries.BIOME_MISC_VOID_BIOME_SYSTEM, VoidBiomeSystem.class);
         SystemRegistries.registerBiome(SystemRegistries.BIOME_OVERWORLD_VANILLA_BIOME_SYSTEM,
