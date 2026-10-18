@@ -64,6 +64,7 @@
     "noise.HeightmapInvoker",
     "terrain.ServerLevelMixin",
     "terrain.carver.WorldCarverMixin",
+    "terrain.carver.NetherWorldCarverMixin",
     "terrain.decoration.BlockEntityLevelMixin",
     "terrain.pipeline.GenerationChunkHolderMixin",
     "terrain.pipeline.SpawnPreloadMixin",

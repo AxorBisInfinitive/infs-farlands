@@ -1,12 +1,10 @@
 package com.inf.farlands.mixin.terrain.carver;
 
-import com.inf.farlands.util.window.WindowedChunk;
+import com.inf.farlands.terrain.carverFiller.CarverSectionWrite;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.LevelHeightAccessor;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
-import net.minecraft.world.level.chunk.LevelChunkSection;
 
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -24,6 +22,9 @@ import org.spongepowered.asm.mixin.injection.Redirect;
  * 原版：同一 section、同一局部坐标、同一 state，只是无锁直写。副作用 onPlace、scheduleTick、
  * markAndNotifyBlock、neighborChanged 一并消失，与 fill 路径一致。
  *
+ * <p>下界的 NETHER_CAVE 是 NetherWorldCarver 对 carveBlock 的覆写，上面这两条覆盖不到它，那一处的
+ * 写入由 NetherWorldCarverMixin 处理。
+ *
  * 调用方对返回值不感兴趣，原字节码在调用后立即 pop，因此返回 null 安全。
  */
 @Mixin(net.minecraft.world.level.levelgen.carver.WorldCarver.class)
@@ -31,7 +32,7 @@ public class WorldCarverMixin {
 
     @Redirect(method = "carveBlock", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/chunk/ChunkAccess;setBlockState(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;)Lnet/minecraft/world/level/block/state/BlockState;"))
     private BlockState farlands$directSectionWrite(ChunkAccess chunk, BlockPos pos, BlockState state) {
-        farlands$writeSection(chunk, pos, state);
+        CarverSectionWrite.write(chunk, pos, state);
         return null;
     }
 
@@ -41,15 +42,7 @@ public class WorldCarverMixin {
      */
     @Redirect(method = "lambda$carveBlock$0", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/chunk/ChunkAccess;setBlockState(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;)Lnet/minecraft/world/level/block/state/BlockState;"))
     private static BlockState farlands$directSectionWriteInLambda(ChunkAccess chunk, BlockPos pos, BlockState state) {
-        farlands$writeSection(chunk, pos, state);
+        CarverSectionWrite.write(chunk, pos, state);
         return null;
-    }
-
-    private static void farlands$writeSection(ChunkAccess chunk, BlockPos pos, BlockState state) {
-        LevelChunkSection section = chunk.getSection(
-                ((LevelHeightAccessor) ((WindowedChunk) chunk).levelHeightAccessor()).getSectionIndex(pos.getY()));
-        if (section != null) {
-            section.setBlockState(pos.getX() & 15, pos.getY() & 15, pos.getZ() & 15, state, false);
-        }
     }
 }

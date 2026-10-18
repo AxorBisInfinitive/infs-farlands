@@ -167,7 +167,7 @@ public class FarlandsTab implements Tab {
         return Math.max(1, font.width(pageTitle(dimension)) + TAB_PADDING);
     }
 
-    /** 一个页：五族系统各一块，块内是标题、下拉、以及按声明生成的参数框。默认项是该族的 VOID。 */
+    /** 一个页：五族系统各一块，块内是标题、下拉、以及按声明生成的参数框。默认项按维度分派。 */
     private LinearLayout familyBody(Font font, Identifier page, DropdownSelect.Layer layer,
             DropdownSelect.Revealer revealer) {
         List<SystemId> biomeIds = SystemRegistries.biomeIds();
@@ -180,22 +180,17 @@ public class FarlandsTab implements Tab {
 
         LinearLayout body = LinearLayout.vertical().spacing(8);
         body.addChild(this.familyBlock(font, Component.translatable("createWorld.tab.infs-farlands.family.biome"),
-                biomeIds, page, FamilyKind.BIOME, SystemRegistries.BIOME_MISC_VOID_BIOME_SYSTEM,
-                SystemRegistries::biomeClassOf, layer, revealer, width));
+                biomeIds, page, FamilyKind.BIOME, SystemRegistries::biomeClassOf, layer, revealer, width));
         body.addChild(this.familyBlock(font, Component.translatable("createWorld.tab.infs-farlands.family.terrain"),
-                terrainIds, page, FamilyKind.TERRAIN, SystemRegistries.TERRAIN_MISC_VOID_NOISE_SYSTEM,
-                SystemRegistries::terrainClassOf, layer, revealer, width));
+                terrainIds, page, FamilyKind.TERRAIN, SystemRegistries::terrainClassOf, layer, revealer, width));
         body.addChild(this.familyBlock(font, Component.translatable("createWorld.tab.infs-farlands.family.surface"),
-                surfaceIds, page, FamilyKind.SURFACE, SystemRegistries.SURFACE_MISC_VOID_SURFACE_SYSTEM,
-                SystemRegistries::surfaceClassOf, layer, revealer, width));
+                surfaceIds, page, FamilyKind.SURFACE, SystemRegistries::surfaceClassOf, layer, revealer, width));
         body.addChild(this.familyBlock(font, Component.translatable("createWorld.tab.infs-farlands.family.carver"),
-                carverIds, page, FamilyKind.CARVER, SystemRegistries.CARVER_MISC_VOID_CARVER_SYSTEM,
-                SystemRegistries::carverClassOf, layer, revealer, width));
+                carverIds, page, FamilyKind.CARVER, SystemRegistries::carverClassOf, layer, revealer, width));
         body.addChild(this.familyBlock(font,
                 Component.translatable("createWorld.tab.infs-farlands.family.decoration"),
-                decorationIds, page, FamilyKind.DECORATION,
-                SystemRegistries.DECORATION_MISC_VOID_DECORATION_SYSTEM,
-                SystemRegistries::decorationClassOf, layer, revealer, width));
+                decorationIds, page, FamilyKind.DECORATION, SystemRegistries::decorationClassOf, layer, revealer,
+                width));
         body.addChild(SpacerElement.height(POPUP_ROOM));
         return body;
     }
@@ -205,11 +200,11 @@ public class FarlandsTab implements Tab {
      * 下拉变更写回暂存，参数文本由参数组直接写回。
      */
     private Layout familyBlock(Font font, Component title, List<SystemId> ids, Identifier page, FamilyKind kind,
-            SystemId defaultId, Function<SystemId, Class<?>> classOf, DropdownSelect.Layer layer,
+            Function<SystemId, Class<?>> classOf, DropdownSelect.Layer layer,
             DropdownSelect.Revealer revealer, int width) {
         SystemId saved = CreatingWorldSystemsConfig.system(page, kind);
         if (saved == null) {
-            saved = defaultSystem(page, kind, defaultId);
+            saved = SystemsIO.defaultId(page, kind);
         }
         int index = defaultIndex(ids, saved);
         ParamGroup group = new ParamGroup(width);
@@ -224,17 +219,6 @@ public class FarlandsTab implements Tab {
                 }));
         control.addChild(group);
         return CommonLayouts.labeledElement(font, control, title);
-    }
-
-    /**
-     * 没选过时的默认项，与 {@code CreatingWorldSystemsConfig} 落盘用的默认同源。地形族按维度分派：
-     * 原版三维度取主世界 vanilla 噪声系统，其余维度退 VOID；另三族不分维度。
-     */
-    private static SystemId defaultSystem(Identifier page, FamilyKind kind, SystemId fallback) {
-        if (kind == FamilyKind.TERRAIN && SystemsIO.isVanillaDimension(page)) {
-            return SystemRegistries.TERRAIN_OVERWORLD_VANILLA_NOISE_SYSTEM;
-        }
-        return fallback;
     }
 
     /** 默认项在该族列表里的下标。列表里没有它时退回第一项。 */

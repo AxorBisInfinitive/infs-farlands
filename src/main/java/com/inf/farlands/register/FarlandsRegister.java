@@ -73,7 +73,7 @@ public class FarlandsRegister {
         }
     }
 
-    /** 21 个内置系统按五族登记，id 与实现类的对应关系集中在此。 */
+    /** 31 个内置系统按五族登记，id 与实现类的对应关系集中在此。 */
     private static void registerSystems() {
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_VOID_NOISE_SYSTEM, VoidNoiseSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_OVERWORLD_VANILLA_NOISE_SYSTEM,
@@ -96,26 +96,46 @@ public class FarlandsRegister {
                 Vanilla263NoiseSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_SKY_GIRL_NOISE_SYSTEM,
                 SkyGirlNoiseSystem.class);
+        SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_THE_NETHER_VANILLA_NOISE_SYSTEM,
+                com.inf.farlands.terrain.system.terrain.noise.theNether.Vanilla.VanillaNoiseSystem.class);
+        SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_THE_END_VANILLA_NOISE_SYSTEM,
+                com.inf.farlands.terrain.system.terrain.noise.theEnd.Vanilla.VanillaNoiseSystem.class);
 
         SystemRegistries.registerBiome(SystemRegistries.BIOME_MISC_VOID_BIOME_SYSTEM, VoidBiomeSystem.class);
         SystemRegistries.registerBiome(SystemRegistries.BIOME_OVERWORLD_VANILLA_BIOME_SYSTEM,
                 VanillaBiomeSystem.class);
         SystemRegistries.registerBiome(SystemRegistries.BIOME_OVERWORLD_OCT_BIOME_SYSTEM, OctBiomeSystem.class);
+        SystemRegistries.registerBiome(SystemRegistries.BIOME_THE_NETHER_VANILLA_BIOME_SYSTEM,
+                com.inf.farlands.terrain.system.biome.theNether.Vanilla.VanillaBiomeSystem.class);
+        SystemRegistries.registerBiome(SystemRegistries.BIOME_THE_END_VANILLA_BIOME_SYSTEM,
+                com.inf.farlands.terrain.system.biome.theEnd.Vanilla.VanillaBiomeSystem.class);
 
         SystemRegistries.registerSurface(SystemRegistries.SURFACE_MISC_VOID_SURFACE_SYSTEM,
                 VoidSurfaceSystem.class);
         SystemRegistries.registerSurface(SystemRegistries.SURFACE_OVERWORLD_VANILLA_SURFACE_SYSTEM,
                 VanillaSurfaceSystem.class);
+        SystemRegistries.registerSurface(SystemRegistries.SURFACE_THE_NETHER_VANILLA_SURFACE_SYSTEM,
+                com.inf.farlands.terrain.system.surface.theNether.Vanilla.VanillaSurfaceSystem.class);
+        SystemRegistries.registerSurface(SystemRegistries.SURFACE_THE_END_VANILLA_SURFACE_SYSTEM,
+                com.inf.farlands.terrain.system.surface.theEnd.Vanilla.VanillaSurfaceSystem.class);
 
         SystemRegistries.registerCarver(SystemRegistries.CARVER_MISC_VOID_CARVER_SYSTEM,
                 VoidCarverSystem.class);
         SystemRegistries.registerCarver(SystemRegistries.CARVER_OVERWORLD_VANILLA_CARVER_SYSTEM,
                 VanillaCarverSystem.class);
+        SystemRegistries.registerCarver(SystemRegistries.CARVER_THE_NETHER_VANILLA_CARVER_SYSTEM,
+                com.inf.farlands.terrain.system.carver.theNether.Vanilla.VanillaCarverSystem.class);
+        SystemRegistries.registerCarver(SystemRegistries.CARVER_THE_END_VANILLA_CARVER_SYSTEM,
+                com.inf.farlands.terrain.system.carver.theEnd.Vanilla.VanillaCarverSystem.class);
 
         SystemRegistries.registerDecoration(SystemRegistries.DECORATION_MISC_VOID_DECORATION_SYSTEM,
                 VoidDecorationSystem.class);
         SystemRegistries.registerDecoration(SystemRegistries.DECORATION_OVERWORLD_VANILLA_DECORATION_SYSTEM,
                 VanillaDecorationSystem.class);
+        SystemRegistries.registerDecoration(SystemRegistries.DECORATION_THE_NETHER_VANILLA_DECORATION_SYSTEM,
+                com.inf.farlands.terrain.system.decoration.theNether.Vanilla.VanillaDecorationSystem.class);
+        SystemRegistries.registerDecoration(SystemRegistries.DECORATION_THE_END_VANILLA_DECORATION_SYSTEM,
+                com.inf.farlands.terrain.system.decoration.theEnd.Vanilla.VanillaDecorationSystem.class);
     }
 
     public static void register() {

@@ -47,12 +47,6 @@ public final class CreatingWorldSystemsConfig {
     /** 没有参数声明的系统退化成自由文本框，它的文本用这个键存，与参数名不可能冲突。 */
     public static final String FREE_KEY = "";
 
-    /** 非原版维度五族统一退到各自的 VOID 系统。 */
-    private static final SystemId DEFAULT_BIOME = SystemRegistries.BIOME_MISC_VOID_BIOME_SYSTEM;
-    private static final SystemId DEFAULT_SURFACE = SystemRegistries.SURFACE_MISC_VOID_SURFACE_SYSTEM;
-    private static final SystemId DEFAULT_CARVER = SystemRegistries.CARVER_MISC_VOID_CARVER_SYSTEM;
-    private static final SystemId DEFAULT_DECORATION = SystemRegistries.DECORATION_MISC_VOID_DECORATION_SYSTEM;
-
     /** 本世界实际拥有的维度，决定界面有几页。由页签构造时喂入。 */
     private static volatile List<Identifier> dimensions = List.of();
 
@@ -167,23 +161,24 @@ public final class CreatingWorldSystemsConfig {
     }
 
     /**
-     * 一页的选择。地形族的默认按维度分派：原版三维度取主世界 vanilla 噪声系统，其余维度退 VOID。
-     * 另五族不分维度，都退各自的 VOID。
+     * 一页的选择。五族的默认都按维度分派：原版三个维度各取各的 vanilla，其余维度退 VOID。
      *
-     * <p>判据取自 {@link SystemsIO#isVanillaDimension}，与 {@code SystemsIO.defaultFor} 同源。新世界的
-     * 维度集合来自界面暂存，那条路在新世界走不到，所以这份默认就是新世界实际拿到的默认；两处若各写一份
-     * 判据，原版三维度就会连同地形一起变成全 VOID。
+     * <p>判据取自 {@link SystemsIO#defaultId}，与 {@code SystemsIO.defaultFor} 同源。新世界的维度集合
+     * 来自界面暂存，那条路在新世界走不到，所以这份默认就是新世界实际拿到的默认；两处若各写一份判据，
+     * 默认就会分叉。
      */
     private static SystemsData.LevelSelection levelSelection(Identifier page) {
-        SystemId terrain = SystemsIO.isVanillaDimension(page)
-                ? SystemRegistries.TERRAIN_OVERWORLD_VANILLA_NOISE_SYSTEM
-                : SystemRegistries.TERRAIN_MISC_VOID_NOISE_SYSTEM;
         return new SystemsData.LevelSelection(
-                family(page, FamilyKind.TERRAIN, SystemRegistries::terrainClassOf, terrain),
-                family(page, FamilyKind.BIOME, SystemRegistries::biomeClassOf, DEFAULT_BIOME),
-                family(page, FamilyKind.SURFACE, SystemRegistries::surfaceClassOf, DEFAULT_SURFACE),
-                family(page, FamilyKind.CARVER, SystemRegistries::carverClassOf, DEFAULT_CARVER),
-                family(page, FamilyKind.DECORATION, SystemRegistries::decorationClassOf, DEFAULT_DECORATION));
+                family(page, FamilyKind.TERRAIN, SystemRegistries::terrainClassOf,
+                        SystemsIO.defaultId(page, FamilyKind.TERRAIN)),
+                family(page, FamilyKind.BIOME, SystemRegistries::biomeClassOf,
+                        SystemsIO.defaultId(page, FamilyKind.BIOME)),
+                family(page, FamilyKind.SURFACE, SystemRegistries::surfaceClassOf,
+                        SystemsIO.defaultId(page, FamilyKind.SURFACE)),
+                family(page, FamilyKind.CARVER, SystemRegistries::carverClassOf,
+                        SystemsIO.defaultId(page, FamilyKind.CARVER)),
+                family(page, FamilyKind.DECORATION, SystemRegistries::decorationClassOf,
+                        SystemsIO.defaultId(page, FamilyKind.DECORATION)));
     }
 
     /** 一族的选择。没选过时用该族的 VOID，与界面的初始选中同一份常量。 */

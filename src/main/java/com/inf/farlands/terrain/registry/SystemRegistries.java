@@ -12,7 +12,7 @@ import com.inf.farlands.terrain.TerrainSystem;
 import net.minecraft.resources.Identifier;
 
 /**
- * 系统注册表的静态门面：五张类型化表、21 个内置 id 常量、五个登记入口、五个取用入口与元信息。
+ * 系统注册表的静态门面：五张类型化表、31 个内置 id 常量、五个登记入口、五个取用入口与元信息。
  *
  * <p>
  * 门面不读配置也不引 level：维度到 id 的选择由调用点给出，注册表层因此不依赖任何上层。
@@ -50,20 +50,33 @@ public final class SystemRegistries {
     public static final SystemId TERRAIN_OVERWORLD_VANILLA_263_NOISE_SYSTEM = id(
             "overworld_vanilla_263_noise_system");
     public static final SystemId TERRAIN_MISC_SKY_GIRL_NOISE_SYSTEM = id("misc_sky_girl_noise_system");
+    public static final SystemId TERRAIN_THE_NETHER_VANILLA_NOISE_SYSTEM = id("the_nether_vanilla_noise_system");
+    public static final SystemId TERRAIN_THE_END_VANILLA_NOISE_SYSTEM = id("the_end_vanilla_noise_system");
 
     public static final SystemId BIOME_MISC_VOID_BIOME_SYSTEM = id("misc_void_biome_system");
     public static final SystemId BIOME_OVERWORLD_VANILLA_BIOME_SYSTEM = id("overworld_vanilla_biome_system");
     public static final SystemId BIOME_OVERWORLD_OCT_BIOME_SYSTEM = id("overworld_oct_biome_system");
+    public static final SystemId BIOME_THE_NETHER_VANILLA_BIOME_SYSTEM = id("the_nether_vanilla_biome_system");
+    public static final SystemId BIOME_THE_END_VANILLA_BIOME_SYSTEM = id("the_end_vanilla_biome_system");
 
     public static final SystemId SURFACE_MISC_VOID_SURFACE_SYSTEM = id("misc_void_surface_system");
     public static final SystemId SURFACE_OVERWORLD_VANILLA_SURFACE_SYSTEM = id("overworld_vanilla_surface_system");
+    public static final SystemId SURFACE_THE_NETHER_VANILLA_SURFACE_SYSTEM = id(
+            "the_nether_vanilla_surface_system");
+    public static final SystemId SURFACE_THE_END_VANILLA_SURFACE_SYSTEM = id("the_end_vanilla_surface_system");
 
     public static final SystemId CARVER_MISC_VOID_CARVER_SYSTEM = id("misc_void_carver_system");
     public static final SystemId CARVER_OVERWORLD_VANILLA_CARVER_SYSTEM = id("overworld_vanilla_carver_system");
+    public static final SystemId CARVER_THE_NETHER_VANILLA_CARVER_SYSTEM = id("the_nether_vanilla_carver_system");
+    public static final SystemId CARVER_THE_END_VANILLA_CARVER_SYSTEM = id("the_end_vanilla_carver_system");
 
     public static final SystemId DECORATION_MISC_VOID_DECORATION_SYSTEM = id("misc_void_decoration_system");
     public static final SystemId DECORATION_OVERWORLD_VANILLA_DECORATION_SYSTEM = id(
             "overworld_vanilla_decoration_system");
+    public static final SystemId DECORATION_THE_NETHER_VANILLA_DECORATION_SYSTEM = id(
+            "the_nether_vanilla_decoration_system");
+    public static final SystemId DECORATION_THE_END_VANILLA_DECORATION_SYSTEM = id(
+            "the_end_vanilla_decoration_system");
 
     private SystemRegistries() {
     }

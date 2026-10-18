@@ -143,7 +143,7 @@ public final class SystemsIO {
     }
 
     /**
-     * 内置默认。原版三维度各自取 {@link #defaultSelection()}，其余维度取 {@link #voidSelection()}。
+     * 内置默认。原版三个维度各取各的 vanilla 五族，其余维度取 {@link #voidSelection()}。
      * 维度取注册表里的全部 LevelStem，新世界因此不会因为数据包加了维度而缺条目。只在该世界还没有
      * 配置文件时生效，已有配置文件的世界一律以文件为准。
      */
@@ -152,34 +152,102 @@ public final class SystemsIO {
         for (Map.Entry<ResourceKey<LevelStem>, LevelStem> entry : server.registryAccess()
                 .lookupOrThrow(Registries.LEVEL_STEM).entrySet()) {
             Identifier dimension = entry.getKey().identifier();
-            levels.put(dimension, isVanillaDimension(dimension) ? defaultSelection() : voidSelection());
+            levels.put(dimension, defaultSelection(dimension));
         }
         return new SystemsData(levels);
     }
 
     /**
-     * 原版三维度。这三个之外的维度没有专属默认，退 VOID。
+     * 该维度的默认五族选择：原版三个维度各取各的 vanilla，其余维度五族全 VOID。
      *
-     * <p>公开是因为界面的初始默认也要按同一条判据分派，见 {@code CreatingWorldSystemsConfig}。新世界的
-     * 维度集合来自界面暂存，{@link #defaultFor} 那条路在新世界走不到，两处若各写一份判据就会分叉。
+     * <p>判据只有这一处。新世界的维度集合来自界面暂存，{@link #defaultFor} 那条路在新世界走不到，
+     * 所以界面建页与落盘默认都经 {@link #defaultId} 取同一份判据，两处各写一份会分叉。
      */
-    public static boolean isVanillaDimension(Identifier dimension) {
-        return Level.OVERWORLD.identifier().equals(dimension)
-                || Level.NETHER.identifier().equals(dimension)
-                || Level.END.identifier().equals(dimension);
-    }
-
-    private static LevelSelection defaultSelection() {
+    public static LevelSelection defaultSelection(Identifier dimension) {
+        VanillaDefaults defaults = vanillaDefaultsOf(dimension);
+        if (defaults == null) {
+            return voidSelection();
+        }
         return new LevelSelection(
-                new SystemSelection(SystemRegistries.TERRAIN_OVERWORLD_VANILLA_NOISE_SYSTEM.value(),
-                        Map.of("seed", Arg.ofLong(0L))),
-                new SystemSelection(SystemRegistries.BIOME_MISC_VOID_BIOME_SYSTEM.value(), Map.of()),
-                new SystemSelection(SystemRegistries.SURFACE_MISC_VOID_SURFACE_SYSTEM.value(), Map.of()),
-                new SystemSelection(SystemRegistries.CARVER_MISC_VOID_CARVER_SYSTEM.value(), Map.of()),
-                new SystemSelection(SystemRegistries.DECORATION_MISC_VOID_DECORATION_SYSTEM.value(), Map.of()));
+                vanillaSelection(defaults.terrain()),
+                vanillaSelection(defaults.biome()),
+                vanillaSelection(defaults.surface()),
+                vanillaSelection(defaults.carver()),
+                vanillaSelection(defaults.decoration()));
     }
 
-    /** 非原版维度的默认：五族全 VOID。 */
+    /** 该维度该族的默认 id，供界面给下拉设初始选中。非原版维度给该族的 VOID。 */
+    public static SystemId defaultId(Identifier dimension, FamilyKind kind) {
+        VanillaDefaults defaults = vanillaDefaultsOf(dimension);
+        if (defaults == null) {
+            return voidId(kind);
+        }
+        return switch (kind) {
+            case TERRAIN -> defaults.terrain();
+            case BIOME -> defaults.biome();
+            case SURFACE -> defaults.surface();
+            case CARVER -> defaults.carver();
+            case DECORATION -> defaults.decoration();
+        };
+    }
+
+    /** 一个原版维度默认取的五族 id。 */
+    private record VanillaDefaults(SystemId terrain, SystemId biome, SystemId surface, SystemId carver,
+            SystemId decoration) {
+    }
+
+    private static final VanillaDefaults OVERWORLD_DEFAULTS = new VanillaDefaults(
+            SystemRegistries.TERRAIN_OVERWORLD_VANILLA_NOISE_SYSTEM,
+            SystemRegistries.BIOME_OVERWORLD_VANILLA_BIOME_SYSTEM,
+            SystemRegistries.SURFACE_OVERWORLD_VANILLA_SURFACE_SYSTEM,
+            SystemRegistries.CARVER_OVERWORLD_VANILLA_CARVER_SYSTEM,
+            SystemRegistries.DECORATION_OVERWORLD_VANILLA_DECORATION_SYSTEM);
+
+    private static final VanillaDefaults NETHER_DEFAULTS = new VanillaDefaults(
+            SystemRegistries.TERRAIN_THE_NETHER_VANILLA_NOISE_SYSTEM,
+            SystemRegistries.BIOME_THE_NETHER_VANILLA_BIOME_SYSTEM,
+            SystemRegistries.SURFACE_THE_NETHER_VANILLA_SURFACE_SYSTEM,
+            SystemRegistries.CARVER_THE_NETHER_VANILLA_CARVER_SYSTEM,
+            SystemRegistries.DECORATION_THE_NETHER_VANILLA_DECORATION_SYSTEM);
+
+    private static final VanillaDefaults END_DEFAULTS = new VanillaDefaults(
+            SystemRegistries.TERRAIN_THE_END_VANILLA_NOISE_SYSTEM,
+            SystemRegistries.BIOME_THE_END_VANILLA_BIOME_SYSTEM,
+            SystemRegistries.SURFACE_THE_END_VANILLA_SURFACE_SYSTEM,
+            SystemRegistries.CARVER_THE_END_VANILLA_CARVER_SYSTEM,
+            SystemRegistries.DECORATION_THE_END_VANILLA_DECORATION_SYSTEM);
+
+    /** 该维度的默认 id 组；非原版维度返回 null。 */
+    private static VanillaDefaults vanillaDefaultsOf(Identifier dimension) {
+        if (Level.OVERWORLD.identifier().equals(dimension)) {
+            return OVERWORLD_DEFAULTS;
+        }
+        if (Level.NETHER.identifier().equals(dimension)) {
+            return NETHER_DEFAULTS;
+        }
+        if (Level.END.identifier().equals(dimension)) {
+            return END_DEFAULTS;
+        }
+        return null;
+    }
+
+    /** 该族 VOID 的 id。缺失维度与创建页里的非原版维度都用它兜底。 */
+    private static SystemId voidId(FamilyKind kind) {
+        return switch (kind) {
+            case TERRAIN -> SystemRegistries.TERRAIN_MISC_VOID_NOISE_SYSTEM;
+            case BIOME -> SystemRegistries.BIOME_MISC_VOID_BIOME_SYSTEM;
+            case SURFACE -> SystemRegistries.SURFACE_MISC_VOID_SURFACE_SYSTEM;
+            case CARVER -> SystemRegistries.CARVER_MISC_VOID_CARVER_SYSTEM;
+            case DECORATION -> SystemRegistries.DECORATION_MISC_VOID_DECORATION_SYSTEM;
+        };
+    }
+
+    /** 默认选择带一个 seed 参数：五族的 vanilla 实现都读它，缺参数会在 level 构造时抛。 */
+    private static SystemSelection vanillaSelection(SystemId id) {
+        return new SystemSelection(id.value(), Map.of("seed", Arg.ofLong(0L)));
+    }
+
+    /** 非原版维度与缺失维度的默认：五族全 VOID。 */
     private static LevelSelection voidSelection() {
         return new LevelSelection(
                 new SystemSelection(SystemRegistries.TERRAIN_MISC_VOID_NOISE_SYSTEM.value(), Map.of()),
