@@ -24,7 +24,7 @@ final class OverworldDensity263 {
     }
 
     static FloatNode263 build(PositionalRandomFactory noises, boolean enableFarlands, boolean topFadeEnabled,
-            boolean enableJagged) {
+            boolean enableJagged, boolean enableSkyGrid) {
         FloatNode263 shiftX = cache(new ShiftNode263(ShiftNode263.Type.SHIFT_A,
                 NoiseData263.SHIFT.create(noises, enableFarlands)));
         FloatNode263 shiftZ = cache(new ShiftNode263(ShiftNode263.Type.SHIFT_B,
@@ -58,9 +58,9 @@ final class OverworldDensity263 {
         FloatNode263 underground = underground(noises, enableFarlands, slopedCheese, entrances, spaghetti2D,
                 spaghettiRoughness, pillars);
         FloatNode263 caves = caves(slopedCheese, entrances, underground);
-        FloatNode263 noodle = noodle(noises, enableFarlands, y);
+        FloatNode263 noodle = noodle(noises, enableFarlands, y, enableSkyGrid);
 
-        return min(postProcess(slideOverworld(caves, topFadeEnabled), 4, 8), noodle);
+        return min(postProcess(slideOverworld(caves, topFadeEnabled), 4, 8, enableSkyGrid), noodle);
     }
 
     /**
@@ -165,21 +165,22 @@ final class OverworldDensity263 {
                 unary(UnaryNode263.Type.CUBE, thickness)));
     }
 
-    private static FloatNode263 noodle(PositionalRandomFactory noises, boolean enableFarlands, FloatNode263 y) {
+    private static FloatNode263 noodle(PositionalRandomFactory noises, boolean enableFarlands, FloatNode263 y,
+            boolean enableSkyGrid) {
         FloatNode263 toggle = yLimited(y,
                 NoiseNode263.plain(NoiseData263.NOODLE.create(noises, enableFarlands), 1.0, 1.0), -60, 320, -1,
-                4, 8);
+                4, 8, enableSkyGrid);
         FloatNode263 thickness = yLimited(y,
                 mappedNoise(NoiseData263.NOODLE_THICKNESS, noises, enableFarlands, 1.0, 1.0, -0.05F, -0.1F), -60,
-                320, 0, 4, 8);
+                320, 0, 4, 8, enableSkyGrid);
         FloatNode263 ridgeA = yLimited(y,
                 NoiseNode263.plain(NoiseData263.NOODLE_RIDGE_A.create(noises, enableFarlands), 2.6666666666666665,
                         2.6666666666666665),
-                -60, 320, 0, 4, 8);
+                -60, 320, 0, 4, 8, enableSkyGrid);
         FloatNode263 ridgeB = yLimited(y,
                 NoiseNode263.plain(NoiseData263.NOODLE_RIDGE_B.create(noises, enableFarlands), 2.6666666666666665,
                         2.6666666666666665),
-                -60, 320, 0, 4, 8);
+                -60, 320, 0, 4, 8, enableSkyGrid);
         FloatNode263 ridged = mul(max(unary(UnaryNode263.Type.ABS, ridgeA),
                 unary(UnaryNode263.Type.ABS, ridgeB)), new ConstantNode263(1.5F));
         return new RangeChoiceNode263(toggle, -1000000.0F, 0.0F, new ConstantNode263(64.0F),
@@ -204,15 +205,17 @@ final class OverworldDensity263 {
     }
 
     private static FloatNode263 yLimited(FloatNode263 y, FloatNode263 whenInRange, int minY, int maxY,
-            int whenOutOfRange, int cellSizeXz, int cellSizeY) {
+            int whenOutOfRange, int cellSizeXz, int cellSizeY, boolean enableSkyGrid) {
         return new InterpolatedNode263(
                 new RangeChoiceNode263(y, minY, maxY + 1, whenInRange, new ConstantNode263(whenOutOfRange)),
-                cellSizeXz, cellSizeY);
+                cellSizeXz, cellSizeY, enableSkyGrid);
     }
 
-    private static FloatNode263 postProcess(FloatNode263 slide, int cellSizeXz, int cellSizeY) {
+    private static FloatNode263 postProcess(FloatNode263 slide, int cellSizeXz, int cellSizeY,
+            boolean enableSkyGrid) {
         FloatNode263 blended = mul(new BlendDensityNode263(slide), new ConstantNode263(0.64F));
-        return unary(UnaryNode263.Type.SQUEEZE, new InterpolatedNode263(blended, cellSizeXz, cellSizeY));
+        return unary(UnaryNode263.Type.SQUEEZE,
+                new InterpolatedNode263(blended, cellSizeXz, cellSizeY, enableSkyGrid));
     }
 
     /**

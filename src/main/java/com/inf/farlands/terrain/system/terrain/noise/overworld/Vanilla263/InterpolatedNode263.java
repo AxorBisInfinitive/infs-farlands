@@ -34,14 +34,24 @@ final class InterpolatedNode263 extends FloatNode263 {
     private final int cellSizeY;
     private final float cellSizeXzInv;
     private final float cellSizeYInv;
+
+    /**
+     * 角点是否直取内层值。
+     *
+     * <p>为真时走标量路径的形状：角点不插值，格内插值。角点取到 {@code Inf} 时角点是方块、格内是
+     * {@code NaN}，一格一个方块。26.3 的生成不走这一条，所以它是研究开关，默认假。
+     */
+    private final boolean skyGrid;
+
     private final ThreadLocal<Corners263> corners = ThreadLocal.withInitial(Corners263::new);
 
-    InterpolatedNode263(FloatNode263 input, int cellSizeXz, int cellSizeY) {
+    InterpolatedNode263(FloatNode263 input, int cellSizeXz, int cellSizeY, boolean skyGrid) {
         this.input = input;
         this.cellSizeXz = cellSizeXz;
         this.cellSizeY = cellSizeY;
         this.cellSizeXzInv = 1.0F / cellSizeXz;
         this.cellSizeYInv = 1.0F / cellSizeY;
+        this.skyGrid = skyGrid;
     }
 
     @Override
@@ -52,6 +62,9 @@ final class InterpolatedNode263 extends FloatNode263 {
         int inX = Math.floorMod(blockX, this.cellSizeXz);
         int inY = Math.floorMod(blockY, this.cellSizeY);
         int inZ = Math.floorMod(blockZ, this.cellSizeXz);
+        if (this.skyGrid && inX == 0 && inY == 0 && inZ == 0) {
+            return this.input.computeF(context);
+        }
         int baseX = blockX - inX;
         int baseY = blockY - inY;
         int baseZ = blockZ - inZ;

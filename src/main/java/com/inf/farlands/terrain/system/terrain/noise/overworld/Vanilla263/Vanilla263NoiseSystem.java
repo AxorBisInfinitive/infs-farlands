@@ -34,6 +34,9 @@ public final class Vanilla263NoiseSystem implements NoiseSystem {
      * <p>{@code enableJagged} 默认开，对应 26.3 里那一条锯齿度。关掉时整条锯齿项不挂进树，而不是换成
      * 常量 0：左零短路已按缓冲语义去掉，{@code 0 × NaN} 会照常传播。
      *
+     * <p>{@code enableSkyGrid} 默认关，它把标量路径的角点早退接回来，让角点直取内层值、格内插值，
+     * 于是角点是无穷的地方出方块、格内是 NaN。26.3 的生成不走那条早退，所以这是研究开关。
+     *
      * <p>种子与 Vanilla 族的其余系统共用同一个空框取值源，同一次创建里几族拿到同一个值。
      */
     @SystemDefaultParams
@@ -41,11 +44,13 @@ public final class Vanilla263NoiseSystem implements NoiseSystem {
             SystemParamSpec.ofBoolean("enableFarlands").define(true).build(),
             SystemParamSpec.ofBoolean("topFadeEnabled").define(false).build(),
             SystemParamSpec.ofBoolean("enableJagged").define(true).build(),
+            SystemParamSpec.ofBoolean("enableSkyGrid").define(false).build(),
             VanillaFamilySeed.seedParam());
 
     private final boolean enableFarlands;
     private final boolean topFadeEnabled;
     private final boolean enableJagged;
+    private final boolean enableSkyGrid;
     private final long seed;
 
     /** 按 vanilla 路由身份缓存的树。NoiseChunk 每段构造一次，不缓存就会每段重造一棵。 */
@@ -56,6 +61,7 @@ public final class Vanilla263NoiseSystem implements NoiseSystem {
         this.enableFarlands = args.getBoolean("enableFarlands");
         this.topFadeEnabled = args.getBoolean("topFadeEnabled");
         this.enableJagged = args.getBoolean("enableJagged");
+        this.enableSkyGrid = args.getBoolean("enableSkyGrid");
         this.seed = args.getLong("seed");
     }
 
@@ -70,7 +76,7 @@ public final class Vanilla263NoiseSystem implements NoiseSystem {
         PositionalRandomFactory noises = WorldgenRandom.Algorithm.XOROSHIRO.newInstance(this.seed)
                 .forkPositional();
         FloatNode263 tree = OverworldDensity263.build(noises, this.enableFarlands, this.topFadeEnabled,
-                this.enableJagged);
+                this.enableJagged, this.enableSkyGrid);
         this.cachedTree = tree;
         this.cachedVanilla = router;
         return tree;
