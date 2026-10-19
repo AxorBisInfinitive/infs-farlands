@@ -26,10 +26,13 @@ import net.minecraft.world.level.levelgen.DensityFunction;
 public final class Vanilla263NoiseSystem implements NoiseSystem {
 
     /**
-     * 声明：关闭坐标折叠的开关与随机种子。
+     * 声明：三个开关与随机种子。
      *
      * <p>{@code enableFarlands} 默认开，对应 26.3 的 {@code DEBUG_ENABLE_FARLANDS}。但它比那个调试开关
      * 影响更远：开时 {@code wrap} 原样返回坐标，边境之地落在 32 位边界上。
+     *
+     * <p>{@code enableJagged} 默认开，对应 26.3 里那一条锯齿度。关掉时整条锯齿项不挂进树，而不是换成
+     * 常量 0：左零短路已按缓冲语义去掉，{@code 0 × NaN} 会照常传播。
      *
      * <p>种子与 Vanilla 族的其余系统共用同一个空框取值源，同一次创建里几族拿到同一个值。
      */
@@ -37,10 +40,12 @@ public final class Vanilla263NoiseSystem implements NoiseSystem {
     public static final SystemParams DEFAULT_PARAMS = SystemParams.of(
             SystemParamSpec.ofBoolean("enableFarlands").define(true).build(),
             SystemParamSpec.ofBoolean("topFadeEnabled").define(false).build(),
+            SystemParamSpec.ofBoolean("enableJagged").define(true).build(),
             VanillaFamilySeed.seedParam());
 
     private final boolean enableFarlands;
     private final boolean topFadeEnabled;
+    private final boolean enableJagged;
     private final long seed;
 
     /** 按 vanilla 路由身份缓存的树。NoiseChunk 每段构造一次，不缓存就会每段重造一棵。 */
@@ -50,6 +55,7 @@ public final class Vanilla263NoiseSystem implements NoiseSystem {
     public Vanilla263NoiseSystem(SystemArgs args) {
         this.enableFarlands = args.getBoolean("enableFarlands");
         this.topFadeEnabled = args.getBoolean("topFadeEnabled");
+        this.enableJagged = args.getBoolean("enableJagged");
         this.seed = args.getLong("seed");
     }
 
@@ -63,7 +69,8 @@ public final class Vanilla263NoiseSystem implements NoiseSystem {
         }
         PositionalRandomFactory noises = WorldgenRandom.Algorithm.XOROSHIRO.newInstance(this.seed)
                 .forkPositional();
-        FloatNode263 tree = OverworldDensity263.build(noises, this.enableFarlands, this.topFadeEnabled);
+        FloatNode263 tree = OverworldDensity263.build(noises, this.enableFarlands, this.topFadeEnabled,
+                this.enableJagged);
         this.cachedTree = tree;
         this.cachedVanilla = router;
         return tree;

@@ -23,7 +23,8 @@ final class OverworldDensity263 {
     private OverworldDensity263() {
     }
 
-    static FloatNode263 build(PositionalRandomFactory noises, boolean enableFarlands, boolean topFadeEnabled) {
+    static FloatNode263 build(PositionalRandomFactory noises, boolean enableFarlands, boolean topFadeEnabled,
+            boolean enableJagged) {
         FloatNode263 shiftX = cache(new ShiftNode263(ShiftNode263.Type.SHIFT_A,
                 NoiseData263.SHIFT.create(noises, enableFarlands)));
         FloatNode263 shiftZ = cache(new ShiftNode263(ShiftNode263.Type.SHIFT_B,
@@ -35,8 +36,6 @@ final class OverworldDensity263 {
         FloatNode263 erosion = cache(shiftedXz(NoiseData263.EROSION, noises, enableFarlands, shiftX, shiftZ));
         FloatNode263 weirdness = cache(shiftedXz(NoiseData263.RIDGE, noises, enableFarlands, shiftX, shiftZ));
         FloatNode263 ridgesFolded = peaksAndValleys(weirdness);
-        FloatNode263 jaggedNoise = NoiseNode263.plain(NoiseData263.JAGGED.create(noises, enableFarlands), 1500.0,
-                0.0);
 
         FloatNode263 offset = blended(
                 add(new ConstantNode263(-0.50375F),
@@ -47,14 +46,9 @@ final class OverworldDensity263 {
                 new SplineNode263(
                         TerrainProvider263.overworldFactor(continents, erosion, weirdness, ridgesFolded, false)),
                 new ConstantNode263(10.0F));
-        FloatNode263 unscaledJaggedness = blended(
-                new SplineNode263(TerrainProvider263.overworldJaggedness(continents, erosion, weirdness,
-                        ridgesFolded, false)),
-                new ConstantNode263(0.0F));
         FloatNode263 depth = add(GradientNode263.yClamped(-64, 320, 1.5F, -1.5F), offset);
-        FloatNode263 jaggedness = cache(
-                mul(unscaledJaggedness, unary(UnaryNode263.Type.HALF_NEGATIVE, jaggedNoise)));
-        FloatNode263 initialDensity = noiseGradientDensity(factor, add(depth, jaggedness));
+        FloatNode263 initialDensity = noiseGradientDensity(factor,
+                jagged(noises, enableFarlands, continents, erosion, weirdness, ridgesFolded, depth, enableJagged));
         FloatNode263 slopedCheese = cache(add(initialDensity, base3dNoise(noises, enableFarlands)));
 
         FloatNode263 spaghettiRoughness = spaghettiRoughnessFunction(noises, enableFarlands);
@@ -67,6 +61,28 @@ final class OverworldDensity263 {
         FloatNode263 noodle = noodle(noises, enableFarlands, y);
 
         return min(postProcess(slideOverworld(caves, topFadeEnabled), 4, 8), noodle);
+    }
+
+    /**
+     * 把锯齿度加到深度上。
+     *
+     * <p>关掉时返回传入的深度本身，不是加一个 0。左零短路已按缓冲语义去掉，{@code 0 × NaN} 会照常
+     * 传播，用一个 0 顶替锯齿度等于把 NaN 请回来，比不关更糟。所以关掉只能是结构上不挂这一项。
+     */
+    private static FloatNode263 jagged(PositionalRandomFactory noises, boolean enableFarlands,
+            FloatNode263 continents, FloatNode263 erosion, FloatNode263 weirdness, FloatNode263 ridgesFolded,
+            FloatNode263 depth, boolean enableJagged) {
+        if (!enableJagged) {
+            return depth;
+        }
+        FloatNode263 jaggedNoise = NoiseNode263.plain(NoiseData263.JAGGED.create(noises, enableFarlands), 1500.0,
+                0.0);
+        FloatNode263 unscaledJaggedness = blended(
+                new SplineNode263(TerrainProvider263.overworldJaggedness(continents, erosion, weirdness,
+                        ridgesFolded, false)),
+                new ConstantNode263(0.0F));
+        return add(depth,
+                cache(mul(unscaledJaggedness, unary(UnaryNode263.Type.HALF_NEGATIVE, jaggedNoise))));
     }
 
     private static FloatNode263 caves(FloatNode263 slopedCheese, FloatNode263 entrances,
