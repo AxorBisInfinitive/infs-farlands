@@ -84,12 +84,16 @@ public final class ConfigFile {
      * 结构不符则抛异常，不静默重置：JSON 语法错、根不是对象、settings 或条目不是对象、
      * 条目缺 value、allow 及 allow.keyword / allow.enums 形状不符，都是这份文件不是本配置的情形。
      * 键缺失（settings、lastWriteBackTime、note、default、allow）与代码侧声明漂移则照旧补写。
+     *
+     * <p>
+     * 缺键不等于没有值可读。只有 settings 缺失才意味着这份文件没有值；时间戳缺失时 settings 可能
+     * 完整，所以读值一律执行，补键由随后的写盘完成。
      */
     public static void load(Path file, Map<String, String> fileNotes,
             Map<String, ConfigEntry<?>> entries) {
         if (!Files.exists(file)) {
             applyDefaults(entries);
-            write(file, null, fileNotes, entries, System.currentTimeMillis() / 1000L);
+            write(file, null, fileNotes, entries);
             return;
         }
         JsonElement parsed;
@@ -103,7 +107,7 @@ public final class ConfigFile {
         }
         if (parsed.isJsonNull()) {
             applyDefaults(entries);
-            write(file, null, fileNotes, entries, System.currentTimeMillis() / 1000L);
+            write(file, null, fileNotes, entries);
             return;
         }
         if (!parsed.isJsonObject()) {
@@ -112,12 +116,8 @@ public final class ConfigFile {
         }
         JsonObject root = parsed.getAsJsonObject();
 
-        boolean[] dirty = { false };
-        JsonObject settings = ensureSettings(root, file, dirty);
-        if (dirty[0]) {
-            write(file, root, fileNotes, entries, root.get(LAST_WRITE_BACK_TIME).getAsLong());
-            return; // 结构缺失重建后直接落盘，避免重复写
-        }
+        boolean[] missing = { false };
+        JsonObject settings = ensureSettings(root, file, missing);
 
         // 读每个注册项：存在->校验类型与值域并覆盖，同时对齐 default/allow/note；缺失->补默认
         boolean[] dirty2 = { false };
@@ -171,8 +171,8 @@ public final class ConfigFile {
                 dirty2[0] = true;
             }
         }
-        if (dirty2[0]) {
-            write(file, root, fileNotes, entries, root.get(LAST_WRITE_BACK_TIME).getAsLong());
+        if (dirty2[0] || missing[0]) {
+            write(file, root, fileNotes, entries);
         } else {
             // 内容没有漂移，但磁盘上的字节可能仍不是本 writer 会写出的形状，例如缩进被改过。
             // 这份文件只有一个写入者，所以「格式规范」等价于「磁盘字节 == 现在会写出的字节」。
@@ -183,20 +183,25 @@ public final class ConfigFile {
                 same = true; // 读不回来就不动它，交给下一次读盘
             }
             if (!same) {
-                write(file, root, fileNotes, entries, root.get(LAST_WRITE_BACK_TIME).getAsLong());
+                write(file, root, fileNotes, entries);
             }
         }
     }
 
-    /** settings/lastWriteBackTime 键存在校验；缺失则补并标记。存在但类型不符是结构错。 */
-    private static JsonObject ensureSettings(JsonObject root, Path file, boolean[] dirty) {
+    /**
+     * settings 与 lastWriteBackTime 的存在性检查。缺失的键只记标志，不在这里写值。
+     *
+     * <p>
+     * 时间戳缺失不代表没有值可读，同一次加载里 settings 可能完整。在这里造一个值，会把「补了一个键」
+     * 与「没有值可保留」写成同一个信号，调用方只能整份重建。补键统一由写盘完成。
+     */
+    private static JsonObject ensureSettings(JsonObject root, Path file, boolean[] missing) {
         if (!root.has(LAST_WRITE_BACK_TIME)) {
-            root.addProperty(LAST_WRITE_BACK_TIME, System.currentTimeMillis() / 1000L);
-            dirty[0] = true;
+            missing[0] = true;
         }
         if (!root.has(SETTINGS)) {
             root.add(SETTINGS, new JsonObject());
-            dirty[0] = true;
+            missing[0] = true;
         } else if (!root.get(SETTINGS).isJsonObject()) {
             throw new RuntimeException(
                     "Config %s: \"%s\" must be a JSON object, got %s"
@@ -213,12 +218,16 @@ public final class ConfigFile {
      * <p>
      * {@code existingRoot} 是已解析的旧文件（文件不存在或损坏时传 null），只用于让 {@code note}
      * 里的额外来源键活下来：写入是覆盖式的，声明键被更新，其余键原样保留。
+     *
+     * <p>
+     * 时间戳取本方法执行时刻：它记的是这一次回写，与文件何时创建无关，因此不由调用方传入。
+     * 本方法不改动传入的树，加载期那个字节比较读到的仍是磁盘上那份时间戳。
      */
     private static void write(Path file, JsonObject existingRoot, Map<String, String> fileNotes,
-            Map<String, ConfigEntry<?>> entries, long lastWriteBackTime) {
+            Map<String, ConfigEntry<?>> entries) {
         JsonObject root = new JsonObject();
         root.add(NOTE, mergeNotes(existingRoot == null ? null : existingRoot.get(NOTE), fileNotes));
-        root.addProperty(LAST_WRITE_BACK_TIME, lastWriteBackTime);
+        root.addProperty(LAST_WRITE_BACK_TIME, System.currentTimeMillis() / 1000L);
         JsonObject oldSettings = existingRoot != null && existingRoot.get(SETTINGS) != null
                 && existingRoot.get(SETTINGS).isJsonObject() ? existingRoot.getAsJsonObject(SETTINGS) : null;
         JsonObject settings = new JsonObject();
