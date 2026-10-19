@@ -1,7 +1,10 @@
 package com.inf.farlands.client.gui;
 
 import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -12,6 +15,7 @@ import com.inf.farlands.terrain.registry.SystemId;
 import com.inf.farlands.terrain.registry.SystemPageHooks;
 import com.inf.farlands.terrain.registry.SystemRegistries;
 import com.inf.farlands.terrain.registry.SystemParams;
+import com.inf.farlands.terrain.registry.SystemSelectionParser;
 import com.inf.farlands.terrain.registry.SystemsIO;
 
 import net.minecraft.client.Minecraft;
@@ -83,6 +87,8 @@ public class FarlandsTab implements Tab {
 
     /** 每页各一份滚动容器，它的 AbstractScrollArea 用于把展开的列表滚进可视区。 */
     private final List<DemoPage> pages = new ArrayList<>();
+    /** 维度页到族到参数组，提交被拦下时按违规的维度与族定位到该标红的组。 */
+    private final Map<Identifier, Map<FamilyKind, ParamGroup>> groups = new HashMap<>();
     /** 页签行。多行换行由它自己按可用宽度排，见 {@link TabStrip}。 */
     private final TabStrip strip;
     private ScreenRectangle lastArea;
@@ -208,6 +214,8 @@ public class FarlandsTab implements Tab {
         }
         int index = defaultIndex(ids, saved);
         ParamGroup group = new ParamGroup(width);
+        this.groups.computeIfAbsent(page, k -> new EnumMap<>(FamilyKind.class)).put(kind, group);
+        group.setOnChanged(() -> this.revalidate(page, kind));
         this.applySelection(group, classOf, page, kind, ids.get(index));
         LinearLayout control = LinearLayout.vertical().spacing(4);
         control.addChild(new DropdownSelect(layer, revealer, width, FIELD_HEIGHT, this.idOptions(ids), index,
@@ -233,6 +241,48 @@ public class FarlandsTab implements Tab {
                 CreatingWorldSystemsConfig.text(page, kind, id),
                 (key, value) -> CreatingWorldSystemsConfig.putText(page, kind, id, key, value));
         this.relayout();
+    }
+
+    /**
+     * 重跑一族的跨字段规则。逐键检查由参数组自己做，这里只管几个参数之间的关系。
+     *
+     * <p>先清掉上一轮的规则标红再重算，否则修好一条之后其余的会一直红着。逐键错因不受影响，它由参数组
+     * 自己维护。
+     */
+    private void revalidate(Identifier page, FamilyKind kind) {
+        ParamGroup group = this.group(page, kind);
+        if (group == null) {
+            return;
+        }
+        group.clearRuleMarks();
+        SystemId id = CreatingWorldSystemsConfig.system(page, kind);
+        if (id == null) {
+            id = SystemsIO.defaultId(page, kind);
+        }
+        for (SystemParams.Violation violation : SystemSelectionParser.violations(
+                CreatingWorldSystemsConfig.classOf(kind, id), group.currentTexts())) {
+            group.markRule(violation.keys(), violation.message());
+        }
+    }
+
+    /**
+     * 把提交前那一次检验的违规标到对应的参数组上。
+     *
+     * <p>维度页与族用来定位，规则引用的键决定标哪几个框。定位不到时只跳过标红，弹窗里的文字仍带全部
+     * 违规，所以不会静默丢掉一条。
+     */
+    public void markViolations(List<CreatingWorldSystemsConfig.FamilyViolation> violations) {
+        for (CreatingWorldSystemsConfig.FamilyViolation violation : violations) {
+            ParamGroup group = this.group(violation.dimension(), violation.family());
+            if (group != null) {
+                group.markRule(violation.keys(), violation.message());
+            }
+        }
+    }
+
+    private ParamGroup group(Identifier page, FamilyKind kind) {
+        Map<FamilyKind, ParamGroup> families = this.groups.get(page);
+        return families == null ? null : families.get(kind);
     }
 
     /** 参数框行数变了，内容高度跟着变，所以要重跑一次布局，否则会被裁在旧高度里。 */

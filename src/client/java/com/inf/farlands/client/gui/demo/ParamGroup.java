@@ -6,6 +6,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.BiConsumer;
 
 import com.inf.farlands.client.gui.CreatingWorldSystemsConfig;
@@ -71,6 +72,14 @@ public final class ParamGroup extends AbstractContainerWidget {
     private final Map<String, SystemParamSpec> specs = new LinkedHashMap<>();
     /** 参数名到建框时的原始 tooltip，标红时在它后面追加错因，恢复时换回来。 */
     private final Map<String, Component> baseTooltips = new LinkedHashMap<>();
+    /** 逐键解析失败留下的错因，一个框一条。 */
+    private final Map<String, Component> textProblems = new LinkedHashMap<>();
+    /** 跨字段规则失败留下的错因，按规则引用的参数逐个记。 */
+    private final Map<String, Component> ruleProblems = new LinkedHashMap<>();
+    /** 任一个框变化后的回调，由页签挂上来重跑本族的跨字段规则。 */
+    private Runnable onChanged;
+    /** 重建期间为真，此时逐个 setValue 触发的回调一律吞掉，建完再报一次。 */
+    private boolean building;
     private final int groupWidth;
     private int labelWidth = MIN_LABEL_WIDTH;
     private boolean free;
@@ -101,6 +110,9 @@ public final class ParamGroup extends AbstractContainerWidget {
         this.reporters.clear();
         this.specs.clear();
         this.baseTooltips.clear();
+        this.textProblems.clear();
+        this.ruleProblems.clear();
+        this.building = true;
         this.free = params == null;
         Font font = Minecraft.getInstance().font;
         if (this.free) {
@@ -114,10 +126,11 @@ public final class ParamGroup extends AbstractContainerWidget {
             box.setTooltip(Tooltip.create(base));
             this.baseTooltips.put(CreatingWorldSystemsConfig.FREE_KEY, base);
             box.setResponder(value -> {
-                this.mark(CreatingWorldSystemsConfig.FREE_KEY, box, SystemSelectionParser.problemFree(value));
+                this.mark(CreatingWorldSystemsConfig.FREE_KEY, SystemSelectionParser.problemFree(value));
                 if (onText != null) {
                     onText.accept(CreatingWorldSystemsConfig.FREE_KEY, value);
                 }
+                this.notifyChanged();
             });
             if (onText != null) {
                 this.reporters.put(CreatingWorldSystemsConfig.FREE_KEY, onText);
@@ -139,10 +152,11 @@ public final class ParamGroup extends AbstractContainerWidget {
                     box.setValue(text);
                 }
                 box.setResponder(value -> {
-                    this.mark(spec.key(), box, SystemSelectionParser.problem(spec, value));
+                    this.mark(spec.key(), SystemSelectionParser.problem(spec, value));
                     if (onText != null) {
                         onText.accept(spec.key(), value);
                     }
+                    this.notifyChanged();
                 });
                 if (onText != null) {
                     this.reporters.put(spec.key(), onText);
@@ -157,34 +171,98 @@ public final class ParamGroup extends AbstractContainerWidget {
         this.setHeight(this.rows * ROW_HEIGHT);
         this.layoutRows();
         this.validateAll();
+        this.building = false;
+        this.notifyChanged();
     }
 
     /** 建好框后按当前文本校验一遍：预填值也要标出来，但不回写采集回调。 */
     private void validateAll() {
         for (Map.Entry<String, EditBox> entry : this.texts.entrySet()) {
             SystemParamSpec spec = this.specs.get(entry.getKey());
-            String problem = spec == null
+            Component problem = spec == null
                     ? SystemSelectionParser.problemFree(entry.getValue().getValue())
                     : SystemSelectionParser.problem(spec, entry.getValue().getValue());
-            this.mark(entry.getKey(), entry.getValue(), problem);
+            this.mark(entry.getKey(), problem);
         }
     }
 
-    /**
-     * 标出或恢复一个框：非法时红字并把错因追加到原始 tooltip 之后，合法时换回默认字色与原始 tooltip。
-     */
-    private void mark(String key, EditBox box, String problem) {
-        Component base = this.baseTooltips.get(key);
-        if (problem == null) {
-            box.setTextColor(EditBox.DEFAULT_TEXT_COLOR);
-            if (base != null) {
-                box.setTooltip(Tooltip.create(base));
-            }
+    /** 挂上变化回调。每次任意一个框的文本变化后调用一次。 */
+    public void setOnChanged(Runnable onChanged) {
+        this.onChanged = onChanged;
+    }
+
+    private void notifyChanged() {
+        if (this.building || this.onChanged == null) {
             return;
         }
-        box.setTextColor(INVALID_TEXT_COLOR);
-        if (base != null) {
-            box.setTooltip(Tooltip.create(Component.empty().append(base).append("\n").append(problem)));
+        this.onChanged.run();
+    }
+
+    /** 当前每个框的文本，键与声明一致。供跨字段规则求值。 */
+    public Map<String, String> currentTexts() {
+        Map<String, String> out = new LinkedHashMap<>();
+        for (Map.Entry<String, EditBox> entry : this.texts.entrySet()) {
+            out.put(entry.getKey(), entry.getValue().getValue());
+        }
+        return out;
+    }
+
+    /**
+     * 记下某条跨字段规则失败，把它引用的参数一起标红。
+     *
+     * <p>只记本组存在的键：规则引用的键都来自本系统的声明，不在本组说明本次选中项变了，那一条作废。
+     */
+    public void markRule(Set<String> keys, Component message) {
+        for (String key : keys) {
+            if (this.texts.containsKey(key)) {
+                this.ruleProblems.put(key, message);
+            }
+        }
+        this.applyMarks();
+    }
+
+    /** 清掉全部跨字段标红，逐键的解析错因不受影响。 */
+    public void clearRuleMarks() {
+        this.ruleProblems.clear();
+        this.applyMarks();
+    }
+
+    /** 记下或清掉一个框的逐键错因，然后重刷整组。 */
+    private void mark(String key, Component problem) {
+        if (problem == null) {
+            this.textProblems.remove(key);
+        } else {
+            this.textProblems.put(key, problem);
+        }
+        this.applyMarks();
+    }
+
+    /**
+     * 按两张表重刷每个框的颜色与 tooltip。
+     *
+     * <p>逐键错因优先于跨字段错因：前者是这一段文本本身不可解析，后者是几个值之间的关系不成立，先修前者
+     * 才有意义。
+     */
+    private void applyMarks() {
+        for (Map.Entry<String, EditBox> entry : this.texts.entrySet()) {
+            String key = entry.getKey();
+            EditBox box = entry.getValue();
+            Component problem = this.textProblems.get(key);
+            if (problem == null) {
+                problem = this.ruleProblems.get(key);
+            }
+            Component base = this.baseTooltips.get(key);
+            if (problem == null) {
+                box.setTextColor(EditBox.DEFAULT_TEXT_COLOR);
+                if (base != null) {
+                    box.setTooltip(Tooltip.create(base));
+                }
+                continue;
+            }
+            box.setTextColor(INVALID_TEXT_COLOR);
+            if (base != null) {
+                box.setTooltip(Tooltip.create(Component.empty().append(base).append("\n").append(problem)));
+            }
         }
     }
 

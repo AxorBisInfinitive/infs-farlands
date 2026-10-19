@@ -2,9 +2,11 @@ package com.inf.farlands.client.gui;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
@@ -21,6 +23,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.toasts.SystemToast;
 import net.minecraft.nbt.NbtOps;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.storage.LevelResource;
 
@@ -140,6 +143,10 @@ public final class CreatingWorldSystemsConfig {
      * 文本非法的解析失败直穿给调用方，由它决定中止创建，不在此处吞掉或退回默认。
      */
     public static SystemsData buildSystemsData() {
+        List<FamilyViolation> violations = violations();
+        if (!violations.isEmpty()) {
+            throw new IllegalStateException("farlands: 系统参数不合规: " + message(violations).getString());
+        }
         Map<Identifier, SystemsData.LevelSelection> levels = new LinkedHashMap<>();
         for (Identifier page : dimensions) {
             levels.put(page, levelSelection(page));
@@ -147,17 +154,60 @@ public final class CreatingWorldSystemsConfig {
         return new SystemsData(levels);
     }
 
+    /** 一条违规所属的维度页与族。界面靠它定位到该标红的参数组。 */
+    public record FamilyViolation(Identifier dimension, FamilyKind family, SystemId system, Set<String> keys,
+            Component message) {
+    }
+
     /**
-     * 当前界面的选择与参数能否编成一份配置：能则 null，不能则返回可显示的错因。创建按钮提交前用它
-     * 校验，判据与真正落盘那一次完全相同，只是多吞一次异常。
+     * 当前界面的全部违规，跨全部维度页与五族。
+     *
+     * <p>
+     * 与 {@link #buildSystemsData} 用同一份判据：后者先跑本方法，非空即抛。所以提交前那一次检验与真正
+     * 落盘那一次不会分叉，界面也拿得到结构化的结果去标红。
      */
-    public static String problem() {
-        try {
-            buildSystemsData();
-            return null;
-        } catch (RuntimeException e) {
-            return e.getMessage() == null ? e.toString() : e.getMessage();
+    public static List<FamilyViolation> violations() {
+        List<FamilyViolation> out = new ArrayList<>();
+        for (Identifier page : dimensions) {
+            for (FamilyKind kind : FamilyKind.values()) {
+                SystemId id = system(page, kind);
+                if (id == null) {
+                    id = SystemsIO.defaultId(page, kind);
+                }
+                List<SystemParams.Violation> found;
+                try {
+                    found = SystemSelectionParser.violations(classOf(kind, id), text(page, kind, id));
+                } catch (RuntimeException e) {
+                    out.add(new FamilyViolation(page, kind, id, Set.of(), Component.literal(message(e))));
+                    continue;
+                }
+                for (SystemParams.Violation violation : found) {
+                    out.add(new FamilyViolation(page, kind, id, violation.keys(), violation.message()));
+                }
+            }
         }
+        return out;
+    }
+
+    /** 把违规拼成一段可显示的文本，每条一行。每条自身已经是语言键渲染出来的。 */
+    public static Component message(List<FamilyViolation> violations) {
+        MutableComponent out = Component.empty();
+        boolean first = true;
+        for (FamilyViolation violation : violations) {
+            if (!first) {
+                out.append("\n");
+            }
+            first = false;
+            out.append(violation.dimension().toString()).append(" / ")
+                    .append(violation.family().name()).append(" / ")
+                    .append(violation.system().toString()).append(": ")
+                    .append(violation.message());
+        }
+        return out;
+    }
+
+    private static String message(RuntimeException e) {
+        return e.getMessage() == null ? e.toString() : e.getMessage();
     }
 
     /**
@@ -229,8 +279,8 @@ public final class CreatingWorldSystemsConfig {
         }
     }
 
-    /** 按族取实现类，供预填判断该系统有没有参数声明。 */
-    private static Class<?> classOf(FamilyKind kind, SystemId id) {
+    /** 按族取实现类，供预填判断该系统有没有参数声明，也供界面按族重跑校验。 */
+    public static Class<?> classOf(FamilyKind kind, SystemId id) {
         return switch (kind) {
             case TERRAIN -> SystemRegistries.terrainClassOf(id);
             case BIOME -> SystemRegistries.biomeClassOf(id);

@@ -1,6 +1,7 @@
 package com.inf.farlands.terrain.system.terrain.noise.overworld.Cwg;
 
 import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
 import com.inf.farlands.terrain.NoiseSystem;
@@ -12,6 +13,7 @@ import com.inf.farlands.terrain.registry.SystemsData.Arg;
 
 import net.minecraft.core.Holder;
 import net.minecraft.data.worldgen.TerrainProvider;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -47,6 +49,12 @@ public final class CwgNoiseSystem implements NoiseSystem {
 
     /**
      * 声明：四路噪声各六项，depth 没有竖直频率，采样式三项，形状换算五项，加开关与 seed。
+     *
+     * <p>
+     * 三类单参数判据写在各自的 spec 上，界面逐键标红：频率必须为正且有限、octave 数在 1 到 30 之间、
+     * 采样格边长只能取 4、8、16 之一。两个水平采样格必须相等是跨字段判据，写在 withConstraint 里。
+     *
+     * <p>
      * 键名在声明与读取两处各出现一次，两处不一致会在构造时以缺参数抛出，不会静默取默认值。
      */
     @SystemDefaultParams
@@ -56,42 +64,76 @@ public final class CwgNoiseSystem implements NoiseSystem {
                     .keyword("", () -> Arg.ofLong(ThreadLocalRandom.current().nextLong()),
                             "createWorld.tab.infs-farlands.param.seed.random")
                     .build(),
-            SystemParamSpec.ofInt("noiseSampleSizeX").define(4).build(),
-            SystemParamSpec.ofInt("noiseSampleSizeY").define(8).build(),
-            SystemParamSpec.ofInt("noiseSampleSizeZ").define(4).build(),
+            sampleSize("noiseSampleSizeX", 4),
+            sampleSize("noiseSampleSizeY", 8),
+            sampleSize("noiseSampleSizeZ", 4),
 
             SystemParamSpec.ofDouble("selectorNoiseFactor").define(12.75).build(),
             SystemParamSpec.ofDouble("selectorNoiseOffset").define(0.5).build(),
-            SystemParamSpec.ofDouble("selectorNoiseFrequencyX").define(SELECTOR_FREQUENCY_XZ).build(),
-            SystemParamSpec.ofDouble("selectorNoiseFrequencyY").define(SELECTOR_FREQUENCY_Y).build(),
-            SystemParamSpec.ofDouble("selectorNoiseFrequencyZ").define(SELECTOR_FREQUENCY_XZ).build(),
-            SystemParamSpec.ofInt("selectorNoiseOctaves").define(8).build(),
+            frequency("selectorNoiseFrequencyX", SELECTOR_FREQUENCY_XZ),
+            frequency("selectorNoiseFrequencyY", SELECTOR_FREQUENCY_Y),
+            frequency("selectorNoiseFrequencyZ", SELECTOR_FREQUENCY_XZ),
+            octaves("selectorNoiseOctaves", 8),
 
             SystemParamSpec.ofDouble("lowNoiseFactor").define(1.0).build(),
             SystemParamSpec.ofDouble("lowNoiseOffset").define(0.0).build(),
-            SystemParamSpec.ofDouble("lowNoiseFrequencyX").define(LOW_HIGH_FREQUENCY_XZ).build(),
-            SystemParamSpec.ofDouble("lowNoiseFrequencyY").define(LOW_HIGH_FREQUENCY_Y).build(),
-            SystemParamSpec.ofDouble("lowNoiseFrequencyZ").define(LOW_HIGH_FREQUENCY_XZ).build(),
-            SystemParamSpec.ofInt("lowNoiseOctaves").define(16).build(),
+            frequency("lowNoiseFrequencyX", LOW_HIGH_FREQUENCY_XZ),
+            frequency("lowNoiseFrequencyY", LOW_HIGH_FREQUENCY_Y),
+            frequency("lowNoiseFrequencyZ", LOW_HIGH_FREQUENCY_XZ),
+            octaves("lowNoiseOctaves", 16),
 
             SystemParamSpec.ofDouble("highNoiseFactor").define(1.0).build(),
             SystemParamSpec.ofDouble("highNoiseOffset").define(0.0).build(),
-            SystemParamSpec.ofDouble("highNoiseFrequencyX").define(LOW_HIGH_FREQUENCY_XZ).build(),
-            SystemParamSpec.ofDouble("highNoiseFrequencyY").define(LOW_HIGH_FREQUENCY_Y).build(),
-            SystemParamSpec.ofDouble("highNoiseFrequencyZ").define(LOW_HIGH_FREQUENCY_XZ).build(),
-            SystemParamSpec.ofInt("highNoiseOctaves").define(16).build(),
+            frequency("highNoiseFrequencyX", LOW_HIGH_FREQUENCY_XZ),
+            frequency("highNoiseFrequencyY", LOW_HIGH_FREQUENCY_Y),
+            frequency("highNoiseFrequencyZ", LOW_HIGH_FREQUENCY_XZ),
+            octaves("highNoiseOctaves", 16),
 
             SystemParamSpec.ofDouble("depthNoiseFactor").define(1.024).build(),
             SystemParamSpec.ofDouble("depthNoiseOffset").define(0.0).build(),
-            SystemParamSpec.ofDouble("depthNoiseFrequencyX").define(DEPTH_FREQUENCY_XZ).build(),
-            SystemParamSpec.ofDouble("depthNoiseFrequencyZ").define(DEPTH_FREQUENCY_XZ).build(),
-            SystemParamSpec.ofInt("depthNoiseOctaves").define(16).build(),
+            frequency("depthNoiseFrequencyX", DEPTH_FREQUENCY_XZ),
+            frequency("depthNoiseFrequencyZ", DEPTH_FREQUENCY_XZ),
+            octaves("depthNoiseOctaves", 16),
 
             SystemParamSpec.ofDouble("heightFactor").define(64.0).build(),
             SystemParamSpec.ofDouble("heightOffset").define(64.0).build(),
             SystemParamSpec.ofDouble("heightVariationFactor").define(64.0).build(),
             SystemParamSpec.ofDouble("heightVariationOffset").define(0.0).build(),
-            SystemParamSpec.ofDouble("specialHeightVariationFactorBelowAverageY").define(0.25).build());
+            SystemParamSpec.ofDouble("specialHeightVariationFactorBelowAverageY").define(0.25).build())
+            .withConstraint(SystemParams.rule(Set.of("noiseSampleSizeX", "noiseSampleSizeZ"), args -> {
+                int x = args.getInt("noiseSampleSizeX");
+                int z = args.getInt("noiseSampleSizeZ");
+                return x == z ? null
+                        : Component.translatable("createWorld.tab.infs-farlands.param.error.sample_xz_equal",
+                                x, z);
+            }));
+
+    /** 采样格边长，只允许 4、8、16，其它取值会让 cell 边长不整除 16。 */
+    private static SystemParamSpec sampleSize(String key, int value) {
+        return SystemParamSpec.ofInt(key).define(value)
+                .check(v -> v == 4 || v == 8 || v == 16,
+                        v -> Component.translatable("createWorld.tab.infs-farlands.param.error.sample_size",
+                                key, v))
+                .build();
+    }
+
+    /** 频率必须为正的有限值。0 会让该路恒定，NaN 会让比较全部为假。 */
+    private static SystemParamSpec frequency(String key, double value) {
+        return SystemParamSpec.ofDouble(key).define(value)
+                .check(v -> v > 0.0 && !Double.isInfinite(v),
+                        v -> Component.translatable("createWorld.tab.infs-farlands.param.error.frequency",
+                                key, v))
+                .build();
+    }
+
+    /** 八度数，超出这个区间时叠加结果不可用。 */
+    private static SystemParamSpec octaves(String key, int value) {
+        return SystemParamSpec.ofInt(key).define(value)
+                .check(v -> v >= 1 && v <= 30,
+                        v -> Component.translatable("createWorld.tab.infs-farlands.param.error.octaves",
+                                key, v))
+                .build();
+    }
 
     private final CwgNoise selector;
     private final CwgNoise low;
@@ -108,40 +150,35 @@ public final class CwgNoiseSystem implements NoiseSystem {
     public CwgNoiseSystem(SystemArgs args) {
         boolean foldCoordinates = !args.getBoolean("farLands");
 
-        this.noiseSampleSizeX = requireSampleSize("noiseSampleSizeX", args.getInt("noiseSampleSizeX"));
-        this.noiseSampleSizeY = requireSampleSize("noiseSampleSizeY", args.getInt("noiseSampleSizeY"));
-        int sampleZ = requireSampleSize("noiseSampleSizeZ", args.getInt("noiseSampleSizeZ"));
-        if (this.noiseSampleSizeX != sampleZ) {
-            throw new IllegalArgumentException(
-                    "farlands: noiseSampleSizeX and noiseSampleSizeZ must be equal, a cell has one horizontal edge");
-        }
+        this.noiseSampleSizeX = args.getInt("noiseSampleSizeX");
+        this.noiseSampleSizeY = args.getInt("noiseSampleSizeY");
 
         // 四个种子按顺序取自同一条随机流，顺序换了四路噪声互换。
         Random random = new Random(args.getLong("seed"));
         this.selector = new CwgNoise(
-                requireFrequency("selectorNoiseFrequencyX", args.getDouble("selectorNoiseFrequencyX")),
-                requireFrequency("selectorNoiseFrequencyY", args.getDouble("selectorNoiseFrequencyY")),
-                requireFrequency("selectorNoiseFrequencyZ", args.getDouble("selectorNoiseFrequencyZ")),
-                requireOctaves("selectorNoiseOctaves", args.getInt("selectorNoiseOctaves")),
+                args.getDouble("selectorNoiseFrequencyX"),
+                args.getDouble("selectorNoiseFrequencyY"),
+                args.getDouble("selectorNoiseFrequencyZ"),
+                args.getInt("selectorNoiseOctaves"),
                 CwgNoise.foldSeed(random.nextLong()), foldCoordinates);
         this.low = new CwgNoise(
-                requireFrequency("lowNoiseFrequencyX", args.getDouble("lowNoiseFrequencyX")),
-                requireFrequency("lowNoiseFrequencyY", args.getDouble("lowNoiseFrequencyY")),
-                requireFrequency("lowNoiseFrequencyZ", args.getDouble("lowNoiseFrequencyZ")),
-                requireOctaves("lowNoiseOctaves", args.getInt("lowNoiseOctaves")),
+                args.getDouble("lowNoiseFrequencyX"),
+                args.getDouble("lowNoiseFrequencyY"),
+                args.getDouble("lowNoiseFrequencyZ"),
+                args.getInt("lowNoiseOctaves"),
                 CwgNoise.foldSeed(random.nextLong()), foldCoordinates);
         this.high = new CwgNoise(
-                requireFrequency("highNoiseFrequencyX", args.getDouble("highNoiseFrequencyX")),
-                requireFrequency("highNoiseFrequencyY", args.getDouble("highNoiseFrequencyY")),
-                requireFrequency("highNoiseFrequencyZ", args.getDouble("highNoiseFrequencyZ")),
-                requireOctaves("highNoiseOctaves", args.getInt("highNoiseOctaves")),
+                args.getDouble("highNoiseFrequencyX"),
+                args.getDouble("highNoiseFrequencyY"),
+                args.getDouble("highNoiseFrequencyZ"),
+                args.getInt("highNoiseOctaves"),
                 CwgNoise.foldSeed(random.nextLong()), foldCoordinates);
         // depth 只有水平两轴，竖直频率为 0，因此不参与竖直方向的饱和。
         this.depth = new CwgNoise(
-                requireFrequency("depthNoiseFrequencyX", args.getDouble("depthNoiseFrequencyX")),
+                args.getDouble("depthNoiseFrequencyX"),
                 0.0,
-                requireFrequency("depthNoiseFrequencyZ", args.getDouble("depthNoiseFrequencyZ")),
-                requireOctaves("depthNoiseOctaves", args.getInt("depthNoiseOctaves")),
+                args.getDouble("depthNoiseFrequencyZ"),
+                args.getInt("depthNoiseOctaves"),
                 CwgNoise.foldSeed(random.nextLong()), foldCoordinates);
 
         this.ops = new CwgDensity.Ops(
@@ -232,29 +269,5 @@ public final class CwgNoiseSystem implements NoiseSystem {
 
     private static DensityFunctions.Spline.Coordinate coordinate(DensityFunction function) {
         return new DensityFunctions.Spline.Coordinate(Holder.direct(function));
-    }
-
-    /** 采样格边长只能取 4、8、16，其它取值会让 cell 边长不整除 16。 */
-    private static int requireSampleSize(String key, int value) {
-        if (value != 4 && value != 8 && value != 16) {
-            throw new IllegalArgumentException(
-                    "farlands: sample cell edge must be 4, 8 or 16: " + key + " = " + value);
-        }
-        return value;
-    }
-
-    /** 频率必须为正的有限值。0 会让该路恒定，NaN 会让比较全部为假。 */
-    private static double requireFrequency(String key, double value) {
-        if (!(value > 0.0) || Double.isInfinite(value)) {
-            throw new IllegalArgumentException("farlands: frequency must be positive and finite: " + key + " = " + value);
-        }
-        return value;
-    }
-
-    private static int requireOctaves(String key, int value) {
-        if (value < 1 || value > 30) {
-            throw new IllegalArgumentException("farlands: octave count must be between 1 and 30: " + key + " = " + value);
-        }
-        return value;
     }
 }

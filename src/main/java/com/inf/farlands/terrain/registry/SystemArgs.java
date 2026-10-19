@@ -1,8 +1,12 @@
 package com.inf.farlands.terrain.registry;
 
+import java.math.BigDecimal;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+
+import com.mojang.serialization.Dynamic;
+import com.inf.farlands.terrain.registry.SystemsData.Arg;
 
 /**
  * 系统构造参数的键值视图。
@@ -20,6 +24,111 @@ public final class SystemArgs {
 
     private final Map<String, Object> values = new LinkedHashMap<>();
     private boolean frozen;
+
+    /**
+     * 由一份落盘或界面产出的参数值造出视图。
+     *
+     * <p>
+     * 类型分派与量程判定都在这里，两条入口共用同一份：`SystemsIO` 在构造系统之前用它，界面的规则求值
+     * 也用它。越界即抛，与各类型 setter 的失败语义一致。
+     */
+    public static SystemArgs of(Map<String, Arg> args) {
+        SystemArgs out = new SystemArgs();
+        for (Map.Entry<String, Arg> entry : args.entrySet()) {
+            set(out, entry.getKey(), entry.getValue());
+        }
+        return out;
+    }
+
+    private static void set(SystemArgs args, String key, Arg arg) {
+        switch (arg.type()) {
+            case INT -> args.setInt(key, (int) range(key, arg, Integer.MIN_VALUE, Integer.MAX_VALUE));
+            case LONG -> args.setLong(key, exactLong(key, arg));
+            case SHORT -> args.setShort(key, (short) range(key, arg, Short.MIN_VALUE, Short.MAX_VALUE));
+            case BYTE -> args.setByte(key, (byte) range(key, arg, Byte.MIN_VALUE, Byte.MAX_VALUE));
+            case FLOAT -> args.setFloat(key, (float) floatValue(key, arg));
+            case DOUBLE -> args.setDouble(key, doubleValue(key, arg));
+            case BOOLEAN -> args.setBoolean(key, number(key, arg).longValue() != 0L);
+            case STRING -> args.setString(key, string(key, arg));
+            case ENUM -> setEnum(args, key, arg);
+        }
+    }
+
+    private static long range(String key, Arg arg, long min, long max) {
+        long value = number(key, arg).longValue();
+        if (value < min || value > max) {
+            throw new IllegalStateException(
+                    "farlands: system arg " + key + " out of " + arg.type().id() + " range: " + value);
+        }
+        return value;
+    }
+
+    private static long exactLong(String key, Arg arg) {
+        Number number = number(key, arg);
+        try {
+            return new BigDecimal(number.toString()).longValueExact();
+        } catch (ArithmeticException | NumberFormatException e) {
+            throw new IllegalStateException("farlands: system arg " + key + " is not an integer in long range: " + number,
+                    e);
+        }
+    }
+
+    private static double doubleValue(String key, Arg arg) {
+        double value = number(key, arg).doubleValue();
+        if (Double.isNaN(value) || Double.isInfinite(value)) {
+            throw new IllegalStateException("farlands: system arg " + key + " is not a finite double: " + value);
+        }
+        return value;
+    }
+
+    private static double floatValue(String key, Arg arg) {
+        double value = number(key, arg).doubleValue();
+        if (Double.isNaN(value) || Double.isInfinite(value) || value < -Float.MAX_VALUE
+                || value > Float.MAX_VALUE) {
+            throw new IllegalStateException("farlands: system arg " + key + " out of float range: " + value);
+        }
+        return value;
+    }
+
+    private static Number number(String key, Arg arg) {
+        return number(key, arg.value());
+    }
+
+    private static <T> Number number(String key, Dynamic<T> value) {
+        return value.getOps().getNumberValue(value.getValue()).getOrThrow(
+                message -> new IllegalStateException("farlands: system arg " + key + " is not a number: " + message));
+    }
+
+    private static String string(String key, Arg arg) {
+        return string(key, arg.value());
+    }
+
+    private static <T> String string(String key, Dynamic<T> value) {
+        return value.getOps().getStringValue(value.getValue()).getOrThrow(
+                message -> new IllegalStateException("farlands: system arg " + key + " is not a string: " + message));
+    }
+
+    @SuppressWarnings({ "unchecked", "rawtypes" })
+    private static void setEnum(SystemArgs args, String key, Arg arg) {
+        String className = arg.enumClass().orElseThrow(() -> new IllegalStateException(
+                "farlands: system arg " + key + " declared as enum but missing enumClass"));
+        Class<?> type;
+        try {
+            type = Class.forName(className);
+        } catch (ClassNotFoundException e) {
+            throw new IllegalStateException("farlands: system arg " + key + " enum class not found: " + className, e);
+        }
+        if (!type.isEnum()) {
+            throw new IllegalStateException("farlands: system arg " + key + " class is not an enum: " + className);
+        }
+        String name = string(key, arg);
+        try {
+            args.setEnum(key, (Enum) Enum.valueOf((Class) type, name));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException(
+                    "farlands: system arg " + key + " has no such enum constant: " + className + "." + name, e);
+        }
+    }
 
     /** 键到值的只读视图。是视图不是快照，冻结前填充的变化对它可见。 */
     public Map<String, Object> asMap() {

@@ -45,5 +45,15 @@
   "createWorld.tab.infs-farlands.param.free.example": "Example:\n%s",
   "createWorld.tab.infs-farlands.param.line": "\"%1$s\": %2$s",
   "createWorld.tab.infs-farlands.param.type": "Type: %s",
-  "createWorld.tab.infs-farlands.param.seed.random": "Random seed each time"
+  "createWorld.tab.infs-farlands.param.seed.random": "Random seed each time",
+  "createWorld.tab.infs-farlands.param.error.missing": "Missing parameter %s",
+  "createWorld.tab.infs-farlands.param.error.not_zero": "Parameter %s must not be 0",
+  "createWorld.tab.infs-farlands.param.error.sample_size": "Parameter %1$s must be 4, 8 or 16, got %2$s",
+  "createWorld.tab.infs-farlands.param.error.frequency": "Parameter %1$s must be positive and finite, got %2$s",
+  "createWorld.tab.infs-farlands.param.error.octaves": "Parameter %1$s must be between 1 and 30, got %2$s",
+  "createWorld.tab.infs-farlands.param.error.half_width": "Parameter %1$s must be at least 1, got %2$s",
+  "createWorld.tab.infs-farlands.param.error.sample_xz_equal": "The two horizontal sample cells must be equal, got %1$s and %2$s",
+  "createWorld.tab.infs-farlands.param.error.radius_exceeds_half_width": "radius must exceed halfWidth, got %1$s and %2$s",
+  "createWorld.tab.infs-farlands.param.error.outer_edge": "The outer edge %1$s is beyond the playable limit %2$s",
+  "createWorld.tab.infs-farlands.param.error.table_cells": "The lookup needs %1$s columns, the cap is %2$s"
 }

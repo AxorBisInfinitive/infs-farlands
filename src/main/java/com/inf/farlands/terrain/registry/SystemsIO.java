@@ -1,12 +1,13 @@
 package com.inf.farlands.terrain.registry;
 
-import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
+import java.util.function.Function;
 
 import com.inf.farlands.terrain.BiomeSystem;
 import com.inf.farlands.terrain.CarverSystem;
@@ -16,7 +17,6 @@ import com.inf.farlands.terrain.TerrainSystem;
 import com.inf.farlands.terrain.registry.SystemsData.Arg;
 import com.inf.farlands.terrain.registry.SystemsData.LevelSelection;
 import com.inf.farlands.terrain.registry.SystemsData.SystemSelection;
-import com.mojang.serialization.Dynamic;
 
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
@@ -258,125 +258,61 @@ public final class SystemsIO {
     }
 
     public static TerrainSystem terrain(LevelSelection selection) {
-        return SystemRegistries.terrain(systemId(selection.terrain()), args(selection.terrain()));
+        return SystemRegistries.terrain(systemId(selection.terrain()),
+                args(selection.terrain(), SystemRegistries::terrainClassOf));
     }
 
     public static BiomeSystem biome(LevelSelection selection) {
-        return SystemRegistries.biome(systemId(selection.biome()), args(selection.biome()));
+        return SystemRegistries.biome(systemId(selection.biome()),
+                args(selection.biome(), SystemRegistries::biomeClassOf));
     }
 
     public static SurfaceSystem surface(LevelSelection selection) {
-        return SystemRegistries.surface(systemId(selection.surface()), args(selection.surface()));
+        return SystemRegistries.surface(systemId(selection.surface()),
+                args(selection.surface(), SystemRegistries::surfaceClassOf));
     }
 
     public static CarverSystem carver(LevelSelection selection) {
-        return SystemRegistries.carver(systemId(selection.carver()), args(selection.carver()));
+        return SystemRegistries.carver(systemId(selection.carver()),
+                args(selection.carver(), SystemRegistries::carverClassOf));
     }
 
     public static DecorationSystem decoration(LevelSelection selection) {
-        return SystemRegistries.decoration(systemId(selection.decoration()), args(selection.decoration()));
+        return SystemRegistries.decoration(systemId(selection.decoration()),
+                args(selection.decoration(), SystemRegistries::decorationClassOf));
     }
 
     private static SystemId systemId(SystemSelection selection) {
         return new SystemId(selection.id());
     }
 
-    /** 缺参数由 SystemArgs 的取值方抛，类型与越界在这里抛。 */
-    private static SystemArgs args(SystemSelection selection) {
-        SystemArgs args = new SystemArgs();
-        for (Map.Entry<String, Arg> entry : selection.args().entrySet()) {
-            set(args, entry.getKey(), entry.getValue());
+    /**
+     * 造参数视图，先跑该系统的声明级校验。
+     *
+     * <p>
+     * 手改过的 systems.dat 可能违反某条跨字段规则，而那些判据原先只写在构造器里，症状是世界加载期一份
+     * 栈顶在反射上的崩溃。这里拦下之后消息能指到参数，用的还是创建世界页签那一份声明。
+     */
+    private static SystemArgs args(SystemSelection selection, Function<SystemId, Class<?>> classOf) {
+        SystemId id = systemId(selection);
+        SystemParams params = SystemParams.declaredBy(classOf.apply(id));
+        if (params != null) {
+            List<SystemParams.Violation> violations = params.validate(selection.args());
+            if (!violations.isEmpty()) {
+                throw new IllegalStateException("farlands: system " + id + " 参数不合规: " + describe(violations));
+            }
         }
-        return args;
+        return SystemArgs.of(selection.args());
     }
 
-    private static void set(SystemArgs args, String key, Arg arg) {
-        switch (arg.type()) {
-            case INT -> args.setInt(key, (int) range(key, arg, Integer.MIN_VALUE, Integer.MAX_VALUE));
-            case LONG -> args.setLong(key, exactLong(key, arg));
-            case SHORT -> args.setShort(key, (short) range(key, arg, Short.MIN_VALUE, Short.MAX_VALUE));
-            case BYTE -> args.setByte(key, (byte) range(key, arg, Byte.MIN_VALUE, Byte.MAX_VALUE));
-            case FLOAT -> args.setFloat(key, (float) floatValue(key, arg));
-            case DOUBLE -> args.setDouble(key, doubleValue(key, arg));
-            case BOOLEAN -> args.setBoolean(key, number(key, arg).longValue() != 0L);
-            case STRING -> args.setString(key, string(key, arg));
-            case ENUM -> setEnum(args, key, arg);
+    private static String describe(List<SystemParams.Violation> violations) {
+        StringBuilder sb = new StringBuilder();
+        for (SystemParams.Violation violation : violations) {
+            if (sb.length() > 0) {
+                sb.append("; ");
+            }
+            sb.append(violation.message().getString());
         }
-    }
-
-    private static long range(String key, Arg arg, long min, long max) {
-        long value = number(key, arg).longValue();
-        if (value < min || value > max) {
-            throw new IllegalStateException(
-                    "farlands: system arg " + key + " out of " + arg.type().id() + " range: " + value);
-        }
-        return value;
-    }
-
-    private static long exactLong(String key, Arg arg) {
-        Number number = number(key, arg);
-        try {
-            return new BigDecimal(number.toString()).longValueExact();
-        } catch (ArithmeticException | NumberFormatException e) {
-            throw new IllegalStateException("farlands: system arg " + key + " is not an integer in long range: " + number,
-                    e);
-        }
-    }
-
-    private static double doubleValue(String key, Arg arg) {
-        double value = number(key, arg).doubleValue();
-        if (Double.isNaN(value) || Double.isInfinite(value)) {
-            throw new IllegalStateException("farlands: system arg " + key + " is not a finite double: " + value);
-        }
-        return value;
-    }
-
-    private static double floatValue(String key, Arg arg) {
-        double value = number(key, arg).doubleValue();
-        if (Double.isNaN(value) || Double.isInfinite(value) || value < -Float.MAX_VALUE
-                || value > Float.MAX_VALUE) {
-            throw new IllegalStateException("farlands: system arg " + key + " out of float range: " + value);
-        }
-        return value;
-    }
-
-    private static Number number(String key, Arg arg) {
-        return number(key, arg.value());
-    }
-
-    private static <T> Number number(String key, Dynamic<T> value) {
-        return value.getOps().getNumberValue(value.getValue()).getOrThrow(
-                message -> new IllegalStateException("farlands: system arg " + key + " is not a number: " + message));
-    }
-
-    private static String string(String key, Arg arg) {
-        return string(key, arg.value());
-    }
-
-    private static <T> String string(String key, Dynamic<T> value) {
-        return value.getOps().getStringValue(value.getValue()).getOrThrow(
-                message -> new IllegalStateException("farlands: system arg " + key + " is not a string: " + message));
-    }
-
-    @SuppressWarnings({ "unchecked", "rawtypes" })
-    private static void setEnum(SystemArgs args, String key, Arg arg) {
-        String className = arg.enumClass().orElseThrow(() -> new IllegalStateException(
-                "farlands: system arg " + key + " declared as enum but missing enumClass"));
-        Class<?> type;
-        try {
-            type = Class.forName(className);
-        } catch (ClassNotFoundException e) {
-            throw new IllegalStateException("farlands: system arg " + key + " enum class not found: " + className, e);
-        }
-        if (!type.isEnum()) {
-            throw new IllegalStateException("farlands: system arg " + key + " class is not an enum: " + className);
-        }
-        String name = string(key, arg);
-        try {
-            args.setEnum(key, (Enum) Enum.valueOf((Class) type, name));
-        } catch (IllegalArgumentException e) {
-            throw new IllegalStateException(
-                    "farlands: system arg " + key + " has no such enum constant: " + className + "." + name, e);
-        }
+        return sb.toString();
     }
 }

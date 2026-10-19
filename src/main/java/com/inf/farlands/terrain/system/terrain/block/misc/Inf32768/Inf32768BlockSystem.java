@@ -1,6 +1,7 @@
 package com.inf.farlands.terrain.system.terrain.block.misc.Inf32768;
 
 import java.util.Arrays;
+import java.util.Set;
 
 import com.inf.farlands.terrain.BlockSystem;
 import com.inf.farlands.terrain.registry.SystemArgs;
@@ -9,6 +10,7 @@ import com.inf.farlands.terrain.registry.SystemParamSpec;
 import com.inf.farlands.terrain.registry.SystemParams;
 import com.inf.farlands.util.world.WorldBounds;
 
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -42,8 +44,8 @@ import net.minecraft.world.level.block.state.BlockState;
  * 否则 vanilla 地表会按高度图把它刷成草皮、雕刻会打洞、装饰会往上放地物。
  *
  * <p>
- * 参数在构造期校验，违反直接抛：世界起不来，能立刻指到是哪个参数，而不是等到生成线程上才炸。查表
- * 规模也有上限，半径大到表撑不下时同样在构造期抛。
+ * 四条判据写在声明层：半宽下界是单参数检查，半径与半宽的三条关系是跨字段规则。违反时创建世界页签在
+ * 提交前拦下并标红两个框，落盘的配置则在读回时抛，不会等到构造器里才炸。
  */
 public final class Inf32768BlockSystem implements BlockSystem {
 
@@ -82,11 +84,72 @@ public final class Inf32768BlockSystem implements BlockSystem {
             Blocks.MAGENTA_CONCRETE.defaultBlockState(),
     };
 
-    /** 声明项：瓣的半长与带子半宽。 */
+    /**
+     * 声明项：瓣的半长与带子半宽。
+     *
+     * <p>
+     * 半宽的下界是单参数判据，写在 spec 上。另外三条都由这对参数共同决定：半径必须大于半宽、外缘不得
+     * 越过可玩上限、查表列数不得超上限，写成跨字段规则，失败时两个框一起标红。
+     *
+     * <p>
+     * 三条派生判据与构造器分配数组时用的是同一个 {@link #geometry}，两边各写一份算式迟早会漂移，而
+     * 漂移的后果是判据放行、构造时按另一份算式炸掉。
+     */
     @SystemDefaultParams
     public static final SystemParams DEFAULT_PARAMS = SystemParams.of(
             SystemParamSpec.ofInt("radius").define(64).build(),
-            SystemParamSpec.ofInt("halfWidth").define(8).build());
+            SystemParamSpec.ofInt("halfWidth").define(8)
+                    .check(v -> v >= 1,
+                            v -> Component.translatable(
+                                    "createWorld.tab.infs-farlands.param.error.half_width", "halfWidth", v))
+                    .build())
+            .withConstraint(
+                    SystemParams.rule(Set.of("radius", "halfWidth"), args -> {
+                        int radius = args.getInt("radius");
+                        int halfWidth = args.getInt("halfWidth");
+                        return radius > halfWidth ? null
+                                : Component.translatable(
+                                        "createWorld.tab.infs-farlands.param.error.radius_exceeds_half_width",
+                                        radius, halfWidth);
+                    }),
+                    SystemParams.rule(Set.of("radius", "halfWidth"), args -> {
+                        long outer = outerEdge(args.getInt("radius"), args.getInt("halfWidth"));
+                        return outer <= WorldBounds.MAX_PLAYABLE_BLOCK ? null
+                                : Component.translatable(
+                                        "createWorld.tab.infs-farlands.param.error.outer_edge",
+                                        outer, WorldBounds.MAX_PLAYABLE_BLOCK);
+                    }),
+                    SystemParams.rule(Set.of("radius", "halfWidth"), args -> {
+                        long cells = geometry(args.getInt("radius"), args.getInt("halfWidth")).cells();
+                        return cells <= MAX_CELLS ? null
+                                : Component.translatable(
+                                        "createWorld.tab.infs-farlands.param.error.table_cells",
+                                        cells, MAX_CELLS);
+                    }));
+
+    /** 一块查表几何。全在 long 上算再落回 int，int 溢出不会让上界判据失效。 */
+    private record Geometry(int minX, int minZ, int sizeX, int sizeZ, long cells) {
+    }
+
+    /** 带子外缘，取 long 以免两个 int 相加回绕。 */
+    private static long outerEdge(int radius, int halfWidth) {
+        return (long) radius + (long) halfWidth;
+    }
+
+    /**
+     * 由两个参数算出包围盒与列数。
+     *
+     * <p>
+     * 中线在 z 方向的最远点是 a/2，radius 为奇数时它是 x.5，整数除法会截掉半格并把最外侧裁掉，所以
+     * halfZ 向上取整。
+     */
+    private static Geometry geometry(int radius, int halfWidth) {
+        long outer = outerEdge(radius, halfWidth);
+        long halfZ = ((long) radius + 1L) / 2L;
+        long sizeX = 2L * outer + 1L;
+        long sizeZ = 2L * (halfZ + halfWidth) + 1L;
+        return new Geometry((int) -outer, (int) -(halfZ + halfWidth), (int) sizeX, (int) sizeZ, sizeX * sizeZ);
+    }
 
     private final int radius;
     private final int halfWidth;
@@ -118,39 +181,23 @@ public final class Inf32768BlockSystem implements BlockSystem {
     public Inf32768BlockSystem(SystemArgs args) {
         this.radius = args.getInt("radius");
         this.halfWidth = args.getInt("halfWidth");
-        // 内缘要留在中心之外，否则两瓣的带子在同一处重叠，画出来是一团。
-        if (this.halfWidth < 1 || this.radius <= this.halfWidth) {
-            throw new IllegalArgumentException(
-                    "farlands: inf32768 needs halfWidth >= 1 and radius > halfWidth, got "
-                            + this.radius + " and " + this.halfWidth);
-        }
-        // 外缘是带子上离原点最远的一格，越过可玩界就写不进去，那些格会被静默丢掉。
-        long outer = (long) this.radius + this.halfWidth;
-        if (outer > WorldBounds.MAX_PLAYABLE_BLOCK) {
-            throw new IllegalArgumentException("farlands: inf32768 outer edge " + outer
-                    + " exceeds the playable limit " + WorldBounds.MAX_PLAYABLE_BLOCK);
-        }
-        // 中线在 z 方向的最远点是 a/2，radius 为奇数时它是 x.5，整数除法会截掉半格并把最外侧裁掉，
-        // 所以这里向上取整。
-        int halfZ = (this.radius + 1) / 2;
-        this.minX = -(int) outer;
-        this.minZ = -(halfZ + this.halfWidth);
-        this.sizeX = 2 * (int) outer + 1;
-        this.sizeZ = 2 * (halfZ + this.halfWidth) + 1;
-        long cells = (long) this.sizeX * this.sizeZ;
-        if (cells > MAX_CELLS) {
-            throw new IllegalArgumentException("farlands: inf32768 lookup needs " + cells
-                    + " columns, cap is " + MAX_CELLS);
-        }
+        Geometry geometry = geometry(this.radius, this.halfWidth);
+        this.minX = geometry.minX();
+        this.minZ = geometry.minZ();
+        this.sizeX = geometry.sizeX();
+        this.sizeZ = geometry.sizeZ();
         this.widthSq = (double) this.halfWidth * this.halfWidth;
-        this.distance = new float[this.sizeX * this.sizeZ];
-        this.halfSin = new float[this.sizeX * this.sizeZ];
-        this.halfCos = new float[this.sizeX * this.sizeZ];
-        this.phase = new float[this.sizeX * this.sizeZ];
-        this.distance2 = new float[this.sizeX * this.sizeZ];
-        this.halfSin2 = new float[this.sizeX * this.sizeZ];
-        this.halfCos2 = new float[this.sizeX * this.sizeZ];
-        this.phase2 = new float[this.sizeX * this.sizeZ];
+        // 三条上界已在声明层拦过，这里的 toIntExact 只兜住绕过注册表直接构造的那条路：列数超出 int
+        // 时给一条指到列数的异常，而不是让它落到数组分配上变成负长度或 OOM。
+        int total = Math.toIntExact(geometry.cells());
+        this.distance = new float[total];
+        this.halfSin = new float[total];
+        this.halfCos = new float[total];
+        this.phase = new float[total];
+        this.distance2 = new float[total];
+        this.halfSin2 = new float[total];
+        this.halfCos2 = new float[total];
+        this.phase2 = new float[total];
         this.paint();
     }
 

@@ -45,5 +45,15 @@
   "createWorld.tab.infs-farlands.param.free.example": "示例：\n%s",
   "createWorld.tab.infs-farlands.param.line": "\"%1$s\": %2$s",
   "createWorld.tab.infs-farlands.param.type": "类型：%s",
-  "createWorld.tab.infs-farlands.param.seed.random": "每次随机生成种子"
+  "createWorld.tab.infs-farlands.param.seed.random": "每次随机生成种子",
+  "createWorld.tab.infs-farlands.param.error.missing": "缺少参数 %s",
+  "createWorld.tab.infs-farlands.param.error.not_zero": "参数 %s 不能为 0",
+  "createWorld.tab.infs-farlands.param.error.sample_size": "参数 %1$s 只能取 4、8 或 16，实际为 %2$s",
+  "createWorld.tab.infs-farlands.param.error.frequency": "参数 %1$s 必须是正的有限值，实际为 %2$s",
+  "createWorld.tab.infs-farlands.param.error.octaves": "参数 %1$s 必须在 1 到 30 之间，实际为 %2$s",
+  "createWorld.tab.infs-farlands.param.error.half_width": "参数 %1$s 至少为 1，实际为 %2$s",
+  "createWorld.tab.infs-farlands.param.error.sample_xz_equal": "两个水平采样格边长必须相等，实际为 %1$s 与 %2$s",
+  "createWorld.tab.infs-farlands.param.error.radius_exceeds_half_width": "radius 必须大于 halfWidth，实际为 %1$s 与 %2$s",
+  "createWorld.tab.infs-farlands.param.error.outer_edge": "外缘 %1$s 越过可玩上限 %2$s",
+  "createWorld.tab.infs-farlands.param.error.table_cells": "查表需要 %1$s 列，上限是 %2$s"
 }

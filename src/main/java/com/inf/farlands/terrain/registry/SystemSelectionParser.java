@@ -1,7 +1,10 @@
 package com.inf.farlands.terrain.registry;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import com.inf.farlands.terrain.registry.SystemsData.Arg;
 import com.inf.farlands.terrain.registry.SystemsData.ArgType;
@@ -11,6 +14,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtOps;
 import net.minecraft.nbt.Tag;
 import net.minecraft.nbt.TagParser;
+import net.minecraft.network.chat.Component;
 
 /**
  * 界面参数文本到 {@link Arg} 的反向解析，{@link SystemsIO#args} 的逆过程。
@@ -37,27 +41,63 @@ public final class SystemSelectionParser {
     /**
      * 该段文本按声明是否可用：可用返回 null，否则返回可显示的错因。空框按关键字与字面默认值判，
      * 与 {@link #parseDeclared} 的走法一致。
+     *
+     * <p>
+     * 解析成功之后还要过该参数自己声明的单值检查，所以逐键校验同时覆盖类型、量程与语义集合三层，
+     * 而跨字段规则不在这里，见 {@link #violations}。
      */
-    public static String problem(SystemParamSpec spec, String text) {
+    public static Component problem(SystemParamSpec spec, String text) {
         try {
-            if (text.isEmpty()) {
-                fromEmpty(spec);
-            } else {
-                parseText(spec, text);
-            }
-            return null;
+            Arg arg = text.isEmpty() ? fromEmpty(spec) : parseText(spec, text);
+            return spec.violation(arg);
         } catch (RuntimeException e) {
-            return message(e);
+            return Component.literal(message(e));
         }
     }
 
+    /**
+     * 一族系统在当前文本下的全部违规，供提交前的那一次检验与界面标红共用。
+     *
+     * <p>
+     * 次序：先逐参数解析，任一失败即只返回解析失败，因为跨字段规则读的是已解析的值；全部解析成功才把值
+     * 交给 {@link SystemParams#validate}，由它跑单值检查与跨字段规则。
+     *
+     * <p>
+     * 没有声明时界面是一个自由框，整张 SNBT 一次解析，失败即一条违规，键取空串。
+     */
+    public static List<SystemParams.Violation> violations(Class<?> systemClass, Map<String, String> texts) {
+        SystemParams declared = SystemParams.declaredBy(systemClass);
+        if (declared == null) {
+            try {
+                parseFree(texts);
+                return List.of();
+            } catch (RuntimeException e) {
+                return List.of(new SystemParams.Violation(Set.of(""), Component.literal(message(e))));
+            }
+        }
+        Map<String, Arg> parsed = new LinkedHashMap<>();
+        List<SystemParams.Violation> out = new ArrayList<>();
+        for (SystemParamSpec spec : declared.entries()) {
+            String text = texts.getOrDefault(spec.key(), "");
+            try {
+                parsed.put(spec.key(), text.isEmpty() ? fromEmpty(spec) : parseText(spec, text));
+            } catch (RuntimeException e) {
+                out.add(new SystemParams.Violation(Set.of(spec.key()), Component.literal(message(e))));
+            }
+        }
+        if (!out.isEmpty()) {
+            return out;
+        }
+        return declared.validate(parsed);
+    }
+
     /** 自由参数框文本是否可用：可用返回 null，否则返回可显示的错因。 */
-    public static String problemFree(String text) {
+    public static Component problemFree(String text) {
         try {
             parseFree(Map.of("", text));
             return null;
         } catch (RuntimeException e) {
-            return message(e);
+            return Component.literal(message(e));
         }
     }
 
