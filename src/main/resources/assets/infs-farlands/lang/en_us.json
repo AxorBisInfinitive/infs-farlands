@@ -55,5 +55,6 @@
   "createWorld.tab.infs-farlands.param.error.sample_xz_equal": "The two horizontal sample cells must be equal, got %1$s and %2$s",
   "createWorld.tab.infs-farlands.param.error.radius_exceeds_half_width": "radius must exceed halfWidth, got %1$s and %2$s",
   "createWorld.tab.infs-farlands.param.error.outer_edge": "The outer edge %1$s is beyond the playable limit %2$s",
-  "createWorld.tab.infs-farlands.param.error.table_cells": "The lookup needs %1$s columns, the cap is %2$s"
+  "createWorld.tab.infs-farlands.param.error.table_cells": "The lookup needs %1$s columns, the cap is %2$s",
+  "createWorld.tab.infs-farlands.param.error.cell_aligned": "Parameter %1$s must be a positive multiple of %2$s, got %3$s"
 }

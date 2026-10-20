@@ -105,6 +105,8 @@ public class FarlandsRegister {
                 com.inf.farlands.terrain.system.terrain.noise.theNether.Vanilla.VanillaNoiseSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_THE_END_VANILLA_NOISE_SYSTEM,
                 com.inf.farlands.terrain.system.terrain.noise.theEnd.Vanilla.VanillaNoiseSystem.class);
+        SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_THE_END_LAYERS_NOISE_SYSTEM,
+                com.inf.farlands.terrain.system.terrain.noise.theEnd.Layers.LayersNoiseSystem.class);
 
         SystemRegistries.registerBiome(SystemRegistries.BIOME_MISC_VOID_BIOME_SYSTEM, VoidBiomeSystem.class);
         SystemRegistries.registerBiome(SystemRegistries.BIOME_OVERWORLD_VANILLA_BIOME_SYSTEM,

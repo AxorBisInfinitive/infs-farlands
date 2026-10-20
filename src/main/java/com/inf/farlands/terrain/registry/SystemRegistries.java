@@ -54,6 +54,7 @@ public final class SystemRegistries {
     public static final SystemId TERRAIN_MISC_SKY_GIRL_NOISE_SYSTEM = id("misc_sky_girl_noise_system");
     public static final SystemId TERRAIN_THE_NETHER_VANILLA_NOISE_SYSTEM = id("the_nether_vanilla_noise_system");
     public static final SystemId TERRAIN_THE_END_VANILLA_NOISE_SYSTEM = id("the_end_vanilla_noise_system");
+    public static final SystemId TERRAIN_THE_END_LAYERS_NOISE_SYSTEM = id("the_end_layers_noise_system");
 
     public static final SystemId BIOME_MISC_VOID_BIOME_SYSTEM = id("misc_void_biome_system");
     public static final SystemId BIOME_OVERWORLD_VANILLA_BIOME_SYSTEM = id("overworld_vanilla_biome_system");
