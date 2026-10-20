@@ -19,6 +19,7 @@ import com.inf.farlands.terrain.system.surface.overworld.Vanilla.VanillaSurfaceS
 import com.inf.farlands.terrain.system.terrain.block.misc.Inf32768.Inf32768BlockSystem;
 import com.inf.farlands.terrain.system.terrain.block.misc.Sierpinski.SierpinskiPyramidBlockSystem;
 import com.inf.farlands.terrain.system.terrain.block.misc.TheFourthDimension.TheFourthDimensionBlockSystem;
+import com.inf.farlands.terrain.system.terrain.block.misc.V.VBlockSystem;
 import com.inf.farlands.terrain.system.terrain.block.overworld.Infdev.Infdev20100226BlockSystem;
 import com.inf.farlands.terrain.system.terrain.noise.misc.Hex.HexNoiseSystem;
 import com.inf.farlands.terrain.system.terrain.noise.misc.SkyGirl.SkyGirlNoiseSystem;
@@ -93,6 +94,7 @@ public class FarlandsRegister {
                 TheFourthDimensionBlockSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_INF32768_BLOCK_SYSTEM,
                 Inf32768BlockSystem.class);
+        SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_V_BLOCK_SYSTEM, VBlockSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_OVERWORLD_CWG_NOISE_SYSTEM,
                 CwgNoiseSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_OVERWORLD_VANILLA_263_NOISE_SYSTEM,

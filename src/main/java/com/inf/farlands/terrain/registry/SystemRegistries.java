@@ -47,6 +47,7 @@ public final class SystemRegistries {
     public static final SystemId TERRAIN_MISC_THE_FOURTH_DIMENSION_BLOCK_SYSTEM = id(
             "misc_the_fourth_dimension_block_system");
     public static final SystemId TERRAIN_MISC_INF32768_BLOCK_SYSTEM = id("misc_inf32768_block_system");
+    public static final SystemId TERRAIN_MISC_V_BLOCK_SYSTEM = id("misc_v_block_system");
     public static final SystemId TERRAIN_OVERWORLD_CWG_NOISE_SYSTEM = id("overworld_cwg_noise_system");
     public static final SystemId TERRAIN_OVERWORLD_VANILLA_263_NOISE_SYSTEM = id(
             "overworld_vanilla_263_noise_system");
