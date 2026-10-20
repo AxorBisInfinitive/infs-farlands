@@ -6,6 +6,7 @@ import com.inf.farlands.serialize.SectionIO;
 import com.inf.farlands.serialize.SectionLifecycle;
 import com.inf.farlands.serialize.SectionStage;
 import com.inf.farlands.terrain.ChunkBeardifier;
+import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.biomeFiller.BiomeFiller;
 import com.inf.farlands.terrain.debug.StageMetrics;
 import com.inf.farlands.terrain.decorationFiller.DecorationFiller;
@@ -175,23 +176,22 @@ public abstract class GenerationChunkHolderMixin {
             // 顺序由 GenTask.execute 的门保证，而那道门查的是不变量本身，即没有 Beardifier 就不填，
             // 不是「有没有登记为等结构相」这个代理：登记的落点晚于本 chunk 对 latestChunk 可见的那一刻。
             //
-            // 结构生成被关掉的世界走捷径：那时 createStructures 什么都不会建、引用表保持为空，而
-            // forStructuresInChunk 对空起点表返回的就是 Beardifier.EMPTY。所以跳过起点相、门与 pin
-            // 和照常跑完，交出来的是同一个对象。照调 forStructuresInChunk 而不是直接塞 EMPTY，是为了
-            // 不让这里成为唯一算得出特例的地方。
-            //
-            // 可玩界之外的 chunk 走同一支：它们没有可玩方块，起点相也不该跑，取到的是同一个 EMPTY。
-            if (!StructureDriver.structuresEnabled(level) || !StructureDriver.inStructureRange(levelchunk)) {
+            // 两道与内容无关的安全门，放在调用点保证任何族都绕不过：维度关掉结构生成的，以及可玩界之外
+            // 的 chunk，都不进起点相。后者的成因见 StructureDriver#inStructureRange。
+            boolean mayHaveStructures = StructureDriver.structuresEnabled(level)
+                    && StructureDriver.inStructureRange(levelchunk);
+            // 起点相归地物族：自己算还是走宿主基座由族决定，见 DecorationSystem#createStructures。
+            boolean started = mayHaveStructures
+                    && ((LevelSystems) level).decorationSystem().createStructures(level, levelchunk);
+            if (!started) {
+                // 无结构：起点表为空，引用表也为空，Beardifier 取空起点表的结果即 EMPTY。照调它而不是
+                // 直接塞 EMPTY，是为了不让这里成为唯一算得出特例的地方。
                 ((ChunkBeardifier) levelchunk).setBeardifier(
                         Beardifier.forStructuresInChunk(level.structureManager(), levelchunk.getPos()));
+            } else if (StructureDriver.referencesBuildable(level, levelchunk)) {
+                farlandsStructureReady(level, levelchunk);
             } else {
-                StructureDriver.ensureStarts(level, levelchunk);
-                if (StructureDriver.referencesBuildable(level, levelchunk)) {
-                    farlandsStructureReady(level, levelchunk);
-                } else {
-                    StructureDriver.await(level, levelchunk,
-                            () -> farlandsStructureReady(level, levelchunk));
-                }
+                StructureDriver.await(level, levelchunk, () -> farlandsStructureReady(level, levelchunk));
             }
             farlandsGenerateTail(level, levelchunk);
         } catch (Exception e) {

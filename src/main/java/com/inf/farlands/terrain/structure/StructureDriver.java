@@ -27,11 +27,11 @@ import net.minecraft.world.level.chunk.LevelChunk;
  * 依赖顺序，三条都是铁的：
  *
  * <ol>
- * <li><b>起点相</b>在 {@link #ensureStarts}，只读中心自己，写也只写中心自己的
+ * <li><b>起点相</b>在 {@link #createStructures}，只读中心自己，写也只写中心自己的
  * {@code structureStarts}。{@code createStructures} 判已有起点，再按
  * {@code generatorState} 决定
- * 该 chunk 落哪个结构集的起点。它不需要任何邻居，所以没有门，存在流程里无条件跑一次，由
- * {@code STARTED} 记住已算过。</li>
+ * 该 chunk 落哪个结构集的起点。它不需要任何邻居，所以没有门；跑不跑由地物族的
+ * {@code DecorationSystem#createStructures} 决定，跑过的由 {@code STARTED} 记住。</li>
  * <li><b>引用相</b>在 {@link #buildReferences}，读 ±8 的起点表，即 {@code createReferences}
  * 的
  * 17×17 起点网格，写中心自己的引用表。±8 是 vanilla FEATURES 步对 {@code STRUCTURE_STARTS} 的
@@ -85,7 +85,18 @@ public final class StructureDriver {
     }
 
     /**
-     * 起点相：该 chunk 自己的结构起点。幂等，已算过直接返回。主线程调用。
+     * 起点相只跑一次：首次返回真，之后返回假。主线程调用。
+     *
+     * <p>
+     * 自带基座的族与 {@link #createStructures} 共用它，所以「已算过」的判据只有这一处。
+     */
+    public static boolean claimStructures(ServerLevel level, LevelChunk chunk) {
+        Set<Long> started = STARTED.computeIfAbsent(level.dimension(), k -> ConcurrentHashMap.newKeySet());
+        return started.add(chunk.getPos().pack());
+    }
+
+    /**
+     * 起点相：该 chunk 自己的结构起点，用宿主维度的基座。幂等，已算过直接返回。主线程调用。
      *
      * <p>
      * 必须夹在 {@link TerrainSystemContext} 的 set 与 clear 之间：起点取 Y 锚会走
@@ -94,11 +105,8 @@ public final class StructureDriver {
      * 而 {@code NoiseChunkMixin} 的两处 {@code @Redirect} 都取这个侧信道，未设即抛。形状照
      * {@code AbstractTerrainFiller.fill}。
      */
-    public static void ensureStarts(ServerLevel level, LevelChunk chunk) {
-        ResourceKey<Level> dimension = level.dimension();
-        long chunkKey = chunk.getPos().pack();
-        Set<Long> started = STARTED.computeIfAbsent(dimension, k -> ConcurrentHashMap.newKeySet());
-        if (started.contains(chunkKey)) {
+    public static void createStructures(ServerLevel level, LevelChunk chunk) {
+        if (!claimStructures(level, chunk)) {
             return;
         }
         TerrainSystemContext.set(((LevelSystems) level).terrainSystem());
@@ -109,11 +117,10 @@ public final class StructureDriver {
                     level.structureManager(),
                     chunk,
                     level.getStructureManager(),
-                    dimension);
+                    level.dimension());
         } finally {
             TerrainSystemContext.clear();
         }
-        started.add(chunkKey);
     }
 
     /**
@@ -145,8 +152,9 @@ public final class StructureDriver {
      * 引用相是否可做：中心 ±{@link #STRUCTURE_READ_RADIUS} 的壳都在场。主线程调用。
      *
      * <p>
-     * 在场即够：每个壳在存在流程里都已跑过自己的起点相，因为 {@link #ensureStarts} 无条件跑；
-     * 旧档的起点由读盘路径填回。所以壳在场蕴含起点表可读。
+     * 在场即够：每个壳在存在流程里都已跑过自己的起点相，因为 {@link #createStructures} 由存在流程统一
+     * 调一次；旧档的起点由读盘路径填回。所以壳在场蕴含起点表可读。不产结构的族不会走到这里，见
+     * {@code DecorationSystem#createStructures} 的返回值。
      */
     public static boolean referencesBuildable(ServerLevel level, LevelChunk center) {
         ChunkPos pos = center.getPos();

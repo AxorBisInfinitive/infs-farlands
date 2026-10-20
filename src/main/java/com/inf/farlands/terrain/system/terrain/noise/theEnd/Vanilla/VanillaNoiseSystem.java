@@ -1,116 +1,157 @@
 package com.inf.farlands.terrain.system.terrain.noise.theEnd.Vanilla;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-
 import com.inf.farlands.terrain.NoiseSystem;
 import com.inf.farlands.terrain.registry.SystemArgs;
 import com.inf.farlands.terrain.registry.SystemDefaultParams;
 import com.inf.farlands.terrain.registry.SystemParams;
 import com.inf.farlands.terrain.system.common.overworld.Vanilla.VanillaFamilySeed;
 
-import net.minecraft.core.Holder;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.levelgen.Aquifer;
 import net.minecraft.world.level.levelgen.DensityFunction;
 import net.minecraft.world.level.levelgen.DensityFunctions;
 import net.minecraft.world.level.levelgen.LegacyRandomSource;
+import net.minecraft.world.level.levelgen.NoiseChunk;
+import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.NoiseRouter;
 import net.minecraft.world.level.levelgen.PositionalRandomFactory;
 import net.minecraft.world.level.levelgen.synth.BlendedNoise;
-import net.minecraft.world.level.levelgen.synth.NormalNoise;
 
 /**
- * 末地 vanilla 噪声系统：finalDensity 的节点结构原样保留，其中的噪声用构造时传入的 seed 重建。
+ * 末地 vanilla 噪声系统：整条 finalDensity 按 26.1.2 的末地数据自建，与所在维度无关。
  *
  * <p>
- * 末地的噪声设置是 {@code legacy_random_source: true}，所以重接随机流必须走 {@code RandomState} 的
- * legacy 那一支：{@code BlendedNoise} 换成 {@code new LegacyRandomSource(seed)}，噪声实例用同一个源 fork
- * 出的 positional factory。走 xoroshiro 时同一个 seed 会重建出与 vanilla 不同的
- * {@code end/base_3d_noise}，而地形看上去仍然是地形，从读数上分不出来。
+ * 自建的理由是维度无关。沿用宿主 router 的写法永远是「宿主维度的密度链换个种子」，把这套系统选到别的
+ * 维度得到的不是末地噪声。节点与常数来自 {@code NoiseRouterData.end} 与 {@code end.json} 两处，逐项
+ * 对应：滑动区间的 56 与 312 来自 {@code slideEndLike(caves, 0, 128)} 的 128-72 与 128+184，4 与 32
+ * 来自 bottomStartY 与 bottomEndY，目标值 -23.4375 与 -0.234375 同源。
  *
  * <p>
- * 岛形也要一起接过来。vanilla 的 {@code end_islands} 在 {@code RandomState} 构造时被换成那个实例的
- * 种子，而本系统收到的 router 属于 level，种子是世界种子；群系那条走 {@code VanillaFamilyRandom} 建的
- * 另一份 {@code RandomState}，已经是系统种子。只换噪声叶不换岛函数，地形与群系就会落在两个岛形上。所以
- * {@code createFinalDensity} 把岛函数也换成 {@code DensityFunctions.endIslands(seed)}。
+ * 末地的噪声设置是 {@code legacy_random_source: true}，所以随机流走 legacy 那一支：{@code BlendedNoise}
+ * 换成 {@code new LegacyRandomSource(seed)}，与 {@code RandomState} 的 legacy 分支同形。走 xoroshiro
+ * 时同一个 seed 会重建出与 vanilla 不同的 {@code end/base_3d_noise}，而地形看上去仍然是地形。
  *
  * <p>
- * 重建走公开 API，不碰任何私有字段。重建后的噪声归本类所有，后续修改不必再依赖原实例。
+ * 自建只接管密度。{@code default_block}、流体、aquifer、cell 网格与 surface rule 仍来自宿主维度的
+ * generator，所以这套系统装到主世界得到的是「末地密度加主世界的方块与网格」，cell 尺寸不同，形状也
+ * 因此不同。
+ *
+ * <p>
+ * 树在构造期建一次并共享：vanilla 也把 {@code settings} 里那棵树共享给所有 {@code NoiseChunk}，每次
+ * 构造各自套一层 wrap。岛函数与 {@code BlendedNoise} 都是无状态的。
  */
 public final class VanillaNoiseSystem implements NoiseSystem {
 
-    /**
-     * 声明：seed 用五族共用的空框取值源，见 {@link VanillaFamilySeed}。本系统的 seed 只驱动密度
-     * 节点重建，aquifer 与矿脉的随机源仍取该 level 的 RandomState。
-     */
+    /** 声明：seed 用五族共用的空框取值源，见 {@link VanillaFamilySeed}。 */
     @SystemDefaultParams
     public static final SystemParams DEFAULT_PARAMS = SystemParams.of(VanillaFamilySeed.seedParam());
 
-    /** 岛函数的探针类。目标类型是 protected static final，跨包写不出类型，只能从实例上取。 */
-    private static final Class<?> END_ISLANDS = DensityFunctions.endIslands(0L).getClass();
+    /**
+     * 末地 {@code base_3d_noise} 的五个参数。与 {@code NoiseRouterData} 里 {@code BASE_3D_NOISE_END}
+     * 的注册值逐字相同，也等于 {@code end.json} 的 noise 尺寸换算结果，所以直接落常量。
+     */
+    private static final double XZ_SCALE = 0.25;
+    private static final double Y_SCALE = 0.25;
+    private static final double XZ_FACTOR = 80.0;
+    private static final double Y_FACTOR = 160.0;
+    private static final double SMEAR_SCALE = 4.0;
 
-    private final long seed;
+    /** 上下两端滑动后的目标值。顶部把密度压到负，底部同样压负，两端就成了空气。 */
+    private static final double TOP_TARGET = -23.4375;
+    private static final double BOTTOM_TARGET = -0.234375;
 
-    /** legacy 源 fork 出的按名取随机源工厂，构造期建好，之后跨线程只读。 */
-    private final PositionalRandomFactory root;
+    /** postProcess 的乘数。 */
+    private static final double POST_PROCESS_FACTOR = 0.64;
 
-    /** 重建后的 NormalNoise，按噪声数据缓存，同一 key 只建一次。 */
-    private final Map<Holder<NormalNoise.NoiseParameters>, NormalNoise> noises = new ConcurrentHashMap<>();
-
-    /** 重建后的主 3D 噪声。withNewRandom 会重建三个 PerlinNoise，不能每个 NoiseChunk 都做。 */
-    private volatile BlendedNoise cachedBlendedNoise;
-
-    /** 按 vanilla 路由身份缓存的树。NoiseChunk 每段构造一次，不缓存就会每段重造一棵。 */
-    private volatile NoiseRouter cachedVanilla;
-    private volatile DensityFunction cachedTree;
+    /** 整条 finalDensity，构造期建好，之后跨线程只读。 */
+    private final DensityFunction finalDensity;
 
     public VanillaNoiseSystem(SystemArgs args) {
-        this.seed = args.getLong("seed");
-        this.root = new LegacyRandomSource(this.seed).forkPositional();
+        this.finalDensity = buildFinalDensity(args.getLong("seed"));
     }
 
+    /** 形参不用：本系统按末地的数据自建，不读宿主路由。签名随接口保留。 */
     @Override
     public DensityFunction createFinalDensity(NoiseRouter router) {
-        if (this.cachedVanilla == router) {
-            DensityFunction cached = this.cachedTree;
-            if (cached != null) {
-                return cached;
-            }
-        }
-        DensityFunction built = router.finalDensity().mapAll(new DensityFunction.Visitor() {
-
-            @Override
-            public DensityFunction apply(DensityFunction function) {
-                // 岛函数与噪声叶一起换：只换噪声叶会让岛形留在世界种子上，与群系分属两个岛形。
-                if (END_ISLANDS.isInstance(function)) {
-                    return DensityFunctions.endIslands(VanillaNoiseSystem.this.seed);
-                }
-                return function instanceof BlendedNoise blended ? blendedNoiseFromSeed(blended) : function;
-            }
-
-            @Override
-            public DensityFunction.NoiseHolder visitNoise(DensityFunction.NoiseHolder noise) {
-                Holder<NormalNoise.NoiseParameters> data = noise.noiseData();
-                NormalNoise rebuilt = noises.computeIfAbsent(data,
-                        key -> NormalNoise.create(root.fromHashOf(key.unwrapKey().orElseThrow().identifier()),
-                                key.value()));
-                return new DensityFunction.NoiseHolder(data, rebuilt);
-            }
-        });
-        // 写序先结果后键，读序先键后结果：读到半个状态只会让下一次重造一遍，不会拿到错的树。
-        this.cachedTree = built;
-        this.cachedVanilla = router;
-        return built;
+        return this.finalDensity;
     }
 
-    /** 复用原实例自己的缩放参数、只换随机源，参数因此不写死。 */
-    private BlendedNoise blendedNoiseFromSeed(BlendedNoise original) {
-        BlendedNoise cached = this.cachedBlendedNoise;
-        if (cached == null) {
-            // 与 RandomState 的 legacy 分支同形：那一支传的是 new LegacyRandomSource(seed) 本身，
-            // 不是 positional factory 上按名取的随机源。
-            cached = original.withNewRandom(new LegacyRandomSource(this.seed));
-            this.cachedBlendedNoise = cached;
-        }
-        return cached;
+    /**
+     * 末地的 cell 网格：{@code size_horizontal 2} 即 8 格宽，{@code size_vertical 1} 即 4 格高，与
+     * {@code NoiseSettings.END_NOISE_SETTINGS} 同值。
+     *
+     * <p>
+     * 不能返回 null。null 表示用宿主维度的尺寸，那样同一段密度函数会按宿主的网格采样，主世界的 4 宽 8 高
+     * 与末地的 8 宽 4 高给出不同的形状，系统就又随维度走了。
+     */
+    @Override
+    public int[] noiseSize() {
+        return new int[] { 2, 1 };
+    }
+
+    /** 末地的 default_block：密度为正处的落点，不取宿主维度的默认方块。 */
+    @Override
+    public BlockState defaultBlock(NoiseGeneratorSettings settings) {
+        return Blocks.END_STONE.defaultBlockState();
+    }
+
+    /**
+     * 末地的 default_fluid 是空气。液面取 {@link Integer#MIN_VALUE} 后 {@code FluidStatus.at(y)} 恒出空气，
+     * 相邻那一层岩浆也就没有了：那是禁用 aquifer 落回默认 picker 的副产物，不是末地的数据。
+     */
+    @Override
+    public Aquifer.FluidPicker createFluidPicker(NoiseGeneratorSettings settings) {
+        return (x, y, z) -> new Aquifer.FluidStatus(Integer.MIN_VALUE, Blocks.AIR.defaultBlockState());
+    }
+
+    /**
+     * 末地不跑 aquifer：它的噪声设置里 {@code aquifers_enabled: false}。
+     *
+     * <p>
+     * 宿主维度若开着 aquifer，{@code NoiseChunk} 会走 {@code Aquifer.create} 并被重定向到这里。返回 null
+     * 就退回 vanilla 的 {@code NoiseBasedAquifer}，那会为每一个非正方块跑一遍 3D 网格采样加
+     * {@code preliminarySurfaceLevel} 查询，起点随机还要取 {@code randomState.aquiferRandom()}。结果仍然是
+     * 空气，因为 picker 恒出空气，所以那一整圈只是白算。
+     *
+     * <p>
+     * 密度为正返回 null，这一点与本仓库几个全空气系统不同：那一步要落回 default_block，即末地石。全空气
+     * 系统恒返 AIR 是为了让 MaterialRuleList 短路，末地不能短路，否则整片没有石头。
+     */
+    @Override
+    public Aquifer createAquifer(NoiseChunk chunk, ChunkPos pos, NoiseRouter router,
+            PositionalRandomFactory random, int minY, int height, Aquifer.FluidPicker picker) {
+        return new Aquifer() {
+            @Override
+            public BlockState computeSubstance(DensityFunction.FunctionContext context, double substance) {
+                return substance > 0.0 ? null : Blocks.AIR.defaultBlockState();
+            }
+
+            @Override
+            public boolean shouldScheduleFluidUpdate() {
+                return false;
+            }
+        };
+    }
+
+    /** 末地的 final_density，算式与 {@code end.json} 的扁平化写法逐层对应。 */
+    private static DensityFunction buildFinalDensity(long seed) {
+        DensityFunction islands = DensityFunctions.endIslands(seed);
+        DensityFunction sloped = DensityFunctions.add(islands, blendedNoise(seed));
+        // 顶部在 y=56 处开始渐消，到 y=312 压到负数；底部在 y=4 到 y=32 之间抬回负目标值。
+        DensityFunction top = DensityFunctions.yClampedGradient(56, 312, 1.0, 0.0);
+        DensityFunction bottom = DensityFunctions.yClampedGradient(4, 32, 0.0, 1.0);
+        DensityFunction slide = DensityFunctions.lerp(bottom, BOTTOM_TARGET,
+                DensityFunctions.lerp(top, TOP_TARGET, sloped));
+        // interpolated 必须包住 blend_density，位置挪一格就改变 NoiseChunk 建插值器的范围。
+        return DensityFunctions.mul(DensityFunctions.interpolated(DensityFunctions.blendDensity(slide)),
+                DensityFunctions.constant(POST_PROCESS_FACTOR)).squeeze();
+    }
+
+    /** 末地的 base_3d_noise，随机源取本系统的 seed 派生。 */
+    private static BlendedNoise blendedNoise(long seed) {
+        return BlendedNoise.createUnseeded(XZ_SCALE, Y_SCALE, XZ_FACTOR, Y_FACTOR, SMEAR_SCALE)
+                .withNewRandom(new LegacyRandomSource(seed));
     }
 }

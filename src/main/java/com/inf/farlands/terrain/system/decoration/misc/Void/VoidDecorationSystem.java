@@ -23,4 +23,13 @@ public final class VoidDecorationSystem implements DecorationSystem {
     @Override
     public void applyDecoration(ServerLevel level, LevelChunk center, DecorationRegion region) {
     }
+
+    /**
+     * 不建结构起点。起点是结构的第一产物，跳过它之后引用表为空、Beardifier 为 EMPTY，地形不会在结构
+     * 位置按 default_block 鼓出壳。
+     */
+    @Override
+    public boolean createStructures(ServerLevel level, LevelChunk chunk) {
+        return false;
+    }
 }

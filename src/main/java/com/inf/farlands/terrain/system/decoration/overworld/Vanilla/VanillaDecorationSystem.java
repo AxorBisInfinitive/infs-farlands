@@ -14,7 +14,10 @@ import com.inf.farlands.terrain.decorationFiller.ScopedStructureManager;
 import com.inf.farlands.terrain.registry.SystemArgs;
 import com.inf.farlands.terrain.registry.SystemDefaultParams;
 import com.inf.farlands.terrain.registry.SystemParams;
+import com.inf.farlands.terrain.structure.StructureBasis;
+import com.inf.farlands.terrain.structure.StructureDriver;
 import com.inf.farlands.terrain.system.common.overworld.Vanilla.VanillaFamilySeed;
+import com.inf.farlands.terrain.terrainFiller.TerrainSystemContext;
 import com.inf.farlands.util.window.WindowedChunk;
 
 import it.unimi.dsi.fastutil.ints.IntArraySet;
@@ -32,6 +35,7 @@ import net.minecraft.core.SectionPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelHeightAccessor;
 import net.minecraft.world.level.StructureManager;
 import net.minecraft.world.level.biome.Biome;
@@ -87,6 +91,41 @@ public final class VanillaDecorationSystem implements DecorationSystem {
 
     public VanillaDecorationSystem(SystemArgs args) {
         this.seed = args.getLong("seed");
+    }
+
+    /** 本维度结构相的自带基座，首次调用时建一次，之后只读。 */
+    private volatile StructureBasis farlandsStructureBasis;
+
+    private StructureBasis basis(ServerLevel level) {
+        StructureBasis built = this.farlandsStructureBasis;
+        if (built == null) {
+            built = StructureBasis.of(Level.OVERWORLD, this.seed, level.registryAccess());
+            this.farlandsStructureBasis = built;
+        }
+        return built;
+    }
+
+    /**
+     * 起点相用本族自带的基座：主世界的群系源、噪声设置与生成器，种子取本系统的 seed。
+     *
+     * <p>
+     * 夹在 setVanilla 与 clear 之间，因为起点取 Y 锚会在主线程上构造 NoiseChunk。哨兵让那次构造不替换
+     * router 与 aquifer，高度场因此是本族 settings 在族 seed 下的场，与宿主地形族无关。
+     */
+    @Override
+    public boolean createStructures(ServerLevel level, LevelChunk chunk) {
+        if (!StructureDriver.claimStructures(level, chunk)) {
+            return true;
+        }
+        StructureBasis built = this.basis(level);
+        TerrainSystemContext.setVanilla();
+        try {
+            built.generator().createStructures(level.registryAccess(), built.state(),
+                    level.structureManager(), chunk, level.getStructureManager(), built.dimension());
+        } finally {
+            TerrainSystemContext.clear();
+        }
+        return true;
     }
 
     @Override

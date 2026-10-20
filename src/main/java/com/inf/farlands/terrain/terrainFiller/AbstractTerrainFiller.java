@@ -232,7 +232,8 @@ public abstract class AbstractTerrainFiller implements TerrainFiller {
                         if (bs == null) {
                             bs = inv.farlands$getInterpolatedState();
                             if (bs == null) {
-                                bs = settings.defaultBlock();
+                                // 落点按系统口径取，不直读维度设置：系统换到别的维度时要自带方块。
+                                bs = sys.defaultBlock(settings);
                             }
                         }
                         if (bs != Blocks.AIR.defaultBlockState() && !SharedConstants.debugVoidTerrain(cpos)) {

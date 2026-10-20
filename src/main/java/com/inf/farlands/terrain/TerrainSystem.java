@@ -1,6 +1,7 @@
 package com.inf.farlands.terrain;
 
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.levelgen.Aquifer;
 import net.minecraft.world.level.levelgen.NoiseChunk;
@@ -34,6 +35,17 @@ public interface TerrainSystem {
     default Aquifer createAquifer(NoiseChunk chunk, ChunkPos pos, NoiseRouter router,
             PositionalRandomFactory random, int minY, int height, Aquifer.FluidPicker picker) {
         return null;
+    }
+
+    /**
+     * 密度为正、且 aquifer 与矿脉都没有接管时的落点。默认取维度设置的方块。
+     *
+     * <p>
+     * 这是 fill 全流程唯一读 default_block 的地方：NoiseChunk 本身不碰它，只读噪声设置、aquifer 开关与
+     * 矿脉开关。自带方块口径的系统覆写本方法，否则选到别的维度会沿用那个维度的默认方块。
+     */
+    default BlockState defaultBlock(NoiseGeneratorSettings settings) {
+        return settings.defaultBlock();
     }
 
     /** 每次 fill 开始时的 chunk 上下文回调。当前无调用方。 */

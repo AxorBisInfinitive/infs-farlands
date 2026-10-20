@@ -15,11 +15,27 @@ public final class TerrainSystemContext {
 
     private static final ThreadLocal<TerrainSystem> SYSTEM = new ThreadLocal<>();
 
+    /**
+     * 原样哨兵：放进上下文后，{@code NoiseChunk} 的构造不替换 router 与 aquifer。
+     *
+     * <p>
+     * 不为它加分支，因为两处替换点本来就走不通：它不是 {@code NoiseSystem}，router 那处落在「用传入的
+     * router」上；{@code createAquifer} 走基接口的默认实现返回 null，aquifer 那处落在 {@code Aquifer.create}
+     * 上。语义是「不要替换」，不是「换成一个系统」。
+     */
+    private static final TerrainSystem VANILLA = new TerrainSystem() {
+    };
+
     private TerrainSystemContext() {
     }
 
     public static void set(TerrainSystem system) {
         SYSTEM.set(system);
+    }
+
+    /** 让下一次 {@code NoiseChunk} 构造按传入的 router 与 vanilla aquifer 走，不替换。 */
+    public static void setVanilla() {
+        SYSTEM.set(VANILLA);
     }
 
     public static void clear() {
