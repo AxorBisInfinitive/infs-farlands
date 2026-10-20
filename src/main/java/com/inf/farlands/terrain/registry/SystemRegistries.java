@@ -80,6 +80,8 @@ public final class SystemRegistries {
             "the_nether_vanilla_decoration_system");
     public static final SystemId DECORATION_THE_END_VANILLA_DECORATION_SYSTEM = id(
             "the_end_vanilla_decoration_system");
+    public static final SystemId DECORATION_MISC_UNIVERSE_DECORATION_SYSTEM = id(
+            "misc_universe_decoration_system");
 
     private SystemRegistries() {
     }

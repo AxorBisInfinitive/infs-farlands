@@ -143,6 +143,8 @@ public class FarlandsRegister {
                 com.inf.farlands.terrain.system.decoration.theNether.Vanilla.VanillaDecorationSystem.class);
         SystemRegistries.registerDecoration(SystemRegistries.DECORATION_THE_END_VANILLA_DECORATION_SYSTEM,
                 com.inf.farlands.terrain.system.decoration.theEnd.Vanilla.VanillaDecorationSystem.class);
+        SystemRegistries.registerDecoration(SystemRegistries.DECORATION_MISC_UNIVERSE_DECORATION_SYSTEM,
+                com.inf.farlands.terrain.system.decoration.misc.Universe.UniverseDecorationSystem.class);
     }
 
     public static void register() {

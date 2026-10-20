@@ -704,6 +704,8 @@ public final class DecorationFiller {
                 BlockEntity blockEntity = e.getValue();
                 blockEntity.setLevel(level);
                 owner.setBlockEntity(blockEntity);
+                // 装完再跑登记的回调：此时方块实体已挂上活 level，要求 level 的写入才不会炸。
+                region.fireBlockEntityInstalled(blockEntity);
             }
             // 下发标记：写域是九格，邻居的方块也被写过，它们各自的下发要跟着这次装饰走。与升段解耦：
             // 写过就得补发，不管本次有没有可升的段。

@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
@@ -135,6 +136,15 @@ public final class DecorationRegion implements WorldGenLevel {
     private final Map<BlockPos, BlockEntity> pendingBlockEntities = new HashMap<>();
 
     /**
+     * 方块实体装好之后要跑的回调，键是方块坐标。
+     *
+     * <p>
+     * 有些写入要求方块实体已经挂上活 level，例如告示牌的文本：{@code setText} 内部会读 level 发方块更新，
+     * 而装饰期 level 被置空。装饰体在池线程上登记，收尾在主线程触发。
+     */
+    private final Map<BlockPos, Consumer<BlockEntity>> installedHooks = new HashMap<>();
+
+    /**
      * 本次装饰把 BE 方块换成非 BE 方块的那些位置，主线程收尾摘掉那里可能存在的活实例。
      *
      * <p>
@@ -222,6 +232,19 @@ public final class DecorationRegion implements WorldGenLevel {
     /** 本次装饰建出的方块实体。主线程收尾安装。 */
     Map<BlockPos, BlockEntity> pendingBlockEntities() {
         return this.pendingBlockEntities;
+    }
+
+    /** 登记「该坐标的方块实体装好之后」要做的事。装饰体在池线程上登记，收尾在主线程执行。 */
+    public void onBlockEntityInstalled(BlockPos pos, Consumer<BlockEntity> hook) {
+        this.installedHooks.put(pos.immutable(), hook);
+    }
+
+    /** 收尾装好一个方块实体之后调用。主线程。 */
+    void fireBlockEntityInstalled(BlockEntity blockEntity) {
+        Consumer<BlockEntity> hook = this.installedHooks.remove(blockEntity.getBlockPos());
+        if (hook != null) {
+            hook.accept(blockEntity);
+        }
     }
 
     /** 本次装饰写过、且写后不是 BE 方块的位置。主线程收尾摘除。 */

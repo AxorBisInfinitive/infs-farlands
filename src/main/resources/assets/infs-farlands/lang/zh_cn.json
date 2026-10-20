@@ -56,5 +56,6 @@
   "createWorld.tab.infs-farlands.param.error.radius_exceeds_half_width": "radius 必须大于 halfWidth，实际为 %1$s 与 %2$s",
   "createWorld.tab.infs-farlands.param.error.outer_edge": "外缘 %1$s 越过可玩上限 %2$s",
   "createWorld.tab.infs-farlands.param.error.table_cells": "查表需要 %1$s 列，上限是 %2$s",
-  "createWorld.tab.infs-farlands.param.error.cell_aligned": "参数 %1$s 必须是 %2$s 的正整数倍，实际为 %3$s"
+  "createWorld.tab.infs-farlands.param.error.cell_aligned": "参数 %1$s 必须是 %2$s 的正整数倍，实际为 %3$s",
+  "createWorld.tab.infs-farlands.param.random_int": "每次随机取一个 int"
 }
