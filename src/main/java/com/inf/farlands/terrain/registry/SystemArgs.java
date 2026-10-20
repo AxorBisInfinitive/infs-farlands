@@ -46,8 +46,8 @@ public final class SystemArgs {
             case LONG -> args.setLong(key, exactLong(key, arg));
             case SHORT -> args.setShort(key, (short) range(key, arg, Short.MIN_VALUE, Short.MAX_VALUE));
             case BYTE -> args.setByte(key, (byte) range(key, arg, Byte.MIN_VALUE, Byte.MAX_VALUE));
-            case FLOAT -> args.setFloat(key, (float) floatValue(key, arg));
-            case DOUBLE -> args.setDouble(key, doubleValue(key, arg));
+            case FLOAT -> args.setFloat(key, arg.asFloat(key));
+            case DOUBLE -> args.setDouble(key, arg.asDouble(key));
             case BOOLEAN -> args.setBoolean(key, number(key, arg).longValue() != 0L);
             case STRING -> args.setString(key, string(key, arg));
             case ENUM -> setEnum(args, key, arg);
@@ -71,23 +71,6 @@ public final class SystemArgs {
             throw new IllegalStateException("farlands: system arg " + key + " is not an integer in long range: " + number,
                     e);
         }
-    }
-
-    private static double doubleValue(String key, Arg arg) {
-        double value = number(key, arg).doubleValue();
-        if (Double.isNaN(value) || Double.isInfinite(value)) {
-            throw new IllegalStateException("farlands: system arg " + key + " is not a finite double: " + value);
-        }
-        return value;
-    }
-
-    private static double floatValue(String key, Arg arg) {
-        double value = number(key, arg).doubleValue();
-        if (Double.isNaN(value) || Double.isInfinite(value) || value < -Float.MAX_VALUE
-                || value > Float.MAX_VALUE) {
-            throw new IllegalStateException("farlands: system arg " + key + " out of float range: " + value);
-        }
-        return value;
     }
 
     private static Number number(String key, Arg arg) {

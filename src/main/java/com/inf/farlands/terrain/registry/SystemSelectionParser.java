@@ -168,8 +168,8 @@ public final class SystemSelectionParser {
             case LONG -> Arg.ofLong(integral(spec.key(), text, Long.MIN_VALUE, Long.MAX_VALUE));
             case SHORT -> Arg.ofShort((short) integral(spec.key(), text, Short.MIN_VALUE, Short.MAX_VALUE));
             case BYTE -> Arg.ofByte((byte) integral(spec.key(), text, Byte.MIN_VALUE, Byte.MAX_VALUE));
-            case FLOAT -> Arg.ofFloat((float) finite(spec.key(), text, Float.MAX_VALUE));
-            case DOUBLE -> Arg.ofDouble(finite(spec.key(), text, Double.MAX_VALUE));
+            case FLOAT -> Arg.ofFloatText(checkedDoubleText(spec.key(), text, Float.MAX_VALUE));
+            case DOUBLE -> Arg.ofDoubleText(checkedDoubleText(spec.key(), text, Double.MAX_VALUE));
             case BOOLEAN -> Arg.ofBoolean(bool(spec.key(), text));
             case STRING -> Arg.ofString(text);
             case ENUM -> throw new IllegalStateException(
@@ -194,18 +194,25 @@ public final class SystemSelectionParser {
         }
     }
 
-    /** 浮点文本：禁 NaN 与 Infinity，超类型量程即抛，与 ConfigFile 的浮点读法同规。 */
-    private static double finite(String key, String text, double limit) {
+    /**
+     * 浮点文本的校验，返回 trim 后的原文，值留到取值时再解析。
+     *
+     * <p>
+     * 存原文而不是存数：负零、非有限、次正规与用户自己的写法都能原样进出，不经过任何规范化。校验只做两
+     * 件事，能解析成数，以及有限值不超该类型的量程。非有限放行，NaN 与正负无穷是合法的取值。
+     */
+    private static String checkedDoubleText(String key, String text, double limit) {
+        String trimmed = text.trim();
         double value;
         try {
-            value = Double.parseDouble(text.trim());
+            value = Double.parseDouble(trimmed);
         } catch (NumberFormatException e) {
             throw new IllegalStateException("farlands: system arg " + key + " is not a number: " + text, e);
         }
-        if (Double.isNaN(value) || Double.isInfinite(value) || Math.abs(value) > limit) {
+        if (Double.isFinite(value) && Math.abs(value) > limit) {
             throw new IllegalStateException("farlands: system arg " + key + " out of range: " + text);
         }
-        return value;
+        return trimmed;
     }
 
     private static boolean bool(String key, String text) {

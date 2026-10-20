@@ -161,7 +161,16 @@ public record SystemParams(List<SystemParamSpec> entries, List<Rule> rules) {
             return out;
         }
         for (SystemParamSpec spec : this.entries) {
-            Component problem = spec.violation(values.get(spec.key()));
+            Component problem;
+            try {
+                problem = spec.violation(values.get(spec.key()));
+            } catch (RuntimeException e) {
+                // 值不是字符串、或字符串解析不出数：文件是旧形态或被人手改坏了。记成一条违规，
+                // 让界面能标到这个参数上，而不是整族抛出去。
+                out.add(new Violation(Set.of(spec.key()),
+                        Component.literal(e.getMessage() == null ? e.toString() : e.getMessage())));
+                continue;
+            }
             if (problem != null) {
                 out.add(new Violation(Set.of(spec.key()), problem));
             }

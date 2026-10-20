@@ -95,8 +95,10 @@ public final class SystemsData extends SavedData {
      * 一个构造参数：声明类型加原始 NBT 值。
      *
      * <p>
-     * 值经 Codec.PASSTHROUGH 原样带过，文件里保留它本来的标签类型，手改配置时读得懂；类型一致性
-     * 由 {@link ArgType} 在取值时判定，不靠标签反推。
+     * 值经 Codec.PASSTHROUGH 原样带过，文件里保留它本来的标签类型，手改配置时读得懂。浮点参数例外：
+     * 它们的值一律是字符串，原文进出，避免 `DoubleTag.valueOf` 把负零归一成正零，解析推迟到
+     * {@link Arg#asDouble} 与 {@link Arg#asFloat}。其余类型的一致性由 {@link ArgType} 在取值时判定，
+     * 不靠标签反推。
      *
      * <p>
      * enum 另带类名。SystemArgs.getEnum 走 Class.cast，只有重建出真枚举实例才取得到。
@@ -129,14 +131,52 @@ public final class SystemsData extends SavedData {
                     Optional.empty());
         }
 
-        public static Arg ofFloat(float value) {
-            return new Arg(ArgType.FLOAT, new Dynamic<>(NbtOps.INSTANCE, NbtOps.INSTANCE.createFloat(value)),
+        /** 浮点参数按文本存，值是字符串，解析推迟到取值时。见 {@link #asDouble(String)}。 */
+        public static Arg ofFloatText(String value) {
+            return new Arg(ArgType.FLOAT, new Dynamic<>(NbtOps.INSTANCE, NbtOps.INSTANCE.createString(value)),
                     Optional.empty());
         }
 
-        public static Arg ofDouble(double value) {
-            return new Arg(ArgType.DOUBLE, new Dynamic<>(NbtOps.INSTANCE, NbtOps.INSTANCE.createDouble(value)),
+        /** 浮点参数按文本存，解析推迟到取值时。见 {@link #asDouble(String)}。 */
+        public static Arg ofDoubleText(String value) {
+            return new Arg(ArgType.DOUBLE, new Dynamic<>(NbtOps.INSTANCE, NbtOps.INSTANCE.createString(value)),
                     Optional.empty());
+        }
+
+        /**
+         * 浮点参数的取值。
+         *
+         * <p>
+         * 值必须是字符串：原文进文件、原文出文件，因此负零、非有限、次正规与用户自己的写法都能原样往返。
+         * 数字标签是旧格式，这里直接拒，不做两种形态的接收。
+         */
+        public double asDouble(String key) {
+            String text = numberText(key);
+            try {
+                return Double.parseDouble(text);
+            } catch (NumberFormatException e) {
+                throw new IllegalStateException("farlands: system arg " + key + " is not a number: " + text, e);
+            }
+        }
+
+        /** 同 {@link #asDouble}，额外判 float 的有限量程。非有限放行。 */
+        public float asFloat(String key) {
+            double value = asDouble(key);
+            if (Double.isFinite(value) && Math.abs(value) > Float.MAX_VALUE) {
+                throw new IllegalStateException(
+                        "farlands: system arg " + key + " out of float range: " + value);
+            }
+            return (float) value;
+        }
+
+        private String numberText(String key) {
+            return text(key, this.value);
+        }
+
+        private static <T> String text(String key, Dynamic<T> value) {
+            return value.getOps().getStringValue(value.getValue()).getOrThrow(
+                    error -> new IllegalStateException(
+                            "farlands: system arg " + key + " 需要字符串形式的浮点数，这个文件是旧格式: " + error));
         }
 
         public static Arg ofBoolean(boolean value) {

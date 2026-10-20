@@ -120,7 +120,7 @@ public final class SystemParamSpec {
     public static String text(String key, ArgType type, Dynamic<?> value) {
         return switch (type) {
             case INT, SHORT, BYTE, LONG -> Long.toString(number(key, value).longValue());
-            case FLOAT, DOUBLE -> doubleText(number(key, value).doubleValue());
+            case FLOAT, DOUBLE -> string(key, value);
             case BOOLEAN -> number(key, value).longValue() != 0L ? "true" : "false";
             case STRING, ENUM -> string(key, value);
         };
@@ -136,10 +136,6 @@ public final class SystemParamSpec {
         return value.getOps().getStringValue(value.getValue())
                 .getOrThrow(message -> new IllegalStateException(
                         "System param is not a string: " + key + " " + message));
-    }
-
-    private static String doubleText(double value) {
-        return value == Math.rint(value) ? Long.toString((long) value) : Double.toString(value);
     }
 
     // ---- 入口：与 Config.setInt/setLong/... 同形，返回 builder ----
@@ -368,14 +364,14 @@ public final class SystemParamSpec {
         }
 
         public FloatBuilder define(float value) {
-            this.defaultValue = Arg.ofFloat(value);
+            this.defaultValue = Arg.ofFloatText(Float.toString(value));
             return this;
         }
 
         /** 单值语义检查。通过返回 null，否则返回错因。 */
         public FloatBuilder check(Predicate<Float> test, Function<Float, Component> message) {
             this.check = arg -> {
-                Float value = SystemParamSpec.number(this.key, arg.value()).floatValue();
+                Float value = arg.asFloat(this.key);
                 return test.test(value) ? null : message.apply(value);
             };
             return this;
@@ -398,14 +394,14 @@ public final class SystemParamSpec {
         }
 
         public DoubleBuilder define(double value) {
-            this.defaultValue = Arg.ofDouble(value);
+            this.defaultValue = Arg.ofDoubleText(Double.toString(value));
             return this;
         }
 
         /** 单值语义检查。通过返回 null，否则返回错因。 */
         public DoubleBuilder check(Predicate<Double> test, Function<Double, Component> message) {
             this.check = arg -> {
-                Double value = SystemParamSpec.number(this.key, arg.value()).doubleValue();
+                Double value = arg.asDouble(this.key);
                 return test.test(value) ? null : message.apply(value);
             };
             return this;

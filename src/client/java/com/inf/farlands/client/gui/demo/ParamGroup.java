@@ -59,6 +59,7 @@ public final class ParamGroup extends AbstractContainerWidget {
     /** 自由框接受的形状示例。引导句与排版在语言文件的 free.example 里，本常量是它的 %s 实参。 */
     private static final String FREE_GRAMMAR =
             "{\"type\":\"int\",\"value\":1}\n"
+                    + "{\"type\":\"double\",\"value\":\"1.0\"}\n"
                     + "{\"type\":\"boolean\",\"value\":true}\n"
                     + "{\"type\":\"string\",\"value\":\"abc\"}\n"
                     + "{\"type\":\"enum\",\"value\":\"TYPE1\",\"enumClass\":\"com.example.Mode\"}";
