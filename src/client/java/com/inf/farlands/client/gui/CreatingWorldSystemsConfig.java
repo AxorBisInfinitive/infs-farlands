@@ -12,7 +12,6 @@ import java.util.function.Function;
 
 import com.inf.farlands.terrain.registry.FamilyKind;
 import com.inf.farlands.terrain.registry.SystemId;
-import com.inf.farlands.terrain.registry.SystemParamSpec;
 import com.inf.farlands.terrain.registry.SystemParams;
 import com.inf.farlands.terrain.registry.SystemRegistries;
 import com.inf.farlands.terrain.registry.SystemSelectionParser;
@@ -21,11 +20,9 @@ import com.inf.farlands.terrain.registry.SystemsIO;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.toasts.SystemToast;
-import net.minecraft.nbt.NbtOps;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.Identifier;
-import net.minecraft.world.level.storage.LevelResource;
 
 /**
  * 创建世界页签下面全部可编辑状态的暂存处：每个维度页 × 五族各自选中的系统，以及该系统每个参数的文本。
@@ -47,8 +44,8 @@ import net.minecraft.world.level.storage.LevelResource;
  */
 public final class CreatingWorldSystemsConfig {
 
-    /** 没有参数声明的系统退化成自由文本框，它的文本用这个键存，与参数名不可能冲突。 */
-    public static final String FREE_KEY = "";
+    /** 没有参数声明的系统退化成自由文本框，它的文本用这个键存。键的归属在主源集，与预填同源。 */
+    public static final String FREE_KEY = SystemsIO.FREE_ARG_KEY;
 
     /** 本世界实际拥有的维度，决定界面有几页。由页签构造时喂入。 */
     private static volatile List<Identifier> dimensions = List.of();
@@ -121,8 +118,7 @@ public final class CreatingWorldSystemsConfig {
      *                  给出
      */
     public static void prefillFrom(Path worldRoot) {
-        Path file = SystemsData.ID.withSuffix(".dat")
-                .resolveAgainst(worldRoot.resolve(LevelResource.DATA.id()));
+        Path file = SystemsIO.file(worldRoot);
         try {
             if (Files.exists(file)) {
                 apply(SystemsIO.read(file));
@@ -262,32 +258,13 @@ public final class CreatingWorldSystemsConfig {
     private static void applySystem(Identifier page, FamilyKind kind, SystemsData.SystemSelection selection) {
         SystemId id = new SystemId(selection.id());
         select(page, kind, id);
-        SystemParams declared = SystemParams.declaredBy(classOf(kind, id));
-        if (declared == null) {
-            putText(page, kind, id, FREE_KEY, SystemsData.SystemSelection.ARGS_CODEC
-                    .encodeStart(NbtOps.INSTANCE, selection.args())
-                    .getOrThrow()
-                    .toString());
-            return;
-        }
-        for (SystemParamSpec spec : declared.entries()) {
-            SystemsData.Arg arg = selection.args().get(spec.key());
-            if (arg != null) {
-                putText(page, kind, id, spec.key(),
-                        SystemParamSpec.text(spec.key(), spec.type(), arg.value()));
-            }
-        }
+        // 还原在 SystemsIO，与选择世界页的兼容性判据共用同一段，两处不会漂移。
+        SystemsIO.texts(kind, selection).forEach((key, value) -> putText(page, kind, id, key, value));
     }
 
     /** 按族取实现类，供预填判断该系统有没有参数声明，也供界面按族重跑校验。 */
     public static Class<?> classOf(FamilyKind kind, SystemId id) {
-        return switch (kind) {
-            case TERRAIN -> SystemRegistries.terrainClassOf(id);
-            case BIOME -> SystemRegistries.biomeClassOf(id);
-            case SURFACE -> SystemRegistries.surfaceClassOf(id);
-            case CARVER -> SystemRegistries.carverClassOf(id);
-            case DECORATION -> SystemRegistries.decorationClassOf(id);
-        };
+        return SystemsIO.classOf(kind, id);
     }
 
     /** 读取失败弹一段中英可译的提示，正文带异常消息便于定位。 */

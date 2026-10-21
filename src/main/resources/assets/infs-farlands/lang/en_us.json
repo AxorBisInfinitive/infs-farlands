@@ -27,6 +27,7 @@
   "commands.infs-farlands.chunky.farlands.band": "Section pregen band %s..%s",
   "commands.infs-farlands.chunky.farlands.minY.range": "minY must be <= maxY(%s) and within the section range",
   "commands.infs-farlands.chunky.farlands.maxY.range": "maxY must be >= minY(%s) and within the section range",
+  "selectWorld.infs-farlands.incompatible.systems": "Incompatible system configuration",
   "createWorld.tab.infs-farlands.title": "Farlands",
   "createWorld.tab.infs-farlands.button": "None",
   "createWorld.tab.infs-farlands.page.overworld": "Overworld",

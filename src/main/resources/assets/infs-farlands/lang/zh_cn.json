@@ -27,6 +27,7 @@
   "commands.infs-farlands.chunky.farlands.band": "Section 预生成范围 %s..%s",
   "commands.infs-farlands.chunky.farlands.minY.range": "minY 必须 <= maxY(%s)，且落在 Section 范围内",
   "commands.infs-farlands.chunky.farlands.maxY.range": "maxY 必须 >= minY(%s)，且落在 Section 范围内",
+  "selectWorld.infs-farlands.incompatible.systems": "不兼容的系统配置",
   "createWorld.tab.infs-farlands.title": "边境之地",
   "createWorld.tab.infs-farlands.button": "无",
   "createWorld.tab.infs-farlands.page.overworld": "主世界",

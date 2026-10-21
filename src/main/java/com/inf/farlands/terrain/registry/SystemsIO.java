@@ -50,8 +50,85 @@ public final class SystemsIO {
 
     /** 配置文件路径，与 SavedDataStorage 的取法同式。 */
     public static Path file(MinecraftServer server) {
+        return file(server.getWorldPath(LevelResource.ROOT));
+    }
+
+    /** 某个世界根目录下的配置文件路径。启动期与选择世界页因此共用同一份算式。 */
+    public static Path file(Path worldRoot) {
         return SystemsData.ID.withSuffix(".dat")
-                .resolveAgainst(server.getWorldPath(LevelResource.DATA));
+                .resolveAgainst(worldRoot.resolve(LevelResource.DATA.id()));
+    }
+
+    /** 无参数声明的系统把整张参数复合写进界面那一个自由框，这就是那个框的键。 */
+    public static final String FREE_ARG_KEY = "";
+
+    /**
+     * 该世界根目录下的配置能否读回并还原成界面文本。
+     *
+     * <p>文件不存在返回真：那种世界没有本模组的配置，按默认选择走。
+     *
+     * <p>判据分两层，两层都过才算兼容。第一层是 {@link #read}：NBT 读不出、缺 {@code data} 键、
+     * codec 解不开。第二层是 {@link #texts}：文件读得出不代表能用，{@code Arg} 的值经
+     * {@code Codec.PASSTHROUGH} 原样带过，声明类型与标签类型不符要等到还原文本时才暴露，未注册的
+     * 系统 id 要等到取类时才暴露。第二层与界面预填共用 {@link #texts} 这一段代码，所以「列表说能
+     * 打开、预填时才炸」不会出现。
+     */
+    public static boolean compatible(Path worldRoot) {
+        Path file = file(worldRoot);
+        if (!Files.exists(file)) {
+            return true;
+        }
+        try {
+            SystemsData data = read(file);
+            for (LevelSelection selection : data.levels().values()) {
+                texts(FamilyKind.TERRAIN, selection.terrain());
+                texts(FamilyKind.BIOME, selection.biome());
+                texts(FamilyKind.SURFACE, selection.surface());
+                texts(FamilyKind.CARVER, selection.carver());
+                texts(FamilyKind.DECORATION, selection.decoration());
+            }
+            return true;
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    /**
+     * 把一族的选择还原成界面文本，键与界面上的框一一对应。
+     *
+     * <p>有参数声明时逐项按声明类型还原，文件里缺的项不出现；没有声明时把整张参数复合编码进
+     * {@link #FREE_ARG_KEY} 那一个框。界面预填与兼容性判据共用本方法，两处不会漂移。
+     *
+     * <p>失败一律抛：未注册的系统 id、声明类型与标签类型不符都在这里暴露，由调用方决定是中止还是
+     * 判成不兼容。
+     */
+    public static Map<String, String> texts(FamilyKind kind, SystemSelection selection) {
+        SystemId id = new SystemId(selection.id());
+        SystemParams declared = SystemParams.declaredBy(classOf(kind, id));
+        if (declared == null) {
+            String encoded = SystemSelection.ARGS_CODEC.encodeStart(NbtOps.INSTANCE, selection.args())
+                    .getOrThrow().toString();
+            return Map.of(FREE_ARG_KEY, encoded);
+        }
+        Map<String, String> out = new LinkedHashMap<>();
+        for (SystemParamSpec spec : declared.entries()) {
+            Arg arg = selection.args().get(spec.key());
+            if (arg != null) {
+                out.put(spec.key(), SystemParamSpec.text(spec.key(), spec.type(), arg.value()));
+            }
+        }
+        return out;
+    }
+
+    /** 按族取实现类。未注册即抛，是兼容性判据第二层的另一半。 */
+    public static Class<?> classOf(FamilyKind kind, SystemId id) {
+        return switch (kind) {
+            case BIOME -> SystemRegistries.biomeClassOf(id);
+            case TERRAIN -> SystemRegistries.terrainClassOf(id);
+            case SURFACE -> SystemRegistries.surfaceClassOf(id);
+            case CARVER -> SystemRegistries.carverClassOf(id);
+            case DECORATION -> SystemRegistries.decorationClassOf(id);
+        };
     }
 
     /**

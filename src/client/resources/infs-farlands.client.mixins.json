@@ -43,6 +43,8 @@
     "render.SectionOcclusionGraphMixin",
     "render.RenderRegionCacheMixin",
     "worldselection.CreateWorldScreenMixin",
+    "worldselection.LevelSummaryMixin",
+    "worldselection.WorldListEntryMixin",
     "worldselection.WorldOpenFlowsMixin",
     "tick.MinecraftMixin",
     "outside.GuiMixin",
