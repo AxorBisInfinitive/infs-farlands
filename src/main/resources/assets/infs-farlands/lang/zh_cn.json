@@ -39,8 +39,6 @@
   "createWorld.tab.infs-farlands.family.decoration": "装饰系统",
   "createWorld.tab.infs-farlands.error.read.title": "系统配置读取失败",
   "createWorld.tab.infs-farlands.error.read.message": "已改用默认值：%s",
-  "createWorld.tab.infs-farlands.error.args.title": "系统参数不合法",
-  "createWorld.tab.infs-farlands.error.args.message": "创建前请先修正标红的参数：\n%s",
   "createWorld.tab.infs-farlands.param.free": "自由参数",
   "createWorld.tab.infs-farlands.param.free.example": "示例：\n%s",
   "createWorld.tab.infs-farlands.param.line": "\"%1$s\": %2$s",

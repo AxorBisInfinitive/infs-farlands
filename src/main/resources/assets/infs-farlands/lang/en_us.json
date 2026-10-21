@@ -39,8 +39,6 @@
   "createWorld.tab.infs-farlands.family.decoration": "Decoration system",
   "createWorld.tab.infs-farlands.error.read.title": "Failed to read the system config",
   "createWorld.tab.infs-farlands.error.read.message": "Defaults are used instead: %s",
-  "createWorld.tab.infs-farlands.error.args.title": "Invalid system parameters",
-  "createWorld.tab.infs-farlands.error.args.message": "Fix the highlighted parameters before creating:\n%s",
   "createWorld.tab.infs-farlands.param.free": "Free-form parameters",
   "createWorld.tab.infs-farlands.param.free.example": "Example:\n%s",
   "createWorld.tab.infs-farlands.param.line": "\"%1$s\": %2$s",

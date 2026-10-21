@@ -96,6 +96,8 @@ public class FarlandsTab implements Tab {
     private final Map<Identifier, Map<FamilyKind, FamilyLabel>> labels = new HashMap<>();
     /** 维度页到其中至少有一个系统非法的族。页签的红当且仅当这一集非空。 */
     private final Map<Identifier, Set<FamilyKind>> invalidFamilies = new HashMap<>();
+    /** 非法集合变化后的回调，屏幕据此回写创建按钮的可用状态。界面初始化期由屏幕装上。 */
+    private Runnable invalidListener;
     /** 页签行。多行换行由它自己按可用宽度排，见 {@link TabStrip}。 */
     private final TabStrip strip;
     private ScreenRectangle lastArea;
@@ -289,27 +291,9 @@ public class FarlandsTab implements Tab {
     }
 
     /**
-     * 把提交前那一次检验的违规标到对应的参数组上。
-     *
-     * <p>维度页与族用来定位，规则引用的键决定标哪几个框。定位不到时只跳过标红，弹窗里的文字仍带全部
-     * 违规，所以不会静默丢掉一条。
-     */
-    public void markViolations(List<CreatingWorldSystemsConfig.FamilyViolation> violations) {
-        // 先复位：违规列表是全集，上一轮标过的红要跟着这一轮已经不成立的项一起消掉。
-        this.clearFamilyMarks();
-        for (CreatingWorldSystemsConfig.FamilyViolation violation : violations) {
-            ParamGroup group = this.group(violation.dimension(), violation.family());
-            if (group != null) {
-                group.markRule(violation.keys(), violation.message());
-            }
-            this.markFamily(violation.dimension(), violation.family(), true);
-        }
-    }
-
-    /**
      * 标红或复位一个族：族标签的颜色，与它所在维度页的页签。
      *
-     * <p>判据是违规列表是否非空，与提交前那一次检验同源，所以页签红与「拦住创建」逐条一致。
+     * <p>判据是违规列表是否非空，与落盘那一次检验同源，所以页签红与「拦住创建」逐条一致。
      * 只在颜色上区分，不改文本、不改布局。
      */
     private void markFamily(Identifier page, FamilyKind kind, boolean invalid) {
@@ -326,17 +310,24 @@ public class FarlandsTab implements Tab {
             label.widget().setMessage(invalid ? label.invalid() : label.normal());
         }
         this.refreshTab(page);
+        if (this.invalidListener != null) {
+            this.invalidListener.run();
+        }
     }
 
-    /** 全部族标签复位成正常色、页级集合清空，页签随后统一刷一次。 */
-    private void clearFamilyMarks() {
-        for (Map<FamilyKind, FamilyLabel> pageLabels : this.labels.values()) {
-            for (FamilyLabel label : pageLabels.values()) {
-                label.widget().setMessage(label.normal());
+    /** 是否有任一维度页的任一系统参数非法。屏幕据此把创建按钮置灰并吃掉回车。 */
+    public boolean hasInvalid() {
+        for (Set<FamilyKind> families : this.invalidFamilies.values()) {
+            if (!families.isEmpty()) {
+                return true;
             }
         }
-        this.invalidFamilies.clear();
-        this.refreshAllTabs();
+        return false;
+    }
+
+    /** 装上非法集合变化的回调。屏幕在界面初始化期调一次，重建界面时随新页签重装。 */
+    public void setInvalidListener(Runnable listener) {
+        this.invalidListener = listener;
     }
 
     /** 该维度页的页签颜色：该页至少一个族非法即红，否则正常色。 */
