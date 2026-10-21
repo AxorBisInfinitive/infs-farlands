@@ -63,20 +63,21 @@ public final class SystemsIO {
     public static final String FREE_ARG_KEY = "";
 
     /**
-     * 该世界根目录下的配置能否读回并还原成界面文本。
+     * 该世界根目录下的配置能不能用。
      *
-     * <p>文件不存在返回真：那种世界没有本模组的配置，按默认选择走。
-     *
-     * <p>判据分两层，两层都过才算兼容。第一层是 {@link #read}：NBT 读不出、缺 {@code data} 键、
+     * <p>文件在时判两层，两层都过才算兼容。第一层是 {@link #read}：NBT 读不出、缺 {@code data} 键、
      * codec 解不开。第二层是 {@link #texts}：文件读得出不代表能用，{@code Arg} 的值经
      * {@code Codec.PASSTHROUGH} 原样带过，声明类型与标签类型不符要等到还原文本时才暴露，未注册的
      * 系统 id 要等到取类时才暴露。第二层与界面预填共用 {@link #texts} 这一段代码，所以「列表说能
      * 打开、预填时才炸」不会出现。
+     *
+     * <p>文件不在时要看世界是否已初始化：{@link #resolve} 对「已初始化却没有配置」的世界直接抛，
+     * 那种世界进了列表也打不开，所以这里判成不兼容。未初始化的世界按暂存或默认选择走，判成兼容。
      */
     public static boolean compatible(Path worldRoot) {
         Path file = file(worldRoot);
         if (!Files.exists(file)) {
-            return true;
+            return !initialized(worldRoot);
         }
         try {
             SystemsData data = read(file);
@@ -90,6 +91,28 @@ public final class SystemsIO {
             return true;
         } catch (RuntimeException e) {
             return false;
+        }
+    }
+
+    /**
+     * 该世界根目录下 {@code level.dat} 的 initialized 标志，缺键默认真。
+     *
+     * <p>与 {@code PrimaryLevelData.parse} 的 {@code input.get("initialized").asBoolean(true)} 同式，
+     * 与 {@link #resolve} 读的 {@code overworldData().isInitialized()} 也是同一份数据：那个标志在
+     * 第一个 {@code ServerLevel} 构造之后才置真，所以新建世界在 resolve 时读到假、已有世界读到真。
+     *
+     * <p>只在缺 {@link #file(Path)} 时才读，有配置的世界不付这次解析。配额用
+     * {@link NbtAccounter#unlimitedHeap()}，与 {@code SavedDataStorage} 读同一个文件时一致。
+     *
+     * <p>读不出来按已初始化处理：那种世界的摘要本身解不出来，已经不可用，偏保守的方向不会误放行。
+     */
+    private static boolean initialized(Path worldRoot) {
+        try {
+            CompoundTag root = NbtIo.readCompressed(
+                    worldRoot.resolve(LevelResource.LEVEL_DATA_FILE.id()), NbtAccounter.unlimitedHeap());
+            return root.getCompoundOrEmpty("Data").getBooleanOr("initialized", true);
+        } catch (Exception e) {
+            return true;
         }
     }
 
