@@ -174,7 +174,7 @@ public final class CreatingWorldSystemsConfig {
                 try {
                     found = SystemSelectionParser.violations(classOf(kind, id), text(page, kind, id));
                 } catch (RuntimeException e) {
-                    out.add(new FamilyViolation(page, kind, id, Set.of(), Component.literal(message(e))));
+                    out.add(new FamilyViolation(page, kind, id, Set.of(), SystemSelectionParser.problem(e)));
                     continue;
                 }
                 for (SystemParams.Violation violation : found) {
@@ -200,10 +200,6 @@ public final class CreatingWorldSystemsConfig {
                     .append(violation.message());
         }
         return out;
-    }
-
-    private static String message(RuntimeException e) {
-        return e.getMessage() == null ? e.toString() : e.getMessage();
     }
 
     /**

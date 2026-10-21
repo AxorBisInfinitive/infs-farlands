@@ -56,5 +56,14 @@
   "createWorld.tab.infs-farlands.param.error.outer_edge": "The outer edge %1$s is beyond the playable limit %2$s",
   "createWorld.tab.infs-farlands.param.error.table_cells": "The lookup needs %1$s columns, the cap is %2$s",
   "createWorld.tab.infs-farlands.param.error.cell_aligned": "Parameter %1$s must be a positive multiple of %2$s, got %3$s",
+  "createWorld.tab.infs-farlands.param.error.not_integer": "Parameter %1$s must be an integer between %2$s and %3$s, got %4$s",
+  "createWorld.tab.infs-farlands.param.error.not_number": "Parameter %1$s is not a number, got %2$s",
+  "createWorld.tab.infs-farlands.param.error.out_of_range": "Parameter %1$s is out of range, got %2$s",
+  "createWorld.tab.infs-farlands.param.error.not_bool": "Parameter %1$s must be true or false, got %2$s",
+  "createWorld.tab.infs-farlands.param.error.unknown_enum": "Parameter %1$s has no value named %3$s in %2$s",
+  "createWorld.tab.infs-farlands.param.error.enum_needs_class": "Parameter %1$s is an enum but declares no enum class",
+  "createWorld.tab.infs-farlands.param.error.no_value": "Parameter %1$s has no value, no default and no empty keyword",
+  "createWorld.tab.infs-farlands.param.error.free_not_snbt": "The free-form parameters are not a valid SNBT map",
+  "createWorld.tab.infs-farlands.param.error.free_arg": "Free-form parameter %1$s failed to parse: %2$s",
   "createWorld.tab.infs-farlands.param.random_int": "Random int each time"
 }

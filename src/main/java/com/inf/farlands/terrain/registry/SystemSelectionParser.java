@@ -51,7 +51,7 @@ public final class SystemSelectionParser {
             Arg arg = text.isEmpty() ? fromEmpty(spec) : parseText(spec, text);
             return spec.violation(arg);
         } catch (RuntimeException e) {
-            return Component.literal(message(e));
+            return problem(e);
         }
     }
 
@@ -72,7 +72,7 @@ public final class SystemSelectionParser {
                 parseFree(texts);
                 return List.of();
             } catch (RuntimeException e) {
-                return List.of(new SystemParams.Violation(Set.of(""), Component.literal(message(e))));
+                return List.of(new SystemParams.Violation(Set.of(""), problem(e)));
             }
         }
         Map<String, Arg> parsed = new LinkedHashMap<>();
@@ -82,7 +82,7 @@ public final class SystemSelectionParser {
             try {
                 parsed.put(spec.key(), text.isEmpty() ? fromEmpty(spec) : parseText(spec, text));
             } catch (RuntimeException e) {
-                out.add(new SystemParams.Violation(Set.of(spec.key()), Component.literal(message(e))));
+                out.add(new SystemParams.Violation(Set.of(spec.key()), problem(e)));
             }
         }
         if (!out.isEmpty()) {
@@ -97,8 +97,18 @@ public final class SystemSelectionParser {
             parseFree(Map.of("", text));
             return null;
         } catch (RuntimeException e) {
-            return Component.literal(message(e));
+            return problem(e);
         }
+    }
+
+    /**
+     * 把解析异常转成界面可显示的错因。
+     *
+     * <p>本类抛的 {@link SystemArgProblem} 自带组件，直接用它；其余异常退回原文本，那些来自别处，
+     * 例如系统 id 未注册或声明形状不对，不该被这里吞掉。
+     */
+    public static Component problem(RuntimeException e) {
+        return e instanceof SystemArgProblem p ? p.problem() : Component.literal(message(e));
     }
 
     private static String message(RuntimeException e) {
@@ -130,8 +140,9 @@ public final class SystemSelectionParser {
         }
         Arg fallback = spec.defaultValue();
         if (fallback == null) {
-            throw new IllegalStateException(
-                    "farlands: system arg " + spec.key() + " has no text, no keyword and no default");
+            throw new SystemArgProblem(
+                    "farlands: system arg " + spec.key() + " has no text, no keyword and no default",
+                    Component.translatable("createWorld.tab.infs-farlands.param.error.no_value", spec.key()));
         }
         return fallback;
     }
@@ -146,14 +157,17 @@ public final class SystemSelectionParser {
         try {
             tag = TagParser.parseCompoundFully(text);
         } catch (Exception e) {
-            throw new IllegalStateException("farlands: free-form arg box is not a valid SNBT map", e);
+            throw new SystemArgProblem("farlands: free-form arg box is not a valid SNBT map",
+                    Component.translatable("createWorld.tab.infs-farlands.param.error.free_not_snbt"), e);
         }
         Map<String, Arg> out = new LinkedHashMap<>();
         for (String key : tag.keySet()) {
             Tag value = tag.get(key);
             out.put(key, Arg.CODEC.parse(NbtOps.INSTANCE, value).getOrThrow(
-                    message -> new IllegalStateException(
-                            "farlands: free-form arg " + key + " failed to parse: " + message)));
+                    message -> new SystemArgProblem(
+                            "farlands: free-form arg " + key + " failed to parse: " + message,
+                            Component.translatable("createWorld.tab.infs-farlands.param.error.free_arg", key,
+                                    message))));
         }
         return out;
     }
@@ -172,8 +186,10 @@ public final class SystemSelectionParser {
             case DOUBLE -> Arg.ofDoubleText(checkedDoubleText(spec.key(), text, Double.MAX_VALUE));
             case BOOLEAN -> Arg.ofBoolean(bool(spec.key(), text));
             case STRING -> Arg.ofString(text);
-            case ENUM -> throw new IllegalStateException(
-                    "farlands: enum arg " + spec.key() + " needs an enum class, plain text is not enough");
+            case ENUM -> throw new SystemArgProblem(
+                    "farlands: enum arg " + spec.key() + " needs an enum class, plain text is not enough",
+                    Component.translatable("createWorld.tab.infs-farlands.param.error.enum_needs_class",
+                            spec.key()));
         };
     }
 
@@ -189,8 +205,11 @@ public final class SystemSelectionParser {
             }
             return value;
         } catch (ArithmeticException | NumberFormatException e) {
-            throw new IllegalStateException(
-                    "farlands: system arg " + key + " is not an integer in [" + min + ", " + max + "]: " + text, e);
+            throw new SystemArgProblem(
+                    "farlands: system arg " + key + " is not an integer in [" + min + ", " + max + "]: " + text,
+                    Component.translatable("createWorld.tab.infs-farlands.param.error.not_integer", key, min, max,
+                            text),
+                    e);
         }
     }
 
@@ -207,10 +226,12 @@ public final class SystemSelectionParser {
         try {
             value = Double.parseDouble(trimmed);
         } catch (NumberFormatException e) {
-            throw new IllegalStateException("farlands: system arg " + key + " is not a number: " + text, e);
+            throw new SystemArgProblem("farlands: system arg " + key + " is not a number: " + text,
+                    Component.translatable("createWorld.tab.infs-farlands.param.error.not_number", key, text), e);
         }
         if (Double.isFinite(value) && Math.abs(value) > limit) {
-            throw new IllegalStateException("farlands: system arg " + key + " out of range: " + text);
+            throw new SystemArgProblem("farlands: system arg " + key + " out of range: " + text,
+                    Component.translatable("createWorld.tab.infs-farlands.param.error.out_of_range", key, text));
         }
         return trimmed;
     }
@@ -223,21 +244,26 @@ public final class SystemSelectionParser {
         if ("false".equals(trimmed)) {
             return false;
         }
-        throw new IllegalStateException("farlands: system arg " + key + " is not true or false: " + text);
+        throw new SystemArgProblem("farlands: system arg " + key + " is not true or false: " + text,
+                Component.translatable("createWorld.tab.infs-farlands.param.error.not_bool", key, text));
     }
 
     /** 枚举文本还原成真实例，并带上枚举类名，取值方 {@link SystemArgs#getEnum} 走 Class.cast 才有东西可取。 */
     @SuppressWarnings({ "unchecked", "rawtypes" })
     static <E extends Enum<E>> Arg enumArg(String key, Class<? extends Enum<?>> enumClass, String text) {
         if (enumClass == null) {
-            throw new IllegalStateException("farlands: enum arg " + key + " has no enum class declared");
+            throw new SystemArgProblem("farlands: enum arg " + key + " has no enum class declared",
+                    Component.translatable("createWorld.tab.infs-farlands.param.error.enum_needs_class", key));
         }
         try {
             return Arg.<E>ofEnum((E) Enum.valueOf((Class) enumClass, text.trim()));
         } catch (IllegalArgumentException e) {
-            throw new IllegalStateException(
+            throw new SystemArgProblem(
                     "farlands: system arg " + key + " has no such enum constant: "
-                            + enumClass.getName() + "." + text.trim(), e);
+                            + enumClass.getName() + "." + text.trim(),
+                    Component.translatable("createWorld.tab.infs-farlands.param.error.unknown_enum", key,
+                            enumClass.getSimpleName(), text.trim()),
+                    e);
         }
     }
 }

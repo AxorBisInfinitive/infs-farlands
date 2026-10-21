@@ -65,6 +65,12 @@ dependencies {
 
 	// Spark: 1.10.187-fabric
 	localRuntime "maven.modrinth:l6YH9Als:e3hsPc1o"
+
+    // Forge Config API Port: 26.1.2
+    localRuntime "maven.modrinth:ohNO6lps:jUe0ucoE"
+
+    // Modern UI: 3.13.0.5-fabric
+    localRuntime "maven.modrinth:3sjzyvGR:uf6cAgLr"
 }
 
 processResources {
