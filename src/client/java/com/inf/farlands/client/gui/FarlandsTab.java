@@ -2,9 +2,11 @@ package com.inf.farlands.client.gui;
 
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -18,16 +20,17 @@ import com.inf.farlands.terrain.registry.SystemParams;
 import com.inf.farlands.terrain.registry.SystemSelectionParser;
 import com.inf.farlands.terrain.registry.SystemsIO;
 
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.components.AbstractScrollArea;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.ScrollableLayout;
+import net.minecraft.client.gui.components.StringWidget;
 import net.minecraft.client.gui.components.TabButton;
 import net.minecraft.client.gui.components.tabs.Tab;
 import net.minecraft.client.gui.components.tabs.TabManager;
 import net.minecraft.client.gui.layouts.AbstractLayout;
-import net.minecraft.client.gui.layouts.CommonLayouts;
 import net.minecraft.client.gui.layouts.FrameLayout;
 import net.minecraft.client.gui.layouts.GridLayout;
 import net.minecraft.client.gui.layouts.Layout;
@@ -89,9 +92,17 @@ public class FarlandsTab implements Tab {
     private final List<DemoPage> pages = new ArrayList<>();
     /** 维度页到族到参数组，提交被拦下时按违规的维度与族定位到该标红的组。 */
     private final Map<Identifier, Map<FamilyKind, ParamGroup>> groups = new HashMap<>();
+    /** 维度页到族到族标签。标红与复位都改它的消息，两份文本在建立时算好，按键路径不再分配。 */
+    private final Map<Identifier, Map<FamilyKind, FamilyLabel>> labels = new HashMap<>();
+    /** 维度页到其中至少有一个系统非法的族。页签的红当且仅当这一集非空。 */
+    private final Map<Identifier, Set<FamilyKind>> invalidFamilies = new HashMap<>();
     /** 页签行。多行换行由它自己按可用宽度排，见 {@link TabStrip}。 */
     private final TabStrip strip;
     private ScreenRectangle lastArea;
+
+    /** 一个族的标签与它的两份文本：正常色与标红色。 */
+    private record FamilyLabel(StringWidget widget, Component normal, Component invalid) {
+    }
 
     public FarlandsTab(List<Identifier> dimensions) {
         Minecraft minecraft = Minecraft.getInstance();
@@ -137,6 +148,8 @@ public class FarlandsTab implements Tab {
             this.strip.addTab(new DemoTabButton(manager, page, tabWidths[i]));
             bodies.addChild(page.scroll());
         }
+        // 构造期那次 revalidate 因按钮尚不存在而跳过了页签刷新，这里补齐。
+        this.refreshAllTabs();
 
         if (!this.pages.isEmpty()) {
             manager.setCurrentTab(this.pages.get(0), false);
@@ -216,6 +229,10 @@ public class FarlandsTab implements Tab {
         ParamGroup group = new ParamGroup(width);
         this.groups.computeIfAbsent(page, k -> new EnumMap<>(FamilyKind.class)).put(kind, group);
         group.setOnChanged(() -> this.revalidate(page, kind));
+        // 标签先建：applySelection 会经 setParams 触发一次 revalidate，那时族标签要在册才标得上红。
+        StringWidget label = new StringWidget(title, font);
+        this.labels.computeIfAbsent(page, k -> new EnumMap<>(FamilyKind.class))
+                .put(kind, new FamilyLabel(label, title, title.copy().withStyle(ChatFormatting.RED)));
         this.applySelection(group, classOf, page, kind, ids.get(index));
         LinearLayout control = LinearLayout.vertical().spacing(4);
         control.addChild(new DropdownSelect(layer, revealer, width, FIELD_HEIGHT, this.idOptions(ids), index,
@@ -226,7 +243,11 @@ public class FarlandsTab implements Tab {
                     this.applySelection(group, classOf, page, kind, chosen);
                 }));
         control.addChild(group);
-        return CommonLayouts.labeledElement(font, control, title);
+        // 与 CommonLayouts.labeledElement 同形：标签在上、控件在下、行距 4，只是标签的引用留在本类。
+        LinearLayout block = LinearLayout.vertical().spacing(4);
+        block.addChild(label);
+        block.addChild(control);
+        return block;
     }
 
     /** 默认项在该族列表里的下标。列表里没有它时退回第一项。 */
@@ -259,10 +280,12 @@ public class FarlandsTab implements Tab {
         if (id == null) {
             id = SystemsIO.defaultId(page, kind);
         }
-        for (SystemParams.Violation violation : SystemSelectionParser.violations(
-                CreatingWorldSystemsConfig.classOf(kind, id), group.currentTexts())) {
+        List<SystemParams.Violation> found = SystemSelectionParser.violations(
+                CreatingWorldSystemsConfig.classOf(kind, id), group.currentTexts());
+        for (SystemParams.Violation violation : found) {
             group.markRule(violation.keys(), violation.message());
         }
+        this.markFamily(page, kind, !found.isEmpty());
     }
 
     /**
@@ -272,11 +295,70 @@ public class FarlandsTab implements Tab {
      * 违规，所以不会静默丢掉一条。
      */
     public void markViolations(List<CreatingWorldSystemsConfig.FamilyViolation> violations) {
+        // 先复位：违规列表是全集，上一轮标过的红要跟着这一轮已经不成立的项一起消掉。
+        this.clearFamilyMarks();
         for (CreatingWorldSystemsConfig.FamilyViolation violation : violations) {
             ParamGroup group = this.group(violation.dimension(), violation.family());
             if (group != null) {
                 group.markRule(violation.keys(), violation.message());
             }
+            this.markFamily(violation.dimension(), violation.family(), true);
+        }
+    }
+
+    /**
+     * 标红或复位一个族：族标签的颜色，与它所在维度页的页签。
+     *
+     * <p>判据是违规列表是否非空，与提交前那一次检验同源，所以页签红与「拦住创建」逐条一致。
+     * 只在颜色上区分，不改文本、不改布局。
+     */
+    private void markFamily(Identifier page, FamilyKind kind, boolean invalid) {
+        Set<FamilyKind> families = this.invalidFamilies.computeIfAbsent(page,
+                k -> EnumSet.noneOf(FamilyKind.class));
+        if (invalid) {
+            families.add(kind);
+        } else {
+            families.remove(kind);
+        }
+        Map<FamilyKind, FamilyLabel> pageLabels = this.labels.get(page);
+        FamilyLabel label = pageLabels == null ? null : pageLabels.get(kind);
+        if (label != null) {
+            label.widget().setMessage(invalid ? label.invalid() : label.normal());
+        }
+        this.refreshTab(page);
+    }
+
+    /** 全部族标签复位成正常色、页级集合清空，页签随后统一刷一次。 */
+    private void clearFamilyMarks() {
+        for (Map<FamilyKind, FamilyLabel> pageLabels : this.labels.values()) {
+            for (FamilyLabel label : pageLabels.values()) {
+                label.widget().setMessage(label.normal());
+            }
+        }
+        this.invalidFamilies.clear();
+        this.refreshAllTabs();
+    }
+
+    /** 该维度页的页签颜色：该页至少一个族非法即红，否则正常色。 */
+    private void refreshTab(Identifier page) {
+        // 构造期按钮还没建，而那时 revalidate 已经在跑。留给构造函数末尾的 refreshAllTabs 补。
+        if (this.strip == null) {
+            return;
+        }
+        Set<FamilyKind> families = this.invalidFamilies.get(page);
+        boolean invalid = families != null && !families.isEmpty();
+        for (int i = 0; i < this.pages.size(); i++) {
+            DemoPage demoPage = this.pages.get(i);
+            if (demoPage.dimension.equals(page)) {
+                this.strip.setTabMessage(i, invalid ? demoPage.invalidTitle : demoPage.title);
+                return;
+            }
+        }
+    }
+
+    private void refreshAllTabs() {
+        for (DemoPage demoPage : this.pages) {
+            this.refreshTab(demoPage.dimension);
         }
     }
 
@@ -413,6 +495,14 @@ public class FarlandsTab implements Tab {
             this.tabs.add(tab);
         }
 
+        /** 改一格的消息。索引越界即返回：构造期按钮还没加进来。 */
+        private void setTabMessage(int index, Component message) {
+            if (index < 0 || index >= this.tabs.size()) {
+                return;
+            }
+            this.tabs.get(index).setMessage(message);
+        }
+
         /** 布局时喂入可用宽度。宽度变化会改变换行位置，也会改变超宽单格的封顶值。 */
         private void setAvailable(int available) {
             this.available = available;
@@ -522,6 +612,8 @@ public class FarlandsTab implements Tab {
 
         private final Identifier dimension;
         private final Component title;
+        /** 页签标红用的同一份标题。颜色在建立时算好，按键路径不再分配。 */
+        private final Component invalidTitle;
         private final ScrollableLayout scroll;
         private final DropdownSelect.Layer layer;
         private final List<AbstractWidget> leaves = new ArrayList<>();
@@ -531,6 +623,7 @@ public class FarlandsTab implements Tab {
                 DropdownSelect.Layer layer) {
             this.dimension = dimension;
             this.title = title;
+            this.invalidTitle = title.copy().withStyle(ChatFormatting.RED);
             this.scroll = scroll;
             this.layer = layer;
             scroll.visitWidgets(this.leaves::add);
