@@ -8,6 +8,7 @@ import com.inf.farlands.register.packet.*;
 import com.inf.farlands.terrain.registry.SystemRegistries;
 import com.inf.farlands.terrain.system.biome.misc.Void.VoidBiomeSystem;
 import com.inf.farlands.terrain.system.biome.overworld.Oct.OctBiomeSystem;
+import com.inf.farlands.terrain.system.biome.overworld.Sakura.SakuraBiomeSystem;
 import com.inf.farlands.terrain.system.biome.overworld.Vanilla.VanillaBiomeSystem;
 import com.inf.farlands.terrain.system.carver.misc.Void.VoidCarverSystem;
 import com.inf.farlands.terrain.system.carver.overworld.Vanilla.VanillaCarverSystem;
@@ -76,7 +77,7 @@ public class FarlandsRegister {
         }
     }
 
-    /** 31 个内置系统按五族登记，id 与实现类的对应关系集中在此。 */
+    /** 37 个内置系统按五族登记，id 与实现类的对应关系集中在此。 */
     private static void registerSystems() {
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_VOID_NOISE_SYSTEM, VoidNoiseSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_OVERWORLD_VANILLA_NOISE_SYSTEM,
@@ -115,6 +116,8 @@ public class FarlandsRegister {
         SystemRegistries.registerBiome(SystemRegistries.BIOME_OVERWORLD_VANILLA_BIOME_SYSTEM,
                 VanillaBiomeSystem.class);
         SystemRegistries.registerBiome(SystemRegistries.BIOME_OVERWORLD_OCT_BIOME_SYSTEM, OctBiomeSystem.class);
+        SystemRegistries.registerBiome(SystemRegistries.BIOME_OVERWORLD_SAKURA_BIOME_SYSTEM,
+                SakuraBiomeSystem.class);
         SystemRegistries.registerBiome(SystemRegistries.BIOME_THE_NETHER_VANILLA_BIOME_SYSTEM,
                 com.inf.farlands.terrain.system.biome.theNether.Vanilla.VanillaBiomeSystem.class);
         SystemRegistries.registerBiome(SystemRegistries.BIOME_THE_END_VANILLA_BIOME_SYSTEM,

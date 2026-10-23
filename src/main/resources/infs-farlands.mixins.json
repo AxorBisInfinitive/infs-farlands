@@ -63,6 +63,8 @@
     "noise.NoiseChunkMixin",
     "noise.HeightmapInvoker",
     "terrain.ServerLevelMixin",
+    "terrain.biome.ChunkGeneratorBiomeSourceMixin",
+    "terrain.biome.MultiNoiseBiomeSourceInvoker",
     "terrain.carver.WorldCarverMixin",
     "terrain.carver.NetherWorldCarverMixin",
     "terrain.decoration.BlockEntityLevelMixin",

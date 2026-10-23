@@ -61,6 +61,7 @@ public final class SystemRegistries {
     public static final SystemId BIOME_MISC_VOID_BIOME_SYSTEM = id("misc_void_biome_system");
     public static final SystemId BIOME_OVERWORLD_VANILLA_BIOME_SYSTEM = id("overworld_vanilla_biome_system");
     public static final SystemId BIOME_OVERWORLD_OCT_BIOME_SYSTEM = id("overworld_oct_biome_system");
+    public static final SystemId BIOME_OVERWORLD_SAKURA_BIOME_SYSTEM = id("overworld_sakura_biome_system");
     public static final SystemId BIOME_THE_NETHER_VANILLA_BIOME_SYSTEM = id("the_nether_vanilla_biome_system");
     public static final SystemId BIOME_THE_END_VANILLA_BIOME_SYSTEM = id("the_end_vanilla_biome_system");
 

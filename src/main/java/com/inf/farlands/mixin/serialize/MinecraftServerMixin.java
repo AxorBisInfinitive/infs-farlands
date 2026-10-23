@@ -5,6 +5,7 @@ import com.inf.farlands.serialize.ChunkReadiness;
 import com.inf.farlands.serialize.SectionIO;
 import com.inf.farlands.serialize.SectionLifecycle;
 import com.inf.farlands.serialize.SectionStage;
+import com.inf.farlands.terrain.biomeSource.BiomeSourceFilter;
 import com.inf.farlands.terrain.decorationFiller.DecorationClaim;
 import com.inf.farlands.terrain.decorationFiller.DecorationFiller;
 import com.inf.farlands.terrain.pipeline.GenQueue;
@@ -68,6 +69,7 @@ public abstract class MinecraftServerMixin {
     private void farlands$clearWorldState(CallbackInfo ci) {
         SectionLifecycle.clearWorldState();
         GenQueue.clearWorldState();
+        BiomeSourceFilter.clearWorldState();
         DecorationFiller.clearWorldState();
         DecorationClaim.clearWorldState();
         StructureDriver.clearWorldState();

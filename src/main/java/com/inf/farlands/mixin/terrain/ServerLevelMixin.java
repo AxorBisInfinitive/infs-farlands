@@ -6,6 +6,7 @@ import com.inf.farlands.terrain.DecorationSystem;
 import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.SurfaceSystem;
 import com.inf.farlands.terrain.TerrainSystem;
+import com.inf.farlands.terrain.biomeSource.BiomeSourceFilter;
 import com.inf.farlands.terrain.registry.SystemsData;
 import com.inf.farlands.terrain.registry.SystemsHolder;
 import com.inf.farlands.terrain.registry.SystemsIO;
@@ -14,6 +15,8 @@ import com.inf.farlands.terrain.terrainFiller.TerrainFiller;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.biome.BiomeSource;
+import net.minecraft.world.level.chunk.ChunkGenerator;
 
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
@@ -73,6 +76,14 @@ public abstract class ServerLevelMixin implements LevelSystems, SystemsHolder {
         this.farlandsCarverSystem = SystemsIO.carver(selection);
         this.farlandsDecorationSystem = SystemsIO.decoration(selection);
         this.farlandsTerrainFiller = new StandardTerrainFiller();
+        // 群系源换出：系统在这里算一次，按生成器实例登记，getter 之后一律返回它。此处取到的仍是字段里
+        // 那份原源，因为登记表此刻还没有该生成器的条目。
+        ChunkGenerator generator = level.getChunkSource().getGenerator();
+        BiomeSource raw = generator.getBiomeSource();
+        BiomeSource adapted = this.farlandsBiomeSystem.adaptBiomeSource(level, raw);
+        if (adapted != raw) {
+            BiomeSourceFilter.register(generator, adapted);
+        }
     }
 
     @Override
