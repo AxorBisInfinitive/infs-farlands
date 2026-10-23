@@ -51,6 +51,8 @@ public final class SystemRegistries {
     public static final SystemId TERRAIN_OVERWORLD_CWG_NOISE_SYSTEM = id("overworld_cwg_noise_system");
     public static final SystemId TERRAIN_OVERWORLD_VANILLA_263_NOISE_SYSTEM = id(
             "overworld_vanilla_263_noise_system");
+    public static final SystemId TERRAIN_OVERWORLD_THE_BENEATH_NOISE_SYSTEM = id(
+            "overworld_the_beneath_noise_system");
     public static final SystemId TERRAIN_MISC_SKY_GIRL_NOISE_SYSTEM = id("misc_sky_girl_noise_system");
     public static final SystemId TERRAIN_THE_NETHER_VANILLA_NOISE_SYSTEM = id("the_nether_vanilla_noise_system");
     public static final SystemId TERRAIN_THE_END_VANILLA_NOISE_SYSTEM = id("the_end_vanilla_noise_system");

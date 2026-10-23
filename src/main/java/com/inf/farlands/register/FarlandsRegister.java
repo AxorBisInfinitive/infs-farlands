@@ -28,6 +28,7 @@ import com.inf.farlands.terrain.system.terrain.noise.misc.Weierstrass.Weierstras
 import com.inf.farlands.terrain.system.terrain.noise.overworld.Beta173.Beta173NoiseSystem;
 import com.inf.farlands.terrain.system.terrain.noise.overworld.Cwg.CwgNoiseSystem;
 import com.inf.farlands.terrain.system.terrain.noise.overworld.Oct.OctNoiseSystem;
+import com.inf.farlands.terrain.system.terrain.noise.overworld.TheBeneath.TheBeneathNoiseSystem;
 import com.inf.farlands.terrain.system.terrain.noise.overworld.Vanilla.VanillaNoiseSystem;
 import com.inf.farlands.terrain.system.terrain.noise.overworld.Vanilla263.Vanilla263NoiseSystem;
 
@@ -99,6 +100,8 @@ public class FarlandsRegister {
                 CwgNoiseSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_OVERWORLD_VANILLA_263_NOISE_SYSTEM,
                 Vanilla263NoiseSystem.class);
+        SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_OVERWORLD_THE_BENEATH_NOISE_SYSTEM,
+                TheBeneathNoiseSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_SKY_GIRL_NOISE_SYSTEM,
                 SkyGirlNoiseSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_THE_NETHER_VANILLA_NOISE_SYSTEM,
