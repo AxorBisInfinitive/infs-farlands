@@ -51,7 +51,7 @@ dependencies {
 
 	// Sodium: mc26.1.2-0.9.2-fabric
 	compileOnly "maven.modrinth:AANobbMI:tZQ3jqnf"
-	localRuntime "maven.modrinth:AANobbMI:tZQ3jqnf"
+	// localRuntime "maven.modrinth:AANobbMI:tZQ3jqnf"
 
 	// Chunky: 1.5.3
 	compileOnly "maven.modrinth:fALzjamp:4Eotm6ov"
@@ -61,7 +61,7 @@ dependencies {
 	localRuntime "net.fabricmc.fabric-api:fabric-api:0.155.2+26.1.2"
 
     // Iris: 1.11.4+26.1-fabric
-	localRuntime "maven.modrinth:YL57xq9U:sZbVsl2Q"
+	// localRuntime "maven.modrinth:YL57xq9U:sZbVsl2Q"
 
 	// Spark: 1.10.187-fabric
 	localRuntime "maven.modrinth:l6YH9Als:e3hsPc1o"
@@ -103,6 +103,22 @@ jar {
 	from("LICENSE") {
 		rename { "${it}_$projectName"}
 	}
+}
+
+// 产物名带时间戳，每次构建都是新名字，旧文件不被覆盖，build/libs 随构建次数单调增长。
+// 清理只能是一个独立任务，不能挂在 build 的 doFirst：任务的 action 在其依赖执行完之后才跑，
+// 那时 remapJar 与 remapSourcesJar 已经写完，删除会把刚产出的文件删掉。挂在 assemble 上同理。
+tasks.register('cleanLibs', Delete) {
+	delete layout.buildDirectory.dir('libs')
+}
+
+tasks.named('build') {
+	dependsOn 'cleanLibs'
+}
+
+// 只约束顺序，不引入依赖：单独跑 remapJar 时不会因为这条关系把 cleanLibs 拉进执行图。
+tasks.withType(org.gradle.api.tasks.bundling.AbstractArchiveTask).configureEach {
+	mustRunAfter 'cleanLibs'
 }
 
 // configure the maven publication
