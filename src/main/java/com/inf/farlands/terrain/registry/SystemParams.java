@@ -17,10 +17,8 @@ import net.minecraft.network.chat.Component;
  * 一个系统声明的参数表，由标注了 {@link SystemDefaultParams} 的静态字段携带。
  *
  * <p>
- * 语义三分，调用方必须分清：
- * EMPTY 表示这个系统不吃参数，界面给 0 个框；
- * null，即没有带注解的字段或字段值为 null，表示没有声明，界面退化成一个自由文本框；
- * 字段形状不对是错误，直接抛，不静默当成没声明。
+ * 语义两分：{@link #EMPTY} 表示这个系统不吃参数，界面给 0 个框；有声明则按声明逐项建框。没有声明不是
+ * 一种状态，注册期就抛，见 {@link #requireDeclared}。字段形状不对同样直接抛，不静默当成没声明。
  *
  * <p>
  * 校验分两层。单参数的值域与语义集合写在 {@link SystemParamSpec} 上，由界面逐键执行，失败只标红那一个框。
@@ -188,34 +186,64 @@ public record SystemParams(List<SystemParamSpec> entries, List<Rule> rules) {
     }
 
     /**
-     * 读该类的参数声明。没有带注解的字段或字段值为 null 时返回 null。带注解的字段多于一个，或字段不是
-     * static final SystemParams 时抛：字段扫描顺序没有规范保证，不能取第一个了事。
+     * 读该类的参数声明。没有带注解的字段、字段多于一个、形状不对、或字段值为 null 都抛
+     * {@link IllegalArgumentException}。
+     *
+     * <p>取字段与读值分两步：读值会触发目标类的静态初始化，而注册期不需要读值，见
+     * {@link #requireDeclared}。
      */
     public static SystemParams declaredBy(Class<?> systemClass) {
+        Field field = declaredField(systemClass);
+        try {
+            field.setAccessible(true);
+            SystemParams declared = (SystemParams) field.get(null);
+            if (declared == null) {
+                throw new IllegalArgumentException(
+                        "farlands: " + systemClass.getName() + " @SystemDefaultParams field is null");
+            }
+            return declared;
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("farlands: failed to read param declaration of " + systemClass.getName(), e);
+        }
+    }
+
+    /**
+     * 注册期检查：该类必须有且只有一个 {@code static final SystemParams} 的
+     * {@link SystemDefaultParams} 字段。
+     *
+     * <p>只读注解与类型，不读字段值，因此不触发目标类的静态初始化。注册发生在模组初始化期，那时系统类的
+     * 静态初始化会碰 {@code Blocks} 一类尚未就绪的注册表对象，所以这一步不能取值。
+     */
+    public static void requireDeclared(Class<?> systemClass) {
+        declaredField(systemClass);
+    }
+
+    /**
+     * 该类的声明字段。没有、多于一个、或不是 static final SystemParams 都抛。
+     *
+     * <p>带注解的字段多于一个时必须抛：字段扫描顺序没有规范保证，不能取第一个了事。
+     */
+    private static Field declaredField(Class<?> systemClass) {
         Field declared = null;
         for (Field field : systemClass.getDeclaredFields()) {
             if (!field.isAnnotationPresent(SystemDefaultParams.class)) {
                 continue;
             }
             if (declared != null) {
-                throw new IllegalStateException(
+                throw new IllegalArgumentException(
                         "farlands: " + systemClass.getName() + " has more than one @SystemDefaultParams field");
             }
             declared = field;
         }
         if (declared == null) {
-            return null;
+            throw new IllegalArgumentException(
+                    "farlands: " + systemClass.getName() + " has no @SystemDefaultParams field");
         }
         if (!Modifier.isStatic(declared.getModifiers()) || !Modifier.isFinal(declared.getModifiers())
                 || declared.getType() != SystemParams.class) {
-            throw new IllegalStateException(
+            throw new IllegalArgumentException(
                     "farlands: " + systemClass.getName() + " @SystemDefaultParams field must be static final SystemParams");
         }
-        try {
-            declared.setAccessible(true);
-            return (SystemParams) declared.get(null);
-        } catch (ReflectiveOperationException e) {
-            throw new IllegalStateException("farlands: failed to read param declaration of " + systemClass.getName(), e);
-        }
+        return declared;
     }
 }

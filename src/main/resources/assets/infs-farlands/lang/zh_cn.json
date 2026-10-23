@@ -40,8 +40,6 @@
   "createWorld.tab.infs-farlands.family.decoration": "装饰系统",
   "createWorld.tab.infs-farlands.error.read.title": "系统配置读取失败",
   "createWorld.tab.infs-farlands.error.read.message": "已改用默认值：%s",
-  "createWorld.tab.infs-farlands.param.free": "自由参数",
-  "createWorld.tab.infs-farlands.param.free.example": "示例：\n%s",
   "createWorld.tab.infs-farlands.param.line": "\"%1$s\": %2$s",
   "createWorld.tab.infs-farlands.param.type": "类型：%s",
   "createWorld.tab.infs-farlands.param.seed.random": "每次随机生成种子",
@@ -63,7 +61,5 @@
   "createWorld.tab.infs-farlands.param.error.unknown_enum": "参数 %1$s 在 %2$s 里没有名为 %3$s 的取值",
   "createWorld.tab.infs-farlands.param.error.enum_needs_class": "参数 %1$s 是枚举项，但没声明枚举类",
   "createWorld.tab.infs-farlands.param.error.no_value": "参数 %1$s 既没有填值，也没有默认值或可用的空值关键字",
-  "createWorld.tab.infs-farlands.param.error.free_not_snbt": "自由参数不是一个合法的 SNBT 映射",
-  "createWorld.tab.infs-farlands.param.error.free_arg": "自由参数 %1$s 解析失败：%2$s",
   "createWorld.tab.infs-farlands.param.random_int": "每次随机取一个 int"
 }

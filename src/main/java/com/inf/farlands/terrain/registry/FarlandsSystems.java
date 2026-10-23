@@ -24,7 +24,8 @@ import com.inf.farlands.terrain.TerrainSystem;
  * {@code SystemRegistry} 的反射：取 {@code getDeclaredConstructors()[0]} 且不做
  * {@code setAccessible}。</li>
  * <li>参数声明用 {@code @SystemDefaultParams} 标在一个 {@code static final SystemParams} 字段上，
- * 与内置系统同形；没有该字段表示界面退化成一个自由文本框。</li>
+ * 与内置系统同形。没有该字段、字段多于一个或形状不对，登记时即抛：不存在「没有声明」这个状态，
+ * 也不想参数的系统必须显式写 {@code SystemParams.EMPTY}。</li>
  * <li>id 不得与既有登记重复，命名空间不限。</li>
  * </ul>
  */

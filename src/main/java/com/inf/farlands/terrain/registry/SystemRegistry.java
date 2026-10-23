@@ -24,12 +24,14 @@ public final class SystemRegistry<T> {
         this.familyType = familyType;
     }
 
-    /** 登记一个实现类。类必须实现本族接口，id 不得重复。 */
+    /** 登记一个实现类。类必须实现本族接口、必须声明参数表，id 不得重复。 */
     public void register(SystemId id, Class<? extends T> type) {
         if (type == null || !this.familyType.isAssignableFrom(type)) {
             throw new IllegalArgumentException(
                     "System %s does not implement %s".formatted(id, this.familyType.getName()));
         }
+        // 注册期就要求声明参数表：没有 @SystemDefaultParams 的实现类不再退化成自由文本框，而是根本不收。
+        SystemParams.requireDeclared(type);
         synchronized (this.entries) {
             if (this.entries.putIfAbsent(id, type) != null) {
                 throw new IllegalStateException("Duplicate system id: " + id);

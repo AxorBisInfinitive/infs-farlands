@@ -40,8 +40,6 @@
   "createWorld.tab.infs-farlands.family.decoration": "Decoration system",
   "createWorld.tab.infs-farlands.error.read.title": "Failed to read the system config",
   "createWorld.tab.infs-farlands.error.read.message": "Defaults are used instead: %s",
-  "createWorld.tab.infs-farlands.param.free": "Free-form parameters",
-  "createWorld.tab.infs-farlands.param.free.example": "Example:\n%s",
   "createWorld.tab.infs-farlands.param.line": "\"%1$s\": %2$s",
   "createWorld.tab.infs-farlands.param.type": "Type: %s",
   "createWorld.tab.infs-farlands.param.seed.random": "Random seed each time",
@@ -63,7 +61,5 @@
   "createWorld.tab.infs-farlands.param.error.unknown_enum": "Parameter %1$s has no value named %3$s in %2$s",
   "createWorld.tab.infs-farlands.param.error.enum_needs_class": "Parameter %1$s is an enum but declares no enum class",
   "createWorld.tab.infs-farlands.param.error.no_value": "Parameter %1$s has no value, no default and no empty keyword",
-  "createWorld.tab.infs-farlands.param.error.free_not_snbt": "The free-form parameters are not a valid SNBT map",
-  "createWorld.tab.infs-farlands.param.error.free_arg": "Free-form parameter %1$s failed to parse: %2$s",
   "createWorld.tab.infs-farlands.param.random_int": "Random int each time"
 }

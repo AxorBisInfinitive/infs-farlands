@@ -59,9 +59,6 @@ public final class SystemsIO {
                 .resolveAgainst(worldRoot.resolve(LevelResource.DATA.id()));
     }
 
-    /** 无参数声明的系统把整张参数复合写进界面那一个自由框，这就是那个框的键。 */
-    public static final String FREE_ARG_KEY = "";
-
     /**
      * 该世界根目录下的配置能不能用。
      *
@@ -119,8 +116,7 @@ public final class SystemsIO {
     /**
      * 把一族的选择还原成界面文本，键与界面上的框一一对应。
      *
-     * <p>有参数声明时逐项按声明类型还原，文件里缺的项不出现；没有声明时把整张参数复合编码进
-     * {@link #FREE_ARG_KEY} 那一个框。界面预填与兼容性判据共用本方法，两处不会漂移。
+     * <p>逐项按声明类型还原，文件里缺的项不出现。界面预填与兼容性判据共用本方法，两处不会漂移。
      *
      * <p>失败一律抛：未注册的系统 id、声明类型与标签类型不符都在这里暴露，由调用方决定是中止还是
      * 判成不兼容。
@@ -128,11 +124,6 @@ public final class SystemsIO {
     public static Map<String, String> texts(FamilyKind kind, SystemSelection selection) {
         SystemId id = new SystemId(selection.id());
         SystemParams declared = SystemParams.declaredBy(classOf(kind, id));
-        if (declared == null) {
-            String encoded = SystemSelection.ARGS_CODEC.encodeStart(NbtOps.INSTANCE, selection.args())
-                    .getOrThrow().toString();
-            return Map.of(FREE_ARG_KEY, encoded);
-        }
         Map<String, String> out = new LinkedHashMap<>();
         for (SystemParamSpec spec : declared.entries()) {
             Arg arg = selection.args().get(spec.key());
@@ -395,12 +386,10 @@ public final class SystemsIO {
      */
     private static SystemArgs args(SystemSelection selection, Function<SystemId, Class<?>> classOf) {
         SystemId id = systemId(selection);
-        SystemParams params = SystemParams.declaredBy(classOf.apply(id));
-        if (params != null) {
-            List<SystemParams.Violation> violations = params.validate(selection.args());
-            if (!violations.isEmpty()) {
-                throw new IllegalStateException("farlands: system " + id + " 参数不合规: " + describe(violations));
-            }
+        List<SystemParams.Violation> violations = SystemParams.declaredBy(classOf.apply(id))
+                .validate(selection.args());
+        if (!violations.isEmpty()) {
+            throw new IllegalStateException("farlands: system " + id + " 参数不合规: " + describe(violations));
         }
         return SystemArgs.of(selection.args());
     }

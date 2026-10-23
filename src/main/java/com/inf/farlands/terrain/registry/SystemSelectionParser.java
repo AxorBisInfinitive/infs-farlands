@@ -10,10 +10,6 @@ import com.inf.farlands.terrain.registry.SystemsData.Arg;
 import com.inf.farlands.terrain.registry.SystemsData.ArgType;
 import com.inf.farlands.terrain.registry.SystemsData.SystemSelection;
 
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtOps;
-import net.minecraft.nbt.Tag;
-import net.minecraft.nbt.TagParser;
 import net.minecraft.network.chat.Component;
 
 /**
@@ -33,9 +29,7 @@ public final class SystemSelectionParser {
 
     /** 按声明还原一族的选择。系统必须在对应族的注册表里，否则 classOf 抛。 */
     public static SystemSelection parse(SystemId id, Map<String, String> texts, Class<?> systemClass) {
-        SystemParams declared = SystemParams.declaredBy(systemClass);
-        Map<String, Arg> args = declared == null ? parseFree(texts) : parseDeclared(declared, texts);
-        return new SystemSelection(id.value(), args);
+        return new SystemSelection(id.value(), parseDeclared(SystemParams.declaredBy(systemClass), texts));
     }
 
     /**
@@ -61,20 +55,9 @@ public final class SystemSelectionParser {
      * <p>
      * 次序：先逐参数解析，任一失败即只返回解析失败，因为跨字段规则读的是已解析的值；全部解析成功才把值
      * 交给 {@link SystemParams#validate}，由它跑单值检查与跨字段规则。
-     *
-     * <p>
-     * 没有声明时界面是一个自由框，整张 SNBT 一次解析，失败即一条违规，键取空串。
      */
     public static List<SystemParams.Violation> violations(Class<?> systemClass, Map<String, String> texts) {
         SystemParams declared = SystemParams.declaredBy(systemClass);
-        if (declared == null) {
-            try {
-                parseFree(texts);
-                return List.of();
-            } catch (RuntimeException e) {
-                return List.of(new SystemParams.Violation(Set.of(""), problem(e)));
-            }
-        }
         Map<String, Arg> parsed = new LinkedHashMap<>();
         List<SystemParams.Violation> out = new ArrayList<>();
         for (SystemParamSpec spec : declared.entries()) {
@@ -89,16 +72,6 @@ public final class SystemSelectionParser {
             return out;
         }
         return declared.validate(parsed);
-    }
-
-    /** 自由参数框文本是否可用：可用返回 null，否则返回可显示的错因。 */
-    public static Component problemFree(String text) {
-        try {
-            parseFree(Map.of("", text));
-            return null;
-        } catch (RuntimeException e) {
-            return problem(e);
-        }
     }
 
     /**
@@ -145,31 +118,6 @@ public final class SystemSelectionParser {
                     Component.translatable("createWorld.tab.infs-farlands.param.error.no_value", spec.key()));
         }
         return fallback;
-    }
-
-    /** 无声明：整个框是一张 SNBT 映射，键是参数名，值是自带 type 与 value 的一段 Arg。 */
-    private static Map<String, Arg> parseFree(Map<String, String> texts) {
-        String text = texts.getOrDefault("", "");
-        if (text.isBlank()) {
-            return Map.of();
-        }
-        CompoundTag tag;
-        try {
-            tag = TagParser.parseCompoundFully(text);
-        } catch (Exception e) {
-            throw new SystemArgProblem("farlands: free-form arg box is not a valid SNBT map",
-                    Component.translatable("createWorld.tab.infs-farlands.param.error.free_not_snbt"), e);
-        }
-        Map<String, Arg> out = new LinkedHashMap<>();
-        for (String key : tag.keySet()) {
-            Tag value = tag.get(key);
-            out.put(key, Arg.CODEC.parse(NbtOps.INSTANCE, value).getOrThrow(
-                    message -> new SystemArgProblem(
-                            "farlands: free-form arg " + key + " failed to parse: " + message,
-                            Component.translatable("createWorld.tab.infs-farlands.param.error.free_arg", key,
-                                    message))));
-        }
-        return out;
     }
 
     /** 有文本：按声明类型解析。判据是"这个筐里合法的是什么"，不是"这段文本像什么"。 */

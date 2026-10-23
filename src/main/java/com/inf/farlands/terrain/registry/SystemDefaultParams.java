@@ -10,7 +10,8 @@ import java.lang.annotation.Target;
  * {@link SystemParams#declaredBy(Class)}。
  *
  * <p>
- * 用注解而不是字段名约定：字段改名或漏写会静默变成「没有声明」，注解能让这种漏写在扫描时就报出来。
+ * 用注解而不是字段名约定：字段改名或漏写会在注册期被 {@link SystemParams#requireDeclared} 报出来，
+ * 而不是静默变成「没有声明」。
  */
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.FIELD)

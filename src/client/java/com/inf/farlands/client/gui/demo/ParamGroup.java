@@ -9,7 +9,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.BiConsumer;
 
-import com.inf.farlands.client.gui.CreatingWorldSystemsConfig;
 import com.inf.farlands.terrain.registry.SystemParamSpec;
 import com.inf.farlands.terrain.registry.SystemParams;
 import com.inf.farlands.terrain.registry.SystemSelectionParser;
@@ -55,21 +54,13 @@ public final class ParamGroup extends AbstractContainerWidget {
     private static final int MAX_TEXT_LENGTH = 1024;
     /** 文本不合声明时的字色，合法时换回 EditBox.DEFAULT_TEXT_COLOR。 */
     private static final int INVALID_TEXT_COLOR = 0xFFFF5555;
-    private static final String FREE_TEXT = "{\"seed\":{\"type\":\"long\",\"value\":0}}";
-    /** 自由框接受的形状示例。引导句与排版在语言文件的 free.example 里，本常量是它的 %s 实参。 */
-    private static final String FREE_GRAMMAR =
-            "{\"type\":\"int\",\"value\":1}\n"
-                    + "{\"type\":\"double\",\"value\":\"1.0\"}\n"
-                    + "{\"type\":\"boolean\",\"value\":true}\n"
-                    + "{\"type\":\"string\",\"value\":\"abc\"}\n"
-                    + "{\"type\":\"enum\",\"value\":\"TYPE1\",\"enumClass\":\"com.example.Mode\"}";
 
     private final List<AbstractWidget> children = new ArrayList<>();
-    /** 参数名到它的框，含自由框那个专用键。切换系统前用它把当前文本整体刷一遍。 */
+    /** 参数名到它的框。切换系统前用它把当前文本整体刷一遍。 */
     private final Map<String, EditBox> texts = new LinkedHashMap<>();
     /** 参数名到它的采集回调，reload 时按当前文本重放一遍。 */
     private final Map<String, BiConsumer<String, String>> reporters = new LinkedHashMap<>();
-    /** 参数名到它的声明，逐框校验用；自由框不进这张表。 */
+    /** 参数名到它的声明，逐框校验用。 */
     private final Map<String, SystemParamSpec> specs = new LinkedHashMap<>();
     /** 参数名到建框时的原始 tooltip，标红时在它后面追加错因，恢复时换回来。 */
     private final Map<String, Component> baseTooltips = new LinkedHashMap<>();
@@ -83,7 +74,6 @@ public final class ParamGroup extends AbstractContainerWidget {
     private boolean building;
     private final int groupWidth;
     private int labelWidth = MIN_LABEL_WIDTH;
-    private boolean free;
     private int rows;
 
     public ParamGroup(int width) {
@@ -91,16 +81,11 @@ public final class ParamGroup extends AbstractContainerWidget {
         this.groupWidth = width;
     }
 
-    /** 按声明重建，不接文本变更。 */
-    public void setParams(SystemParams params) {
-        this.setParams(params, Map.of(), null);
-    }
-
     /**
-     * 按声明重建。params 为 null 表示没有声明，退化成单个自由文本框。
+     * 按声明重建。
      *
-     * <p>saved 是该项上次留下的文本，键与 onText 收到的键一致，自由框用专用的那个键。有则预填，
-     * 没有就用声明给的默认文本。onText 为 null 表示不采集。
+     * <p>saved 是该项上次留下的文本，键与 onText 收到的键一致。有则预填，没有就用声明给的默认文本。
+     * onText 为 null 表示不采集。
      *
      * <p>顺序固定为先 setValue 再 setResponder：setResponder 只写字段，而 setValue 会走
      * onValueChange 回调 responder，先挂上会把预填也报一遍。
@@ -114,60 +99,35 @@ public final class ParamGroup extends AbstractContainerWidget {
         this.textProblems.clear();
         this.ruleProblems.clear();
         this.building = true;
-        this.free = params == null;
         Font font = Minecraft.getInstance().font;
-        if (this.free) {
-            this.rows = 1;
-            EditBox box = new EditBox(font, this.groupWidth, BOX_HEIGHT,
-                    Component.translatable("createWorld.tab.infs-farlands.param.free"));
+        this.labelWidth = this.labelWidth(font, params);
+        this.rows = params.entries().size();
+        for (SystemParamSpec spec : params.entries()) {
+            StringWidget label = new StringWidget(Component.literal(spec.key()), font);
+            EditBox box = new EditBox(font, this.boxWidth(), BOX_HEIGHT, Component.literal(spec.key()));
             box.setMaxLength(MAX_TEXT_LENGTH);
-            box.setValue(saved.getOrDefault(CreatingWorldSystemsConfig.FREE_KEY, FREE_TEXT));
-            Component base = Component.translatable(
-                    "createWorld.tab.infs-farlands.param.free.example", FREE_GRAMMAR);
+            box.setHint(Component.literal(spec.type().id()));
+            Component base = this.tooltip(spec);
             box.setTooltip(Tooltip.create(base));
-            this.baseTooltips.put(CreatingWorldSystemsConfig.FREE_KEY, base);
+            String text = saved.getOrDefault(spec.key(), spec.defaultText());
+            if (text != null) {
+                box.setValue(text);
+            }
             box.setResponder(value -> {
-                this.mark(CreatingWorldSystemsConfig.FREE_KEY, SystemSelectionParser.problemFree(value));
+                this.mark(spec.key(), SystemSelectionParser.problem(spec, value));
                 if (onText != null) {
-                    onText.accept(CreatingWorldSystemsConfig.FREE_KEY, value);
+                    onText.accept(spec.key(), value);
                 }
                 this.notifyChanged();
             });
             if (onText != null) {
-                this.reporters.put(CreatingWorldSystemsConfig.FREE_KEY, onText);
+                this.reporters.put(spec.key(), onText);
             }
-            this.texts.put(CreatingWorldSystemsConfig.FREE_KEY, box);
+            this.specs.put(spec.key(), spec);
+            this.baseTooltips.put(spec.key(), base);
+            this.texts.put(spec.key(), box);
+            this.children.add(label);
             this.children.add(box);
-        } else {
-            this.labelWidth = this.labelWidth(font, params);
-            this.rows = params.entries().size();
-            for (SystemParamSpec spec : params.entries()) {
-                StringWidget label = new StringWidget(Component.literal(spec.key()), font);
-                EditBox box = new EditBox(font, this.boxWidth(), BOX_HEIGHT, Component.literal(spec.key()));
-                box.setMaxLength(MAX_TEXT_LENGTH);
-                box.setHint(Component.literal(spec.type().id()));
-                Component base = this.tooltip(spec);
-                box.setTooltip(Tooltip.create(base));
-                String text = saved.getOrDefault(spec.key(), spec.defaultText());
-                if (text != null) {
-                    box.setValue(text);
-                }
-                box.setResponder(value -> {
-                    this.mark(spec.key(), SystemSelectionParser.problem(spec, value));
-                    if (onText != null) {
-                        onText.accept(spec.key(), value);
-                    }
-                    this.notifyChanged();
-                });
-                if (onText != null) {
-                    this.reporters.put(spec.key(), onText);
-                }
-                this.specs.put(spec.key(), spec);
-                this.baseTooltips.put(spec.key(), base);
-                this.texts.put(spec.key(), box);
-                this.children.add(label);
-                this.children.add(box);
-            }
         }
         this.setHeight(this.rows * ROW_HEIGHT);
         this.layoutRows();
@@ -178,12 +138,9 @@ public final class ParamGroup extends AbstractContainerWidget {
 
     /** 建好框后按当前文本校验一遍：预填值也要标出来，但不回写采集回调。 */
     private void validateAll() {
-        for (Map.Entry<String, EditBox> entry : this.texts.entrySet()) {
-            SystemParamSpec spec = this.specs.get(entry.getKey());
-            Component problem = spec == null
-                    ? SystemSelectionParser.problemFree(entry.getValue().getValue())
-                    : SystemSelectionParser.problem(spec, entry.getValue().getValue());
-            this.mark(entry.getKey(), problem);
+        for (Map.Entry<String, SystemParamSpec> entry : this.specs.entrySet()) {
+            EditBox box = this.texts.get(entry.getKey());
+            this.mark(entry.getKey(), SystemSelectionParser.problem(entry.getValue(), box.getValue()));
         }
     }
 
@@ -320,12 +277,6 @@ public final class ParamGroup extends AbstractContainerWidget {
     private void layoutRows() {
         int x = this.getX();
         int y = this.getY();
-        if (this.free) {
-            if (!this.children.isEmpty()) {
-                this.children.get(0).setPosition(x, y);
-            }
-            return;
-        }
         for (int i = 0; i < this.children.size(); i += 2) {
             this.children.get(i).setPosition(x, y + LABEL_TOP);
             this.children.get(i + 1).setPosition(x + this.labelWidth, y);

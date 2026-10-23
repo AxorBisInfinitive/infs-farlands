@@ -44,9 +44,6 @@ import net.minecraft.resources.Identifier;
  */
 public final class CreatingWorldSystemsConfig {
 
-    /** 没有参数声明的系统退化成自由文本框，它的文本用这个键存。键的归属在主源集，与预填同源。 */
-    public static final String FREE_KEY = SystemsIO.FREE_ARG_KEY;
-
     /** 本世界实际拥有的维度，决定界面有几页。由页签构造时喂入。 */
     private static volatile List<Identifier> dimensions = List.of();
 
