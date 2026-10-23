@@ -72,6 +72,8 @@ import net.minecraft.util.Mth;
 public class FarlandsTab implements Tab {
 
     private static final String PAGE_KEY_PREFIX = "createWorld.tab.infs-farlands.page.";
+    /** 系统标题的键前缀，其后接 `<namespace>.<path>`。 */
+    private static final String SYSTEM_KEY_PREFIX = "createWorld.tab.infs-farlands.system.";
     private static final int MARGIN = 16;
     private static final int TAB_HEIGHT = 24;
     private static final int TAB_PADDING = 16;
@@ -369,24 +371,41 @@ public class FarlandsTab implements Tab {
     /**
      * 四个下拉共用一个宽度：取全部选项里最宽的那个加内边距，再夹在上下限之间。文字宽度由字体量，
      * 不写死。
+     *
+     * <p>量的必须是 {@link #systemTitle} 的结果而不是注册 id：标题比 id 短，按 id 量会让下拉框留着 id 的
+     * 宽度。
      */
     private int fieldWidth(Font font, List<List<SystemId>> families) {
         int widest = 0;
         for (List<SystemId> ids : families) {
             for (SystemId id : ids) {
-                widest = Math.max(widest, font.width(Component.literal(id.toString())));
+                widest = Math.max(widest, font.width(systemTitle(id)));
             }
         }
         return Mth.clamp(widest + FIELD_PADDING, MIN_FIELD_WIDTH, MAX_FIELD_WIDTH);
     }
 
-    /** 选项文字取 SystemId.toString，即带命名空间的完整 id。 */
+    /** 下拉选项的文字，与选中项显示的、量宽度用的都是同一份标题。 */
     private List<Component> idOptions(List<SystemId> ids) {
         List<Component> options = new ArrayList<>(ids.size());
         for (SystemId id : ids) {
-            options.add(Component.literal(id.toString()));
+            options.add(systemTitle(id));
         }
         return options;
+    }
+
+    /**
+     * 一个系统在界面上的标题。
+     *
+     * <p>键的形态是 {@code createWorld.tab.infs-farlands.system.<namespace>.<path>}。本模组登记的 35 个
+     * 系统都有这条键；外部模组注册的系统不会有，此时退回原始 id，界面至少还能看出是哪个系统。
+     */
+    private static Component systemTitle(SystemId id) {
+        String key = SYSTEM_KEY_PREFIX + id.value().getNamespace() + "." + id.value().getPath();
+        if (Language.getInstance().has(key)) {
+            return Component.translatable(key);
+        }
+        return Component.literal(id.toString());
     }
 
     /**
