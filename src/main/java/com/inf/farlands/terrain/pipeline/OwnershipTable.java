@@ -5,6 +5,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 
+import com.inf.farlands.util.map.ClaimStripedMap;
 import com.inf.farlands.util.map.Long2ObjectStripedMap;
 
 import net.minecraft.resources.ResourceKey;
@@ -27,8 +28,12 @@ import net.minecraft.world.level.Level;
  * 只清属于自己的格。主线程单点认领不会死锁；排序与回滚保留，因为多个 chunk 的域会相交，失败必须干净。
  *
  * <p>线程：认领只在主线程，释放可来自 farlands-gen 与 farlands-light，所以外层是 ConcurrentHashMap，
- * 桶一经发布不再换字段。放域按编号 CAS，传错维度不会误放别人持有的格，但会漏放成永久占用，所以
+ * 桶一经发布不再换字段。放域按编号判归属，传错维度不会误放别人持有的格，但会漏放成永久占用，所以
  * unlockCells 必须用取域时的同一维度。
+ *
+ * <p>条目寿命：chunk 级三相与二十五格域锁走 {@link ClaimStripedMap}，认领的「取或建 + CAS」与释放的
+ * 「清零 + 摘条目」都在表内的段写锁里完成，调用方拿不到内部对象。于是表的大小恒等于在途认领数，
+ * 不随探索过的坐标单调增长，也就不需要按时间窗清扫。清扫与认领抢同一张表时，删错一侧会漏票。
  *
  * <p>票：chunk 级相在取成功时加 `GEN_WORK_TICKET`，放时撤，都在主线程。段级相不铺票，票由 chunk
  * 级相覆盖。
@@ -86,7 +91,12 @@ public final class OwnershipTable {
      */
     private static final class Tables {
 
-        /** 段级相：chunkKey 映射到段号到持有者编号。 */
+        /**
+         * 段级相：chunkKey 映射到段号到持有者编号。
+         *
+         * <p>当前没有写者，仍用「锁外持 cell 再 CAS」的老形状，条目也从不摘。复活段级认领时必须换成
+         * {@link ClaimStripedMap} 那一套，否则它会重新变成一张只增不减的表，且与任何清扫抢同一批格子。
+         */
         private final AtomicReferenceArray<Long2ObjectStripedMap<Long2ObjectStripedMap<AtomicLong>>> sectionCells =
                 new AtomicReferenceArray<>(PHASES);
 
@@ -94,12 +104,11 @@ public final class OwnershipTable {
         private final AtomicReferenceArray<Long2ObjectStripedMap<AtomicLong>> sectionCounts =
                 new AtomicReferenceArray<>(PHASES);
 
-        /** chunk 级相：chunkKey 到持有者编号。 */
-        private final AtomicReferenceArray<Long2ObjectStripedMap<AtomicLong>> chunkClaims =
-                new AtomicReferenceArray<>(PHASES);
+        /** chunk 级相：chunkKey 到持有者编号。认领与放域都在表内的段锁里完成，释放即摘条目。 */
+        private final AtomicReferenceArray<ClaimStripedMap> chunkClaims = new AtomicReferenceArray<>(PHASES);
 
         /** 光照任务与装饰域的二十五格锁，键是 chunkKey。每维一张，便宜到不必惰性。 */
-        private final Long2ObjectStripedMap<AtomicLong> lightTask = new Long2ObjectStripedMap<>(1 << 8);
+        private final ClaimStripedMap lightTask = new ClaimStripedMap(1 << 8);
 
         Long2ObjectStripedMap<Long2ObjectStripedMap<AtomicLong>> sectionCells(int phase) {
             return lazy(this.sectionCells, phase);
@@ -117,15 +126,15 @@ public final class OwnershipTable {
             return this.sectionCounts.get(phase);
         }
 
-        Long2ObjectStripedMap<AtomicLong> chunkClaims(int phase) {
-            return lazy(this.chunkClaims, phase);
+        ClaimStripedMap chunkClaims(int phase) {
+            return lazyClaim(this.chunkClaims, phase);
         }
 
-        Long2ObjectStripedMap<AtomicLong> chunkClaimsOrNull(int phase) {
+        ClaimStripedMap chunkClaimsOrNull(int phase) {
             return this.chunkClaims.get(phase);
         }
 
-        Long2ObjectStripedMap<AtomicLong> lightTask() {
+        ClaimStripedMap lightTask() {
             return this.lightTask;
         }
     }
@@ -138,6 +147,16 @@ public final class OwnershipTable {
         }
         Long2ObjectStripedMap<V> created = new Long2ObjectStripedMap<>(1 << 12);
         // CAS 失败说明别的线程刚发布了一张；两张表内容不同，用输的那张会丢认领。
+        return slots.compareAndSet(phase, null, created) ? created : slots.get(phase);
+    }
+
+    /** 认领表的惰性发布，语义同 {@link #lazy}。 */
+    private static ClaimStripedMap lazyClaim(AtomicReferenceArray<ClaimStripedMap> slots, int phase) {
+        ClaimStripedMap table = slots.get(phase);
+        if (table != null) {
+            return table;
+        }
+        ClaimStripedMap created = new ClaimStripedMap(1 << 12);
         return slots.compareAndSet(phase, null, created) ? created : slots.get(phase);
     }
 
@@ -210,17 +229,24 @@ public final class OwnershipTable {
      * @return 持有者编号，0 表示已被占
      */
     public static long tryClaimChunk(ServerLevel level, int phase, ChunkPos pos) {
-        AtomicLong cell = tables(level.dimension()).chunkClaims(phase)
-                .computeIfAbsent(pos.pack(), k -> new AtomicLong());
         long owner = OWNER_SEQ.incrementAndGet();
-        if (!cell.compareAndSet(0L, owner)) {
+        // 取或建与 CAS 都在表内的段写锁里，调用方拿不到内部对象：这是「条目存在即有认领」的前提。
+        if (tables(level.dimension()).chunkClaims(phase).claim(pos.pack(), owner) == 0L) {
             return 0L;
         }
         GenQueue.addGenTicket(level, pos);
         return owner;
     }
 
-    /** 释放该相的 chunk 级认领，只清带回来的编号，并撤票。主线程调用。 */
+    /**
+     * 释放该相的 chunk 级认领，只清带回来的编号，并撤票。主线程调用。
+     *
+     * <p>清零成功即摘条目：表的大小因此恒等于在途认领数，不需要按时间窗清扫。
+     *
+     * <p>已知边界：撤票经 {@code SectionIO.runOnMainThread} 是延迟执行，而同坐标新认领的加票在派发时
+     * 立即执行。两者乱序时，旧认领的撤票可能落在新认领的加票之后，把那张保加载票撤掉。这条与条目的
+     * 删留无关，是票据本身的既有语义，本方法不改它。
+     */
     public static void releaseChunk(ServerLevel level, int phase, ChunkPos pos, long owner) {
         if (owner == 0L) {
             return;
@@ -229,12 +255,11 @@ public final class OwnershipTable {
         if (tables == null) {
             return;
         }
-        Long2ObjectStripedMap<AtomicLong> claims = tables.chunkClaimsOrNull(phase);
+        ClaimStripedMap claims = tables.chunkClaimsOrNull(phase);
         if (claims == null) {
             return;
         }
-        AtomicLong cell = claims.get(pos.pack());
-        if (cell != null && cell.compareAndSet(owner, 0L)) {
+        if (claims.release(pos.pack(), owner, true)) {
             GenQueue.removeGenTicket(level, pos);
         }
     }
@@ -245,12 +270,11 @@ public final class OwnershipTable {
         if (tables == null) {
             return false;
         }
-        Long2ObjectStripedMap<AtomicLong> claims = tables.chunkClaimsOrNull(phase);
+        ClaimStripedMap claims = tables.chunkClaimsOrNull(phase);
         if (claims == null) {
             return false;
         }
-        AtomicLong cell = claims.get(chunkKey);
-        return cell != null && cell.get() != 0L;
+        return claims.isClaimed(chunkKey);
     }
 
     /**
@@ -274,7 +298,7 @@ public final class OwnershipTable {
 
     private static long tryLockCells(ServerLevel level, int centerX, int centerZ, Long centerChunkKey) {
         ResourceKey<Level> dimension = level.dimension();
-        Long2ObjectStripedMap<AtomicLong> lightTask = tables(dimension).lightTask();
+        ClaimStripedMap lightTask = tables(dimension).lightTask();
         long[] keys = new long[25];
         int n = 0;
         for (int dz = -2; dz <= 2; dz++) {
@@ -297,8 +321,7 @@ public final class OwnershipTable {
                 rollbackCells(lightTask, taken, acquired, owner);
                 return 0L;
             }
-            AtomicLong cell = lightTask.computeIfAbsent(keys[i], k -> new AtomicLong());
-            if (cell.compareAndSet(0L, owner)) {
+            if (lightTask.claim(keys[i], owner) != 0L) {
                 taken[acquired++] = keys[i];
             } else {
                 rollbackCells(lightTask, taken, acquired, owner);
@@ -318,19 +341,15 @@ public final class OwnershipTable {
         return dx <= 1 && dz <= 1;
     }
 
-    /** 回滚：只清本次真的取到的那几格，按记录的键而不是按数量推出来的前缀。 */
-    private static void rollbackCells(Long2ObjectStripedMap<AtomicLong> lightTask, long[] taken, int acquired,
-            long owner) {
+    /** 回滚：只清本次真的取到的那几格，按记录的键而不是按数量推出来的前缀。放掉的格同时摘条目。 */
+    private static void rollbackCells(ClaimStripedMap lightTask, long[] taken, int acquired, long owner) {
         for (int j = 0; j < acquired; j++) {
-            AtomicLong held = lightTask.get(taken[j]);
-            if (held != null) {
-                held.compareAndSet(owner, 0L);
-            }
+            lightTask.release(taken[j], owner, true);
         }
     }
 
     /**
-     * 放域：清中心二十五格中属于该编号的格。
+     * 放域：清中心二十五格中属于该编号的格，放掉的格同时摘条目。
      *
      * <p>维度必须与取域时同一个：编号 CAS 保证不会误放别人持有的格，但维度传错就够不到自己那几格，
      * 它们会永久占用。
@@ -343,13 +362,10 @@ public final class OwnershipTable {
         if (tables == null) {
             return;
         }
-        Long2ObjectStripedMap<AtomicLong> lightTask = tables.lightTask();
+        ClaimStripedMap lightTask = tables.lightTask();
         for (int dz = -2; dz <= 2; dz++) {
             for (int dx = -2; dx <= 2; dx++) {
-                AtomicLong cell = lightTask.get(ChunkPos.pack(centerX + dx, centerZ + dz));
-                if (cell != null) {
-                    cell.compareAndSet(owner, 0L);
-                }
+                lightTask.release(ChunkPos.pack(centerX + dx, centerZ + dz), owner, true);
             }
         }
     }
@@ -388,11 +404,10 @@ public final class OwnershipTable {
         if (tables == null) {
             return false;
         }
-        Long2ObjectStripedMap<AtomicLong> lightTask = tables.lightTask();
+        ClaimStripedMap lightTask = tables.lightTask();
         for (int dz = -2; dz <= 2; dz++) {
             for (int dx = -2; dx <= 2; dx++) {
-                AtomicLong cell = lightTask.get(ChunkPos.pack(chunkX + dx, chunkZ + dz));
-                if (cell != null && cell.get() != 0L) {
+                if (lightTask.isClaimed(ChunkPos.pack(chunkX + dx, chunkZ + dz))) {
                     return true;
                 }
             }

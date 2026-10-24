@@ -98,7 +98,12 @@ public final class Long2ObjectStripedMap<V> {
         }
     }
 
-    /** 已存在则不重算，storage.getOrCreate / OwnershipTable 依赖此行为。mapping 轻量且不回调 map。 */
+    /**
+     * 已存在则不重算，storage.getOrCreate 依赖此行为。mapping 轻量且不回调 map。
+     *
+     * <p>返回的是内部对象，调用方在锁外持有它，所以「拿到的对象可能已被别的线程摘掉」这件事由调用方
+     * 自己承担。需要「条目存在等价于在途持有」的场合不要用它，用 {@link ClaimStripedMap}。
+     */
     public V computeIfAbsent(long key, LongFunction<V> mapping) {
         StampedLock l = locks[seg(key)];
         long stamp = l.writeLock();
