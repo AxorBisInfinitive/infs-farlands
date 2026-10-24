@@ -361,8 +361,14 @@ public final class Scheduler {
                 }
                 continue;
             }
-            budget--;
-            GenQueue.enqueueTask(chunk, sections);
+            // 认领失败等于没派发，不扣预算：扣了就是把余量记在一件没发生的事上。
+            if (GenQueue.enqueueTask(chunk, sections)) {
+                budget--;
+            } else {
+                // 候选已在派发之前离表，这里必须重投。TERRAIN 认领是瞬时争用，退避上限约十二秒；
+                // 期间的收尾还会再提交一次同一个 chunk，两路都进候选表，同键覆盖，无害。
+                requeue(key, candidate);
+            }
         }
     }
 

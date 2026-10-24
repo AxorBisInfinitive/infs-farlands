@@ -17,6 +17,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.ChunkTaskDispatcher;
 import net.minecraft.server.level.ServerLevel;
@@ -25,6 +26,7 @@ import net.minecraft.util.Util;
 import net.minecraft.util.thread.BlockableEventLoop;
 import net.minecraft.util.thread.ConsecutiveExecutor;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.DataLayer;
@@ -388,8 +390,18 @@ public class FarLandsLightEngine extends ThreadedLevelLightEngine {
     /** 装饰侧释放光照域锁。与 {@link #tryLockDomain} 配对，收尾调用，必须带回取域时的编号。 */
     public void unlockDomain(int chunkX, int chunkZ, long owner) {
         if (this.serverSide) {
-            com.inf.farlands.terrain.pipeline.OwnershipTable.unlockCells(chunkX, chunkZ, owner);
+            com.inf.farlands.terrain.pipeline.OwnershipTable.unlockCells(dimension(), chunkX, chunkZ, owner);
         }
+    }
+
+    /**
+     * 本 engine 所属维度。认领表按维度分桶，取域与放域必须同一个键。
+     *
+     * <p>{@code chunkSource.getLevel()} 的声明类型是 {@code BlockGetter}，运行时对象一定是 Level，
+     * 所以这里强转到 Level 取维度。它在父类里是 final，池线程读安全。
+     */
+    private ResourceKey<Level> dimension() {
+        return ((Level) this.chunkSource.getLevel()).dimension();
     }
 
     @Override
@@ -614,7 +626,7 @@ public class FarLandsLightEngine extends ThreadedLevelLightEngine {
                     // 池已关闭或提交被拒：锁必须还、任务必须放回。否则这个 ChunkWork 既不在
                     // workMap 也不在 pendingWork，没人执行也没人 requeue，onComplete 永不完成，
                     // LIGHTED 认领永久为真，块锁也永远不释放。与 wakeConsumer 的处理对齐。
-                    com.inf.farlands.terrain.pipeline.OwnershipTable.unlockCells(cx, cz, lockOwner);
+                    com.inf.farlands.terrain.pipeline.OwnershipTable.unlockCells(dimension(), cx, cz, lockOwner);
                     queue.requeue(tasks);
                     InfsFarlands.LOGGER.error("farlands: light submit failed chunk={},{}", cx, cz, t);
                     return;
@@ -681,7 +693,7 @@ public class FarLandsLightEngine extends ThreadedLevelLightEngine {
         } catch (Throwable t) {
             InfsFarlands.LOGGER.error("Light task exception chunk={},{}", cx, cz, t);
         } finally {
-            com.inf.farlands.terrain.pipeline.OwnershipTable.unlockCells(cx, cz, lockOwner);
+            com.inf.farlands.terrain.pipeline.OwnershipTable.unlockCells(dimension(), cx, cz, lockOwner);
             tasks.onComplete.complete(null);
             // 任务完成补唤醒：防 drainLight 单例漏调度 残留任务由在跑任务的
             // 任务完成即唤醒：计时已删，唤醒自身 CAS 限流，不会自旋。

@@ -23,10 +23,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.TicketType;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.LevelChunk;
 
 /**
@@ -221,22 +223,28 @@ public final class GenQueue {
      * 调度器准入之后交作业：这里才是唯一的 chunk 级认领点，TERRAIN 认领的 CAS 兼作去重。
      *
      * <p>准入的判据在 {@link Scheduler#tick()}，本方法不再过滤：调用方已判过 A、B、C。
+     *
+     * <p>返回值是「作业真的提交了没有」。调用方在派发前就把候选移出了表，所以 false 必须被当成
+     * 「这一次没办事」重投，不能当成功咽下去：没认领到的那次没有任务会替这个 chunk 收尾，也就
+     * 没有别的出口把它放回候选表。
      */
-    static void enqueueTask(LevelChunk chunk, int[] preloadSections) {
+    static boolean enqueueTask(LevelChunk chunk, int[] preloadSections) {
         if (!(chunk.getLevel() instanceof ServerLevel level)) {
-            return;
+            return false;
         }
         long owner = OwnershipTable.tryClaimChunk(level, OwnershipTable.TERRAIN, chunk.getPos());
         if (owner == 0L) {
-            return; // 同 chunk 已有在途任务，去重
+            return false; // 同 chunk 已有在途任务，去重
         }
         ACTIVE.incrementAndGet();
         try {
             GenTask task = new GenTask(chunk, preloadSections, owner);
             POOL.submit(task::execute);
+            return true;
         } catch (RejectedExecutionException e) {
             ACTIVE.decrementAndGet();
             OwnershipTable.releaseChunk(level, OwnershipTable.TERRAIN, chunk.getPos(), owner);
+            return false; // 池已关，即停服：调用方的重投会被 submit 的关服早退吃掉
         }
     }
 
@@ -300,8 +308,9 @@ public final class GenQueue {
     public static boolean isGeneratingOrLighting(LevelChunk chunk) {
         // 所有权表按坐标键记，身份键喂进去恒不命中：生成侧的 TERRAIN 认领因此从来看不到。
         long key = chunk.getPos().pack();
-        return OwnershipTable.anyGenClaim(key)
-                || OwnershipTable.isLightedClaimed(chunk.getPos().x(), chunk.getPos().z());
+        ResourceKey<Level> dimension = chunk.getLevel().dimension();
+        return OwnershipTable.anyGenClaim(dimension, key)
+                || OwnershipTable.isLightedClaimed(dimension, chunk.getPos().x(), chunk.getPos().z());
     }
 
     /**
@@ -312,7 +321,7 @@ public final class GenQueue {
      */
     public static boolean isChunkBusy(LevelChunk chunk) {
         return isGeneratingOrLighting(chunk)
-                || OwnershipTable.isDecoratedClaimed(chunk.getPos().pack());
+                || OwnershipTable.isDecoratedClaimed(chunk.getLevel().dimension(), chunk.getPos().pack());
     }
 
     /**
@@ -356,7 +365,8 @@ public final class GenQueue {
 
     /** 该 chunk 是否有光照任务在途，发包前检查，在途则留队列，等播种完成带正确光照。 */
     public static boolean isLightInFlight(LevelChunk chunk) {
-        return OwnershipTable.isLightedClaimed(chunk.getPos().x(), chunk.getPos().z());
+        return OwnershipTable.isLightedClaimed(chunk.getLevel().dimension(), chunk.getPos().x(),
+                chunk.getPos().z());
     }
 
     /** 一次 fillFrom 与 lightChunk，完成回调里升段、释放认领、再检查。 */
