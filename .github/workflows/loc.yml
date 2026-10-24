@@ -1,0 +1,118 @@
+name: Java LoC Report
+
+on:
+  push:
+    branches: [fabric-26.1.2]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  loc:
+    name: Count Java LoC
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install cloc
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cloc
+
+      - name: Generate LoC Summary
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+
+          directories = [
+              "src/main/java",
+              "src/client/java",
+          ]
+
+          rows = []
+
+          for directory in directories:
+              result = subprocess.run(
+                  [
+                      "cloc",
+                      "--json",
+                      "--include-lang=Java",
+                      directory,
+                  ],
+                  capture_output=True,
+                  text=True,
+                  check=True,
+              )
+
+              stats = json.loads(result.stdout).get("SUM", {})
+
+              rows.append({
+                  "directory": directory,
+                  "files": stats.get("nFiles", 0),
+                  "blank": stats.get("blank", 0),
+                  "comment": stats.get("comment", 0),
+                  "code": stats.get("code", 0),
+              })
+
+          metrics = ("files", "blank", "comment", "code")
+
+          totals = {
+              key: sum(row[key] for row in rows)
+              for key in metrics
+          }
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          branch = os.environ["GITHUB_REF_NAME"]
+          commit = os.environ["GITHUB_SHA"]
+
+          lines = [
+              "# LoC 统计",
+              "",
+              "## 基本信息",
+              "",
+              f"- **仓库：** `{repository}`",
+              f"- **分支：** `{branch}`",
+              f"- **提交：** [`{commit[:7]}`]"
+              f"(https://github.com/{repository}/commit/{commit})",
+              "- **统计工具：** `cloc`",
+              "",
+              "## 统计",
+              "",
+              "| 源码目录 | 文件数 | 空行 | 注释行 | LoC |",
+              "|:--|--:|--:|--:|--:|",
+          ]
+
+          for row in rows:
+              lines.append(
+                  f"| `{row['directory']}` "
+                  f"| {row['files']:,} "
+                  f"| {row['blank']:,} "
+                  f"| {row['comment']:,} "
+                  f"| {row['code']:,} |"
+              )
+
+          lines.append(
+              f"| **合计** "
+              f"| **{totals['files']:,}** "
+              f"| **{totals['blank']:,}** "
+              f"| **{totals['comment']:,}** "
+              f"| **{totals['code']:,}** |"
+          )
+
+          with open(
+              os.environ["GITHUB_STEP_SUMMARY"],
+              "a",
+              encoding="utf-8",
+          ) as summary:
+              summary.write("\n".join(lines))
+
+          print("LoC report generated successfully.")
+          PY
