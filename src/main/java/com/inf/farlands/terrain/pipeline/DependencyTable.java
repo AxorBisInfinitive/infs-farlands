@@ -298,41 +298,96 @@ public final class DependencyTable {
             for (int dz = -1; dz <= 1; dz++) {
                 int cx = pos.x() + dx;
                 int cz = pos.z() + dz;
-                LevelChunk neighbor = cursor.at(cx, cz);
-                if (neighbor == null) {
-                    return describe ? dx + "," + dz + ":absent" : "";
-                }
-                if (!WorldBounds.inChunkRange(cx, cz)) {
-                    continue;
-                }
-                int[] lowest = { -1 };
-                int[] lowestSy = { 0 };
-                int[] count = { 0 };
-                // 判据面是「档位表与段容器的交集」：只算流水线真的碰过、并且真的可写的段。
-                //
-                // 不能只遍历容器：构造期的窗口默认段会被物化但从不落档，它们读出来是 UNPROCESSED，
-                // 而它们本来就不在该被生成的集合里，按容器判会让每一格都恒假。
-                // 也不能只遍历档位表：读回标记会给盘上无数据的位置建条目，那些条目容器里没有、
-                // 装饰也写不进去，按整表判会让周围九格的装饰被永久挡死。
-                Map<Integer, LevelChunkSection> container = ((WindowedChunk) neighbor).windowedAllSections();
-                SectionStage.forEachStage(neighbor, (sy, stage) -> {
-                    if (sy == null || !container.containsKey(sy)) {
-                        return;
-                    }
-                    count[0]++;
-                    if (stage < SectionStage.CARVERS && !SectionIO.isReading(neighbor, sy)
-                            && (lowest[0] < 0 || stage < lowest[0])) {
-                        lowest[0] = stage;
-                        lowestSy[0] = sy;
-                    }
-                });
-                if (count[0] == 0) {
-                    return describe ? dx + "," + dz + ":no-stage" : "";
-                }
-                if (lowest[0] >= 0) {
-                    return describe ? dx + "," + dz + ":stage=" + lowest[0] + "@sy=" + lowestSy[0] : "";
+                String failure = cellFailure(cursor.at(cx, cz), dx, dz, cx, cz);
+                if (failure != null) {
+                    return describe ? failure : "";
                 }
             }
+        }
+        return null;
+    }
+
+    /**
+     * 九格逐格的形态，只列不成立的那些格，每格再带两栏后续问题。
+     *
+     * <p>与判据共用 {@link #cellFailure}：一个判断两种驱动，判据版遇第一个失败即返回，诊断版收全九格。
+     * 判断本身只有一份，两份驱动不会走偏。
+     *
+     * <p>两栏目的是分开「门只是暂时不成立」与「这一格再也不会有变化」：{@code cand} 是该格是否仍在
+     * 候选表里，{@code claim} 是该格是否被某次装饰认领。两者都假时，这一格不会再有任何推进者。
+     */
+    public static String neighborGateAll(LevelChunk center) {
+        if (!(center.getLevel() instanceof ServerLevel level)) {
+            return "no-level";
+        }
+        SectionLifecycle.ChunkCursor cursor = SectionLifecycle.cursor(level);
+        ChunkPos pos = center.getPos();
+        StringBuilder sb = new StringBuilder();
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                int cx = pos.x() + dx;
+                int cz = pos.z() + dz;
+                LevelChunk neighbor = cursor.at(cx, cz);
+                String failure = cellFailure(neighbor, dx, dz, cx, cz);
+                if (failure == null) {
+                    continue;
+                }
+                if (sb.length() > 0) {
+                    sb.append(' ');
+                }
+                sb.append(failure);
+                if (neighbor != null) {
+                    sb.append(",cand=").append(Scheduler.hasCandidate(neighbor));
+                    sb.append(",claim=").append(
+                            OwnershipTable.isChunkClaimed(OwnershipTable.DECORATED, neighbor.getPos().pack()));
+                }
+            }
+        }
+        return sb.length() == 0 ? "ok" : sb.toString();
+    }
+
+    /**
+     * 九格里某一格的判据。成立返回 null，否则返回该格的原因。
+     *
+     * <p>判据面是「档位表与段容器的交集」：只算流水线真的碰过、并且真的可写的段。
+     *
+     * <ul>
+     * <li>只遍历容器会把构造期的窗口默认段算成 {@code UNPROCESSED}。那些段被物化但从不落档，本来
+     * 就不在该被生成的集合里，按容器判会让九格恒假。</li>
+     * <li>只遍历档位表会把读回标记留下的残留算进来。那些条目容器里没有，装饰也写不进去，
+     * 按整表判会让周围九格的装饰被永久挡死。</li>
+     * </ul>
+     *
+     * <p>交集与写门同宽：{@code DecorationRegion.setBlock} 对未物化的段直接返回假。这条是一条耦合，
+     * 若将来写门改成会物化的取法，例如 {@code getSection}，判据面要重新算。
+     */
+    private static String cellFailure(LevelChunk neighbor, int dx, int dz, int cx, int cz) {
+        if (neighbor == null) {
+            return dx + "," + dz + ":absent";
+        }
+        if (!WorldBounds.inChunkRange(cx, cz)) {
+            return null;
+        }
+        int[] lowest = { -1 };
+        int[] lowestSy = { 0 };
+        int[] count = { 0 };
+        Map<Integer, LevelChunkSection> container = ((WindowedChunk) neighbor).windowedAllSections();
+        SectionStage.forEachStage(neighbor, (sy, stage) -> {
+            if (sy == null || !container.containsKey(sy)) {
+                return;
+            }
+            count[0]++;
+            if (stage < SectionStage.CARVERS && !SectionIO.isReading(neighbor, sy)
+                    && (lowest[0] < 0 || stage < lowest[0])) {
+                lowest[0] = stage;
+                lowestSy[0] = sy;
+            }
+        });
+        if (count[0] == 0) {
+            return dx + "," + dz + ":no-stage";
+        }
+        if (lowest[0] >= 0) {
+            return dx + "," + dz + ":stage=" + lowest[0] + "@sy=" + lowestSy[0];
         }
         return null;
     }

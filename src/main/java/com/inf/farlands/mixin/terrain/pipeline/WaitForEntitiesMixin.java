@@ -114,11 +114,11 @@ public class WaitForEntitiesMixin {
                 }
             }
         }
-        InfsFarlands.LOGGER.info("FLWAIT center={},{} r={} total={} loaded={} noHolder={}",
+        InfsFarlands.LOGGER.info("FLENTRY center={},{} r={} total={} loaded={} noHolder={}",
                 centerChunk.x(), centerChunk.z(), radius, total, loaded, noHolder);
-        InfsFarlands.LOGGER.info("FLWAIT loadStatus {}", histogram);
+        InfsFarlands.LOGGER.info("FLENTRY loadStatus {}", histogram);
         if (listed > 0) {
-            InfsFarlands.LOGGER.info("FLWAIT notloaded listed={} {}", listed, notLoaded);
+            InfsFarlands.LOGGER.info("FLENTRY notloaded listed={} {}", listed, notLoaded);
         }
     }
 }

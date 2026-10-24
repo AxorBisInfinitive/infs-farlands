@@ -204,7 +204,7 @@ public abstract class GenerationChunkHolderMixin {
                 Beardifier.forStructuresInChunk(level.structureManager(), levelchunk.getPos()));
 
         // 建完引用相即可交回准入：TERRAIN 的依赖是 hasBeardifier，调度器会再提交一次。
-        Scheduler.submit(levelchunk);
+        Scheduler.submit("exist", levelchunk);
     }
 
     /**
@@ -250,7 +250,7 @@ public abstract class GenerationChunkHolderMixin {
                         // 缝，ChunkReadiness 会把这个缝判成就绪。
                         GenQueue.endBiomeFill(levelchunk);
                         // 群系标志清掉后，一个已读回且已点亮的 chunk 可能刚好就绪，交准入。
-                        Scheduler.submit(levelchunk);
+                        Scheduler.submit("exist", levelchunk);
                         // fsa 读回：先查磁盘窗口内 section，有则读回恢复数据、光照、stage 并补发。
                         // 完成后才 enqueueChunk，collectSegments 的 isOrAfter(TERRAIN) 自动跳过已读回的，
                         // 磁盘没有的 section 正常入生成队列。

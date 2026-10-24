@@ -177,6 +177,36 @@ public class FarlandsTick {
         TICK_SINKS.add(sink);
     }
 
+    /**
+     * 只刷两张表：玩家位置快照与实体 section 窗口并集。
+     *
+     * <p>准入的两道门读的就是这两张：{@code isNearPlayer} 读快照，{@code Scheduler.sectionsFor} 的竖直面
+     * 读窗口并集。抽出来的理由是提交点也要能只刷这一层：提交发生在阻塞取数之内，而票据的加减不该跟着
+     * 提前到那一处。
+     *
+     * @return 刷新后存在窗口的维度数
+     */
+    public static int refreshGates(MinecraftServer server) {
+        List<ServerPlayer> players = server.getPlayerList().getPlayers();
+        PlayerSnapshot.capture(players);
+        EntitySectionWindow.update(players);
+        return EntitySectionWindow.dimensions();
+    }
+
+    /**
+     * 每 tick 的三步刷新：两张表加驱动面 ±8 的保加载票。
+     *
+     * <p>抽成方法是为了让真 tick 的末尾与阻塞等待期的泵共用同一份顺序。两处各写一份顺序，就会刷出与真
+     * tick 不同源的状态，而两边同时被准入读。
+     *
+     * @return 刷新后存在窗口的维度数，供泵的读数对照
+     */
+    public static int refreshTickState(MinecraftServer server) {
+        int dims = refreshGates(server);
+        NeighborhoodTickets.tick(server);
+        return dims;
+    }
+
     /** 服务端 tick 末尾统一入口。 */
     public static void atEnd(MinecraftServer server, int tickCount) {
         setNow(tickCount);
@@ -190,6 +220,8 @@ public class FarlandsTick {
             StageMetrics.flush();
             // 调度器读数：与本周期同档。本行挪到这里，不再随每次派发打印。
             SchedulerMetrics.flushIfEnabled();
+            // 装饰各出口的次数：逐条那几行被限流，量级只能看这一行。
+            com.inf.farlands.terrain.decorationFiller.DecorationFiller.flushRejects();
             // 候选离开候选表的读数：两条静默路各丢了多少、其中多少是在欠账时丢的。
             com.inf.farlands.debug.CandidateProbe.flush();
             // 档位写入侧读数：与本周期同档，请求段数与执行次数的比值是这一栏的靶心。
@@ -226,13 +258,8 @@ public class FarlandsTick {
                 }
             }
         }
-        // 玩家位置快照与窗口并集：两者读同一份玩家列表、同一时点落地，排序与准入都读快照。
-        List<ServerPlayer> windowPlayers = server.getPlayerList().getPlayers();
-        PlayerSnapshot.capture(windowPlayers);
-        // 实体 section 窗口并集更新。terrain 的窗口段收集与 fsa 的清理判定都读它，必须先刷新。
-        EntitySectionWindow.update(windowPlayers);
-        // 驱动面 ±8 邻域的保加载：玩家自己的票圈只到视距加 2，门要的那 289 格有约 94% 落在圈外。
-        NeighborhoodTickets.tick(server);
+        // 玩家快照、窗口并集与驱动面票圈，同一份玩家列表、同一时点落地。阻塞等待期的泵也走这一条。
+        refreshTickState(server);
 
         // fsa 序列化
 
@@ -249,7 +276,7 @@ public class FarlandsTick {
         }
 
         // 地形管线：调度器是地形侧唯一的每 tick 入口，准入、派发、重扫都在里面。
-        Scheduler.tick();
+        Scheduler.tick("end");
         // 兼容层的每 tick 钩子，排在所有核心驱动之后：它只驱动本 port 之外的请求方，例如 Chunky 预生成。
         for (Consumer<MinecraftServer> sink : TICK_SINKS) {
             sink.accept(server);

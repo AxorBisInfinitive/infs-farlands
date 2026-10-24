@@ -229,7 +229,7 @@ public final class ChunkyPregen {
                         LevelChunk loaded = dx == 0 && dz == 0 ? chunk
                                 : SectionLifecycle.latestChunk(request.level, target.x(), target.z());
                         if (loaded != null) {
-                            Scheduler.submit(loaded);
+                            Scheduler.submit("exist", loaded);
                         }
                     }
                 }

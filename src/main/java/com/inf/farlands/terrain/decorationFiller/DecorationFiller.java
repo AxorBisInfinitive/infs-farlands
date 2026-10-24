@@ -6,9 +6,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 
 import com.inf.farlands.FarlandsConfig;
 import com.inf.farlands.InfsFarlands;
+import com.inf.farlands.debug.FreezeWatch;
 import com.inf.farlands.light.FarLandsLightEngine;
 import com.inf.farlands.serialize.SectionIO;
 import com.inf.farlands.serialize.SectionLifecycle;
@@ -67,8 +70,66 @@ public final class DecorationFiller {
      */
     private static final AtomicInteger ABORT_LOGGED = new AtomicInteger();
 
-    /** 诊断行的限流：同一 chunk 同一原因只打一次。形状与 Scheduler 的同名集合相同。 */
-    private static final Set<Long> REJECT_LOGGED = ConcurrentHashMap.newKeySet();
+    /**
+     * 诊断行的限流键：维度、坐标与原因三者一起判。
+     *
+     * <p>键里必须有维度。只按坐标记时，同一格在主世界已经打过一次，换维度之后同一格的另一条原因
+     * 会被同一个键吞掉，而跨维度恰是调度的常态。
+     */
+    private record RejectKey(String dimension, long chunkPos, String reason) {
+    }
+
+    /** 诊断行的限流：同一维度、同一 chunk、同一原因只打一次。 */
+    private static final Set<RejectKey> REJECT_LOGGED = ConcurrentHashMap.newKeySet();
+
+    /** 本窗各出口的拒绝次数。逐条那几行只给形状，量级看 {@link #flushRejects()} 那一行。 */
+    private static final AtomicLong REJECT_GATE = new AtomicLong();
+
+    private static final AtomicLong REJECT_LOCK = new AtomicLong();
+
+    private static final AtomicLong REJECT_CLAIMED = new AtomicLong();
+
+    private static final AtomicLong REJECT_HANDLES = new AtomicLong();
+
+    private static final AtomicLong REJECT_SUBMIT = new AtomicLong();
+
+    private static final AtomicLong REJECT_NO_CARVERS = new AtomicLong();
+
+    private static final AtomicLong FINISH_EMPTY = new AtomicLong();
+
+    /**
+     * 诊断：域锁的取与放，按四个释放点分开。
+     *
+     * <p>取锁数减四个释放数就是净泄漏量。分开记是因为四个释放点的线程与时机不同：三个拒绝出口与
+     * {@code finishRegionNull} 就地放，{@code finish} 走主线程队列。只记总数时，一支漏放会被另一支的
+     * 正常释放抵消掉。
+     */
+    private static final AtomicLong LOCKS_TAKEN = new AtomicLong();
+
+    private static final AtomicLong RELEASE_ON_REJECT = new AtomicLong();
+
+    private static final AtomicLong RELEASE_IN_FINISH = new AtomicLong();
+
+    private static final AtomicLong RELEASE_IN_FINISH_NULL = new AtomicLong();
+
+    /**
+     * 诊断：两个收尾各自被进入的次数，判据是 {@code lockOwner != 0}，位置在取光照引擎之前。
+     *
+     * <p>与两个 {@code RELEASE_*} 分开记的理由：那两个埋在 {@code lightEngine != null} 的内层，引擎取不到
+     * 时放锁与计数会一起静默消失，读数上表现为「进了收尾却没放」，与「没进收尾」同形。进入数在判空之前
+     * 加，两支才分得开。
+     */
+    private static final AtomicLong ENTERED_FINISH = new AtomicLong();
+
+    private static final AtomicLong ENTERED_FINISH_NULL = new AtomicLong();
+
+    /**
+     * 诊断：装饰提交被尝试的总次数，累计值，不清零。
+     *
+     * <p>累计而不按窗清零的理由是它要与调度器的分栏计数一起判读：两边都是累计，相邻两行相减就得到每秒
+     * 速率，而一旦有一边清零，第一行就永远等于整段累计，速率无从算起。
+     */
+    private static final AtomicLong DECO_TRIES = new AtomicLong();
 
     /**
      * 取不到光照域锁时，下一次尝试的间隔，单位毫秒。
@@ -93,7 +154,7 @@ public final class DecorationFiller {
             for (int dz = -NEIGHBORHOOD_RADIUS; dz <= NEIGHBORHOOD_RADIUS; dz++) {
                 LevelChunk chunk = cursor.at(cx + dx, cz + dz);
                 if (chunk != null) {
-                    Scheduler.submit(chunk);
+                    Scheduler.submit("deco", chunk);
                 }
             }
         }
@@ -108,6 +169,12 @@ public final class DecorationFiller {
      * @return 是否真的提交了
      */
     public static boolean trySubmitDecoration(LevelChunk center) {
+        DECO_TRIES.incrementAndGet();
+        // 等待那一格的诊断：全局计数分不出这一格有没有被碰过，所以另记三个。
+        boolean watched = FreezeWatch.isWatched(center);
+        if (watched) {
+            FreezeWatch.watchedTry();
+        }
         // 待装饰的判据与门都在依赖表那一侧求值，是唯一表达式。
         boolean[] anyCarvers = { false };
         SectionStage.forEachStage(center, (sy, stage) -> {
@@ -116,12 +183,16 @@ public final class DecorationFiller {
             }
         });
         if (!anyCarvers[0]) {
+            REJECT_NO_CARVERS.incrementAndGet();
             logReject(center, "no-carvers");
             return false;
         }
         if (!DependencyTable.neighborGate(center)) {
-            logReject(center, "gate", FarlandsConfig.logScheduler
-                    ? DependencyTable.neighborGateDetail(center) : null);
+            REJECT_GATE.incrementAndGet();
+            if (watched) {
+                FreezeWatch.watchedGateFail();
+            }
+            logReject(center, "gate", () -> DependencyTable.neighborGateAll(center));
             return false;
         }
         ServerLevel level = (ServerLevel) center.getLevel();
@@ -133,8 +204,14 @@ public final class DecorationFiller {
         if (lightEngine != null) {
             lockOwner = lightEngine.tryLockDomain(center.getPos().x(), center.getPos().z());
             if (lockOwner == 0L) {
-                logReject(center, "lock");
+                REJECT_LOCK.incrementAndGet();
+                logReject(center, "lock",
+                        () -> OwnershipTable.lightDomainOwners(center.getPos().x(), center.getPos().z()));
                 return false;
+            }
+            LOCKS_TAKEN.incrementAndGet();
+            if (watched) {
+                FreezeWatch.watchedLockOk();
             }
         }
         int readRadius = center.getAllReferences().isEmpty() ? DecorationRegion.READ_RADIUS
@@ -142,12 +219,14 @@ public final class DecorationFiller {
         Long2ObjectMap<LevelChunk> handles = collectHandles(level, center, readRadius);
         if (handles == null) {
             unlockDomain(lightEngine, center, lockOwner);
+            REJECT_HANDLES.incrementAndGet();
             logReject(center, "no-handles");
             return false;
         }
         long decoOwner = OwnershipTable.tryClaimChunk(level, OwnershipTable.DECORATED, center.getPos());
         if (decoOwner == 0L) {
             unlockDomain(lightEngine, center, lockOwner);
+            REJECT_CLAIMED.incrementAndGet();
             logReject(center, "claimed");
             return false;
         }
@@ -158,6 +237,7 @@ public final class DecorationFiller {
         if (!GenQueue.submitDecoration(task)) {
             OwnershipTable.releaseChunk(level, OwnershipTable.DECORATED, center.getPos(), decoOwner);
             unlockDomain(lightEngine, center, lockOwner);
+            REJECT_SUBMIT.incrementAndGet();
             logReject(center, "rejected");
             return false;
         }
@@ -168,6 +248,7 @@ public final class DecorationFiller {
     private static void unlockDomain(FarLandsLightEngine lightEngine, LevelChunk center, long lockOwner) {
         if (lockOwner != 0L && lightEngine != null) {
             lightEngine.unlockDomain(center.getPos().x(), center.getPos().z(), lockOwner);
+            RELEASE_ON_REJECT.incrementAndGet();
         }
     }
 
@@ -183,28 +264,46 @@ public final class DecorationFiller {
     }
 
     /**
-     * 同上，附带一条原因细节，例如九格门的第一个不成立位置与原因。
+     * 同上，附带一条原因细节。
      *
-     * <p>{@code detail} 由调用方在诊断开关打开时才构造，正常路径不分配。
+     * <p>{@code detail} 迟一层求值：限流键判过之后才构造。九格门的全量明细要扫九格档位表，而拒绝
+     * 每 50 毫秒就可能来一轮，把它放在键判之前等于每秒扫几百次。
      */
-    private static void logReject(LevelChunk center, String reason, String detail) {
+    private static void logReject(LevelChunk center, String reason, Supplier<String> detail) {
         if (!FarlandsConfig.logScheduler) {
             return;
         }
-        // 键留 8 位给原因：只留 3 位时 gate、claimed、lock 三者撞在同一位上，先打的那条会把
-        // 后两条吞掉，于是「某个 chunk 后来才变成 claimed」在日志里根本不存在。
-        long key = (center.getPos().pack() << 8) | (reason.hashCode() & 0xFFL);
+        ServerLevel level = (ServerLevel) center.getLevel();
+        RejectKey key = new RejectKey(String.valueOf(level.dimension().identifier()),
+                center.getPos().pack(), reason);
         if (!REJECT_LOGGED.add(key)) {
             return;
         }
-        ServerLevel level = (ServerLevel) center.getLevel();
-        if (detail == null) {
+        String text = detail == null ? null : detail.get();
+        if (text == null) {
             InfsFarlands.LOGGER.info("FLDECO reject reason={} dim={} chunk={},{}",
                     reason, level.dimension().identifier(), center.getPos().x(), center.getPos().z());
         } else {
             InfsFarlands.LOGGER.info("FLDECO reject reason={} detail={} dim={} chunk={},{}",
-                    reason, detail, level.dimension().identifier(), center.getPos().x(), center.getPos().z());
+                    reason, text, level.dimension().identifier(), center.getPos().x(), center.getPos().z());
         }
+    }
+
+    /**
+     * 每 200 tick 一行：本窗各出口的次数。
+     *
+     * <p>逐条那几行只留第一次出现的形状，重复被限流压掉，所以总量只能从这一行看。{@code rows} 是
+     * 本窗已打过的去重键总数，也是逐条探针自身的有效性证据。
+     */
+    public static void flushRejects() {
+        if (!FarlandsConfig.logScheduler) {
+            return;
+        }
+        InfsFarlands.LOGGER.info(
+                "FLDECO sum gate={} lock={} claimed={} handles={} rejected={} noCarvers={} finishEmpty={} rows={}",
+                REJECT_GATE.getAndSet(0L), REJECT_LOCK.getAndSet(0L), REJECT_CLAIMED.getAndSet(0L),
+                REJECT_HANDLES.getAndSet(0L), REJECT_SUBMIT.getAndSet(0L), REJECT_NO_CARVERS.getAndSet(0L),
+                FINISH_EMPTY.getAndSet(0L), REJECT_LOGGED.size());
     }
 
     private record Key(ResourceKey<Level> dimension, long chunkPos) {
@@ -453,9 +552,11 @@ public final class DecorationFiller {
         logReject(center, lockOwner == 0L ? "lock" : "abort");
         OwnershipTable.releaseChunk(level, OwnershipTable.DECORATED, center.getPos(), decoOwner);
         if (lockOwner != 0L) {
+            ENTERED_FINISH_NULL.incrementAndGet();
             FarLandsLightEngine lightEngine = lightEngineOf(level);
             if (lightEngine != null) {
                 lightEngine.unlockDomain(center.getPos().x(), center.getPos().z(), lockOwner);
+                RELEASE_IN_FINISH_NULL.incrementAndGet();
             }
         }
         GenQueue.finishDecoration();
@@ -535,6 +636,10 @@ public final class DecorationFiller {
                 }
             });
             if (carvers.isEmpty()) {
+                // 任务跑完了，却没有一段停在 CARVERS：要么段已被别处推进，要么这一遍没写成方块。
+                // 一次性一行，用来分开「提交成功却不升段」与「根本没提交」这两支。
+                FINISH_EMPTY.incrementAndGet();
+                logReject(current, "finish-empty");
                 return;
             }
             int[] decorated = new int[carvers.size()];
@@ -553,20 +658,51 @@ public final class DecorationFiller {
             // 只有真的取到过锁才释放：取域返回的持有者编号非 0 才算取到。取锁失败那一支是一个方块
             // 都没写的放弃，把 0 传下去不会碰到任何别人持有的格。
             if (lockOwner != 0L) {
+                ENTERED_FINISH.incrementAndGet();
                 FarLandsLightEngine lightEngine = lightEngineOf(level);
                 if (lightEngine != null) {
                     lightEngine.unlockDomain(center.getPos().x(), center.getPos().z(), lockOwner);
+                    RELEASE_IN_FINISH.incrementAndGet();
                 }
             }
             GenQueue.finishDecoration();
             // 认领已撤：该 chunk 的「装饰写域被占」这一条落了，可能就此就绪，交准入。
-            Scheduler.submit(center);
+            Scheduler.submit("deco", center);
         }
+    }
+
+    /**
+     * 诊断：域锁的取与四个释放点压成一行，取走本窗的累计计数。
+     *
+     * <p>落点只能是冻结期仍在执行的路径，所以由泵的心跳调用，不由 200 tick 块调用。
+     */
+    public static String lockSummary() {
+        return "decoTry=" + DECO_TRIES.get()
+                + " lockTaken=" + LOCKS_TAKEN.getAndSet(0L)
+                + " entFinish=" + ENTERED_FINISH.getAndSet(0L)
+                + " entNull=" + ENTERED_FINISH_NULL.getAndSet(0L)
+                + " relReject=" + RELEASE_ON_REJECT.getAndSet(0L)
+                + " relFinish=" + RELEASE_IN_FINISH.getAndSet(0L)
+                + " relNull=" + RELEASE_IN_FINISH_NULL.getAndSet(0L);
     }
 
     /** 停服时清空本类的进程级状态。认领表由 `OwnershipTable.clearWorldState` 清。 */
     public static void clearWorldState() {
         ABORT_LOGGED.set(0);
         REJECT_LOGGED.clear();
+        REJECT_GATE.set(0L);
+        REJECT_LOCK.set(0L);
+        REJECT_CLAIMED.set(0L);
+        REJECT_HANDLES.set(0L);
+        REJECT_SUBMIT.set(0L);
+        REJECT_NO_CARVERS.set(0L);
+        FINISH_EMPTY.set(0L);
+        LOCKS_TAKEN.set(0L);
+        RELEASE_ON_REJECT.set(0L);
+        RELEASE_IN_FINISH.set(0L);
+        RELEASE_IN_FINISH_NULL.set(0L);
+        ENTERED_FINISH.set(0L);
+        ENTERED_FINISH_NULL.set(0L);
+        DECO_TRIES.set(0L);
     }
 }

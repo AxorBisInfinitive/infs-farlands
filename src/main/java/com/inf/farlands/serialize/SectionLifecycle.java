@@ -725,7 +725,7 @@ public final class SectionLifecycle {
                             ChunkCounters.markWindowReadDone(lc);
                             promotePendingSections(lc, windowSy);
                             skySourcesReady(lc);
-                            Scheduler.submit(lc);
+                            Scheduler.submit("read", lc);
                             onDone.run();
                         }
                     });
@@ -779,7 +779,7 @@ public final class SectionLifecycle {
         if (!exist) {
             SectionIO.unmarkReading(lc, sectionY);
             // 读回在途这一条落了，且没有数据要恢复：该 chunk 可能就此就绪，交准入。
-            Scheduler.submit(lc);
+            Scheduler.submit("read", lc);
             onDone.run();
             return;
         }
@@ -789,7 +789,7 @@ public final class SectionLifecycle {
         if (ref == null) {
             SectionIO.unmarkReading(lc, sectionY);
             // 同上：无槽位即无数据，读回在途这一条落，交准入。
-            Scheduler.submit(lc);
+            Scheduler.submit("read", lc);
             onDone.run();
             return;
         }
@@ -801,7 +801,7 @@ public final class SectionLifecycle {
             }
             promotePendingSections(lc, List.of(sectionY));
             skySourcesReady(lc);
-            Scheduler.submit(lc);
+            Scheduler.submit("read", lc);
             onDone.run();
         });
     }

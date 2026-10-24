@@ -172,7 +172,7 @@ public final class GenTask {
                 // 这一处没有伴随档位变化，单独投一条脏事件，走落档体。
                 Scheduler.dirty(chunk, awaitingLight, true);
                 // 交准入：光照由调度器的第六行发，本任务只把该 chunk 推回候选表。
-                Scheduler.submit(chunk);
+                Scheduler.submit("task", chunk);
                 // fill、surface、carvers 直接写 section，没有 vanilla 广播；这里只标记该 chunk
                 // 内容已变，由 ChunkDataSender 每 tick 按玩家当前窗口物化后再发段包。光照会先完成，
                 // flush 时 LIGHTED 认领为真，于是留队列等光照完成，方块与光照同到。

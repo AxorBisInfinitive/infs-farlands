@@ -33,6 +33,6 @@ public final class TerrainHooks {
 
     /** 读回完成后的信号。sectionY 只表达语义，调度器按窗口并集或面重算范围。 */
     public static void enqueueGen(LevelChunk chunk, int sectionY) {
-        Scheduler.submit(chunk);
+        Scheduler.submit("hook", chunk);
     }
 }

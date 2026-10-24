@@ -297,8 +297,8 @@ public final class StallWatch {
                 .append(" secs=").append(sections.length)
                 .append(" ny=").append(counts[0])
                 .append(" nyIn=").append(counts[2])
-                .append(" sub=").append(Scheduler.submitTrace(pos.pack()))
-                .append(" exit=").append(Scheduler.exitTrace(pos.pack()))
+                .append(" sub=").append(Scheduler.submitTrace(String.valueOf(dimension.identifier()), pos.pack()))
+                .append(" exit=").append(Scheduler.exitTrace(String.valueOf(dimension.identifier()), pos.pack()))
                 .append(" unproc=").append(Arrays.toString(Arrays.copyOf(unprocessed, counts[1])))
                 .append(" gate=").append(gate == null ? "ok" : gate);
         if (counts[2] < counts[0]) {

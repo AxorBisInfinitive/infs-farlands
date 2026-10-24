@@ -246,7 +246,7 @@ public abstract class SpawnPreloadMixin {
                 }
                 cache.tick(() -> false, false);
                 SectionIO.drainMainThreadTasks(server);
-                Scheduler.tick();
+                Scheduler.tick("create");
                 rounds++;
                 // 兜底重扫：等邻居的候选会在退避上限处被丢掉，而邻居落档之后不一定有人再提交它。
                 // 每 N 轮把判据圈整圈重投一次，等于给这些等待续期；圈外不碰，所以不会把几何死区
@@ -325,7 +325,7 @@ public abstract class SpawnPreloadMixin {
             for (int dz = -radius; dz <= radius; dz++) {
                 LevelChunk chunk = ChunkReadiness.chunkAt(level, new ChunkPos(center.x() + dx, center.z() + dz));
                 if (chunk != null) {
-                    Scheduler.submit(chunk);
+                    Scheduler.submit("exist", chunk);
                 }
             }
         }
@@ -514,13 +514,13 @@ public abstract class SpawnPreloadMixin {
                             for (int i = 0; i < range.length; i++) {
                                 range[i] = minSy + i;
                             }
-                            Scheduler.submit(chunk, range);
+                            Scheduler.submit("exist", chunk, range);
                         }
                     }
                 }
                 // 调度器在这里驱动：它由 tick 驱动，而预加载跑在 tick 之前。不补这一步，判据圈的段会永远停在
                 // CARVERS，而本循环的退出条件是范围内全部点亮，那就永远等不到。
-                Scheduler.tick();
+                Scheduler.tick("preload");
                 // 抽一次主线程执行器。装饰的收尾把升段与撤认领投在这里，fsa 的编码提交也在这里，
                 // 而 prepareLevels 期间的 waitUntilNextTick 可能不再抽各 level 的 chunk 执行器，
                 // 与 GenQueue.awaitIdle 的同形处理一致。不抽它，收尾永远落不下来，认领被一直持有。

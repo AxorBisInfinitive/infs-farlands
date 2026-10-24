@@ -46,6 +46,16 @@ public final class SchedulerMetrics {
 
     private static final AtomicLong JOB_CARVED = new AtomicLong();
 
+    /** 本窗调度器泵的执行次数。只在阻塞等待期增长，正常 tick 里恒为 0。 */
+    private static final AtomicLong PUMPED = new AtomicLong();
+
+    /**
+     * 本窗泵刷出的维度数之和，与上一栏配对。
+     *
+     * <p>次数非零而这一栏为零，说明泵在跑但拿不到任何窗口，那正是「阻塞期准入读不到本维度」的读数。
+     */
+    private static final AtomicLong PUMP_DIMS = new AtomicLong();
+
     private SchedulerMetrics() {
     }
 
@@ -103,16 +113,23 @@ public final class SchedulerMetrics {
         }
     }
 
+    /** 一次泵：刷新了 dims 个维度。只由阻塞等待期的泵调用，正常 tick 里不会增长。 */
+    public static void pumped(int dims) {
+        PUMPED.incrementAndGet();
+        PUMP_DIMS.addAndGet(dims);
+    }
+
     /** 打印并清零本窗计数。 */
     public static void flush() {
         InfsFarlands.LOGGER.info(
                 "FLSCHED emitted={} blocked={} repost={} rejectTicket={} rejectFace={} rejectReady={} "
                         + "rejectWindow={} lightQuota={} decoQuota={} readbackQuota={} jobs={} jobNoop={} "
-                        + "jobSegs={} jobCarved={} faces={}",
+                        + "jobSegs={} jobCarved={} pumped={} pumpedDims={} faces={}",
                 EMITTED.getAndSet(0), BLOCKED.getAndSet(0), REPOST.getAndSet(0), REJECT_TICKET.getAndSet(0),
                 REJECT_FACE.getAndSet(0), REJECT_READY.getAndSet(0), REJECT_WINDOW.getAndSet(0),
                 LIGHT_QUOTA.getAndSet(0), DECO_QUOTA.getAndSet(0), READBACK_QUOTA.getAndSet(0),
                 JOBS.getAndSet(0), JOB_NOOP.getAndSet(0), JOB_SEGMENTS.getAndSet(0), JOB_CARVED.getAndSet(0),
+                PUMPED.getAndSet(0), PUMP_DIMS.getAndSet(0),
                 Scheduler.faces());
     }
 
@@ -132,6 +149,8 @@ public final class SchedulerMetrics {
         JOB_NOOP.set(0);
         JOB_SEGMENTS.set(0);
         JOB_CARVED.set(0);
+        PUMPED.set(0);
+        PUMP_DIMS.set(0);
     }
 
     /** 每 200 tick 调一次；开关在配置里，关掉时零日志。 */
