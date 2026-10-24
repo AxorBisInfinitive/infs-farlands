@@ -1,5 +1,6 @@
 package com.inf.farlands.client.register.packet;
 
+import com.inf.farlands.FarlandsConfig;
 import com.inf.farlands.client.TintInvalidator;
 import com.inf.farlands.client.network.ClientPacketHandlers;
 import com.inf.farlands.network.expand.y.ChunkDataPacket;
@@ -7,6 +8,8 @@ import com.inf.farlands.util.maps.Common;
 import com.inf.farlands.util.window.WindowedChunk;
 
 import io.netty.buffer.Unpooled;
+
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -52,17 +55,13 @@ public class ChunkDataPacketRegister {
                     }
                     int minY = payload.windowMinY();
                     LevelLightEngine le = level.getChunkSource().getLightEngine();
-                    // 标脏按 chunk 的段区间合并一次。逐段调 setSectionDirtyWithNeighbors 会把同一个
+                    // 标脏按 chunk 的段集合合并一次。逐段调 setSectionDirtyWithNeighbors 会把同一个
                     // 3x3x3 盒重复标几十遍，详见 flushSectionDirty。
                     int curCx = Integer.MIN_VALUE;
                     int curCz = Integer.MIN_VALUE;
-                    int curWinMin = 0;
-                    int curWinMax = 0;
-                    // hasInWindow 与两个端点同进同出：只有端点而没有这个标志时，单条项与首项最大这两种
-                    // 形态会留下未赋值的一端，区间判空后一次都不标，数据到位而网格永不重建。
-                    boolean hasInWindow = false;
-                    int dirtyMinSy = 0;
-                    int dirtyMaxSy = 0;
+                    // 本 chunk 已应用的段号，按到达顺序收着。区间由它取上下界，不按窗口取：客户端 chunk
+                    // 的窗口在构造后、每帧拉正之前是死的单段，那时真段全都落在窗口外。
+                    IntArrayList dirtyYs = new IntArrayList();
                     for (ChunkDataPacket.SectionEntry e : payload.sections()) {
                         ChunkAccess ca = level.getChunkSource().getChunk(
                                 e.chunkX(), e.chunkZ(), ChunkStatus.FULL, false);
@@ -71,31 +70,12 @@ public class ChunkDataPacketRegister {
                             if (e.chunkX() != curCx || e.chunkZ() != curCz) {
                                 // 先清颜色再标脏：本 chunk 的段已全部应用，邻居边缘列下次编译就能取到新群系。
                                 invalidateTint(level, curCx, curCz);
-                                flushSectionDirty(level, curCx, curCz, hasInWindow, dirtyMinSy, dirtyMaxSy,
-                                        curWinMin, curWinMax);
+                                flushSectionDirty(level, curCx, curCz, dirtyYs);
                                 curCx = e.chunkX();
                                 curCz = e.chunkZ();
-                                WindowedChunk wc = (WindowedChunk) lc;
-                                curWinMin = wc.getWindowMinY();
-                                curWinMax = wc.getWindowMaxY();
-                                hasInWindow = false;
-                                dirtyMinSy = 0;
-                                dirtyMaxSy = 0;
+                                dirtyYs.clear();
                             }
-                            int entrySy = e.sectionY();
-                            if (entrySy < curWinMin || entrySy > curWinMax) {
-                                // 窗口外的段不进区间，但必须逐条标脏：区间跨到窗口外时跨度会随会话历史
-                                // 涨到上亿，而不标就会让数据到位后永不重建，Sodium 对已在集合里的段早退。
-                                Minecraft.getInstance().levelRenderer.setSectionDirty(e.chunkX(), entrySy, e.chunkZ());
-                            } else {
-                                hasInWindow = true;
-                                if (entrySy < dirtyMinSy) {
-                                    dirtyMinSy = entrySy;
-                                }
-                                if (entrySy > dirtyMaxSy) {
-                                    dirtyMaxSy = entrySy;
-                                }
-                            }
+                            dirtyYs.add(e.sectionY());
                         } else {
                             // chunk 未加载 → 缓存，chunk 加载后由 applyPendingSectionData 补应用
                             Common.cachePendingSectionData(level.dimension(),
@@ -103,8 +83,7 @@ public class ChunkDataPacketRegister {
                         }
                     }
                     invalidateTint(level, curCx, curCz);
-                    flushSectionDirty(level, curCx, curCz, hasInWindow, dirtyMinSy, dirtyMaxSy,
-                            curWinMin, curWinMax);
+                    flushSectionDirty(level, curCx, curCz, dirtyYs);
                 });
     }
 
@@ -125,31 +104,13 @@ public class ChunkDataPacketRegister {
             return; // 仍未加载；补应用挂在 chunk 加载之后，理论不触发
         }
         LevelLightEngine le = level.getChunkSource().getLightEngine();
-        WindowedChunk wc = (WindowedChunk) lc;
-        int winMin = wc.getWindowMinY();
-        int winMax = wc.getWindowMaxY();
-        // 与主处理同一不变量：标志为真时两个端点都是真实段号。
-        boolean hasInWindow = false;
-        int dirtyMinSy = 0;
-        int dirtyMaxSy = 0;
+        IntArrayList dirtyYs = new IntArrayList();
         for (ChunkDataPacket.SectionEntry e : pending.entries) {
             applySectionData(level, le, lc, e, pending.minY);
-            int entrySy = e.sectionY();
-            if (entrySy < winMin || entrySy > winMax) {
-                // 同 §5 主处理：窗口外的段逐条标，不进区间。
-                Minecraft.getInstance().levelRenderer.setSectionDirty(cx, entrySy, cz);
-            } else {
-                hasInWindow = true;
-                if (entrySy < dirtyMinSy) {
-                    dirtyMinSy = entrySy;
-                }
-                if (entrySy > dirtyMaxSy) {
-                    dirtyMaxSy = entrySy;
-                }
-            }
+            dirtyYs.add(e.sectionY());
         }
         invalidateTint(level, cx, cz);
-        flushSectionDirty(level, cx, cz, hasInWindow, dirtyMinSy, dirtyMaxSy, winMin, winMax);
+        flushSectionDirty(level, cx, cz, dirtyYs);
     }
 
     /**
@@ -172,30 +133,42 @@ public class ChunkDataPacketRegister {
     }
 
     /**
-     * 按 chunk 的段区间标脏一次。
+     * 按 chunk 本批实际应用的段标脏一次。
      *
      * <p>{@code setSectionDirtyWithNeighbors} 一次连带 3x3x3 共 27 个段（{@code LevelRenderer:1343-1345}），
-     * 逐段调用会把同一个盒子重复标几十遍；而窗口内各段的盒子并集正好是这段连续区间，所以区间调一次
+     * 逐段调用会把同一个盒子重复标几十遍；而这段连续区间各段的盒子并集正好是一个大盒子，所以区间调一次
      * 即可，盒内每个目标恰好一次。
      *
-     * <p>{@code hasInWindow} 为假表示本批没有窗口内条目，含 chunk 切换时的空批；为真时两个端点都是
-     * 真实段号，且 {@code minSy <= maxSy}。端点不用哨兵值表示「无条目」，是为了让单条项与首项最大
-     * 这两种形态不可能留下未赋值的一端。
+     * <p>区间由段集合取上下界，不按 chunk 的窗口取。客户端 chunk 的窗口在构造后、每帧拉正之前是死的单段，
+     * 构造默认窗口取的是维度下界那一段，那一刻本批真段全都落在窗口之外，按窗口判定会把整批标脏丢掉，
+     * 于是新区块旁边的旧区块永远保留着「贴着空气」的接缝面。
+     *
+     * <p>跨度超过一个窗口时改逐段带邻居标脏：那种情形只出现在容器或队列里跨了两个窗口的段，例如 tp
+     * 前后，区间会随会话历史涨到上亿。逐段标脏按段集合的条目数走，不按跨度走。
      */
-    private static void flushSectionDirty(ClientLevel level, int cx, int cz, boolean hasInWindow, int minSy,
-            int maxSy, int winMin, int winMax) {
-        if (!hasInWindow) {
+    private static void flushSectionDirty(ClientLevel level, int cx, int cz, IntArrayList ys) {
+        if (ys.isEmpty()) {
             return;
         }
-        // 标脏区间以目标 chunk 的当前窗口为界。若让区间跨到窗口外，待应用条目按 (维度, chunkPos) 累积、
-        // tp 前后两段 Y 并存时跨度可达上亿；有 Sodium 时每格写一次侧信道表并与 trim 抢段锁，表会涨到
-        // 千万级、渲染线程停等。窗口外的条目由调用方逐条 setSectionDirty 标，这里只负责窗口内那一段。
-        minSy = Math.max(minSy, winMin);
-        maxSy = Math.min(maxSy, winMax);
-        if (minSy > maxSy) {
-            return; // 夹取把区间夹空了，与「无条目」是两件事
+        int minSy = Integer.MAX_VALUE;
+        int maxSy = Integer.MIN_VALUE;
+        for (int i = 0; i < ys.size(); i++) {
+            int sy = ys.getInt(i);
+            if (sy < minSy) {
+                minSy = sy;
+            }
+            if (sy > maxSy) {
+                maxSy = sy;
+            }
         }
-        level.setSectionRangeDirty(cx - 1, minSy - 1, cz - 1, cx + 1, maxSy + 1, cz + 1);
+        int cap = FarlandsConfig.verticalSimulationDistance * 2 + 1;
+        if (maxSy - minSy + 1 <= cap) {
+            level.setSectionRangeDirty(cx - 1, minSy - 1, cz - 1, cx + 1, maxSy + 1, cz + 1);
+            return;
+        }
+        for (int i = 0; i < ys.size(); i++) {
+            level.setSectionDirtyWithNeighbors(cx, ys.getInt(i), cz);
+        }
     }
 
     /** 应用单个 section 条目：数据、光照与持有边界。标脏由调用方按 chunk 区间合并后统一做。 */

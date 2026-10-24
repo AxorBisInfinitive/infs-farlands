@@ -1,5 +1,6 @@
 package com.inf.farlands.client.mixin.expand.y;
 
+import com.inf.farlands.FarlandsConfig;
 import com.inf.farlands.InfsFarlands;
 import com.inf.farlands.light.FarLandsLightEngine;
 import com.inf.farlands.light.FarLandsLightPacketData;
@@ -7,6 +8,8 @@ import com.inf.farlands.util.maps.Common;
 import com.inf.farlands.util.window.WindowedChunk;
 
 import java.util.Map;
+
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
@@ -119,42 +122,50 @@ public abstract class ClientPacketListenerMixin {
     private void enableChunkLight(LevelChunk chunk, int x, int z) {
         LevelLightEngine lightEngine = this.level.getChunkSource().getLightEngine();
         ChunkPos chunkPos = chunk.getPos();
-        // 先只更新光照状态并收集有内容的段区间，标脏延到循环外一次做。
-        // setSectionDirtyWithNeighbors 一次连带 3x3x3 共 27 个段（LevelRenderer:1343-1345），
-        // 逐段调用会让同一个 27 格盒被重复标几十遍；而窗口内各段的盒子的并集正好是一个连续区间，
-        // 所以按区间发一次 setSectionRangeDirty 即可，盒内每个目标恰好一次。区间必须以窗口为界。
-        // 两个端点各自独立更新，单条项时取等；「无条目」不用哨兵值表示，见 ChunkDataPacketRegister
-        // 里同一形态的说明。
+        // 只更新光照状态并收集有内容的段，标脏延到循环外一次做。
+        //
+        // 区间由段集合取上下界，不按 chunk 的窗口取：客户端 chunk 的窗口在构造后、每帧拉正之前是构造
+        // 默认的单段，取的是维度下界那一段，此刻容器里的真段全在窗口之外。按窗口判定会把整批标脏丢掉，
+        // 新区块旁边的旧区块于是保留着「贴着空气」的接缝面，直到相机移动把它顺带重编。
+        //
+        // 空段不入集合：它们没有几何，到达也不改变任何邻居的面。
         WindowedChunk windowed = (WindowedChunk) chunk;
-        int winMin = windowed.getWindowMinY();
-        int winMax = windowed.getWindowMaxY();
-        int minSy = Integer.MAX_VALUE;
-        int maxSy = Integer.MIN_VALUE;
+        IntArrayList ys = new IntArrayList();
         for (Map.Entry<Integer, LevelChunkSection> e : windowed.windowedAllSections().entrySet()) {
             LevelChunkSection section = e.getValue();
             if (section == null) {
                 continue;
             }
             int sectionY = e.getKey();
-            SectionPos secPos = SectionPos.of(chunkPos, sectionY);
             boolean air = section.hasOnlyAir();
-            lightEngine.updateSectionStatus(secPos, air);
-            // 并集是历次窗口的并集，tp 后跨度可达上亿；有 Sodium 时每格还会写一次侧信道表并与 trim
-            // 抢段锁。窗口内的段收进区间一次标；窗口外的段逐条标，否则数据到位后不会再有人标它，
-            // Sodium 对已在集合里的段直接早退，那一段就永远不重建。
-            if (sectionY >= winMin && sectionY <= winMax) {
-                if (sectionY < minSy) {
-                    minSy = sectionY;
-                }
-                if (sectionY > maxSy) {
-                    maxSy = sectionY;
-                }
-            } else {
-                Minecraft.getInstance().levelRenderer.setSectionDirty(x, sectionY, z);
+            lightEngine.updateSectionStatus(SectionPos.of(chunkPos, sectionY), air);
+            if (!air) {
+                ys.add(sectionY);
             }
         }
-        if (minSy <= maxSy) {
+        if (ys.isEmpty()) {
+            return;
+        }
+        int minSy = Integer.MAX_VALUE;
+        int maxSy = Integer.MIN_VALUE;
+        for (int i = 0; i < ys.size(); i++) {
+            int sy = ys.getInt(i);
+            if (sy < minSy) {
+                minSy = sy;
+            }
+            if (sy > maxSy) {
+                maxSy = sy;
+            }
+        }
+        // 跨度超过一个窗口时改逐段带邻居标脏：并集是历次窗口的并集，tp 后跨度可达上亿，而逐段标脏
+        // 按段集合的条目数走，不按跨度走。
+        int cap = FarlandsConfig.verticalSimulationDistance * 2 + 1;
+        if (maxSy - minSy + 1 <= cap) {
             this.level.setSectionRangeDirty(x - 1, minSy - 1, z - 1, x + 1, maxSy + 1, z + 1);
+            return;
+        }
+        for (int i = 0; i < ys.size(); i++) {
+            this.level.setSectionDirtyWithNeighbors(x, ys.getInt(i), z);
         }
     }
 
