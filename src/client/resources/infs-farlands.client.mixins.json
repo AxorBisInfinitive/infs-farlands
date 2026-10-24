@@ -15,6 +15,7 @@
     "expand.y.ClientLevelMixin",
     "expand.y.ClientPacketListenerMixin",
     "gui.DropdownScrollWheelMixin",
+    "gui.LevelLoadingScreenMixin",
     "gui.ScrollableLayoutContainerMixin",
     "fix.audio.BeeSoundInstanceMixin",
     "fix.audio.ElytraOnPlayerSoundInstanceMixin",

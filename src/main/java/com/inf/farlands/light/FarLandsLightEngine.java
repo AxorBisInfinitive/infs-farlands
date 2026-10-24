@@ -14,7 +14,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
@@ -153,7 +152,6 @@ public class FarLandsLightEngine extends ThreadedLevelLightEngine {
 
     private final boolean serverSide;
     private final FarLandsLightQueue queue;
-    private final LightTaskLock taskLock;
     private final ExecutorService lightPool;
     private final ArrayDeque<FarLandsSkyLightEngine> skyPool = new ArrayDeque<>();
     private final ArrayDeque<FarLandsBlockLightEngine> blockPool = new ArrayDeque<>();
@@ -178,7 +176,6 @@ public class FarLandsLightEngine extends ThreadedLevelLightEngine {
         this.skyEngine = skyLight ? new FarLandsSkyLightEngine(chunkSource, sharedSkyStorage, sharedSkyTopSections)
                 : null;
         this.queue = new FarLandsLightQueue();
-        this.taskLock = new LightTaskLock(((ServerLevel) chunkSource.getLevel()).dimension());
         // 已由 FarlandsConfig 解析：显式值受 range(1,64) 约束，"auto" 由取值器算出，恒 >= 1
         int parallelism = FarlandsConfig.parallelLightThreads;
         this.lightPool = Executors.newFixedThreadPool(parallelism, r -> {
@@ -198,7 +195,6 @@ public class FarLandsLightEngine extends ThreadedLevelLightEngine {
         this.blockEngine = new FarLandsBlockLightEngine(chunkSource);
         this.skyEngine = hasSkyLight ? new FarLandsSkyLightEngine(chunkSource) : null;
         this.queue = null;
-        this.taskLock = null;
         this.lightPool = null;
         this.sharedSkyStorage = null;
         this.sharedBlockStorage = null;
@@ -378,18 +374,21 @@ public class FarLandsLightEngine extends ThreadedLevelLightEngine {
      * 装饰侧取光照域锁：半径 2，覆盖它的 3×3 写域。主线程调用，失败即放弃本次、留表重试。
      *
      * <p>
-     * 这把锁与 {@link LightTaskLock#tryLock} 共用同一份 per-chunk 锁：光照侧在那里的 25 格
-     * 循环里查装饰认领表，装饰侧直接取锁，于是两个方向互为排除。客户端构造下 taskLock 为 null，
-     * 装饰是纯服务端，返回假即可。
+     * 锁已搬进 {@link com.inf.farlands.terrain.pipeline.OwnershipTable} 的二十五格相：光照侧在那里
+     * 查装饰认领表，装饰侧直接取锁，两个方向互为排除。客户端构造下没有该表，装饰是纯服务端，返回假。
      */
     public long tryLockDomain(int chunkX, int chunkZ) {
-        return this.taskLock == null ? 0L : this.taskLock.tryLockDomain(chunkX, chunkZ);
+        if (!this.serverSide) {
+            return 0L;
+        }
+        return com.inf.farlands.terrain.pipeline.OwnershipTable.tryLockDomain(
+                (ServerLevel) this.chunkSource.getLevel(), chunkX, chunkZ, ChunkPos.pack(chunkX, chunkZ));
     }
 
     /** 装饰侧释放光照域锁。与 {@link #tryLockDomain} 配对，收尾调用，必须带回取域时的编号。 */
     public void unlockDomain(int chunkX, int chunkZ, long owner) {
-        if (this.taskLock != null) {
-            this.taskLock.unlock(chunkX, chunkZ, owner);
+        if (this.serverSide) {
+            com.inf.farlands.terrain.pipeline.OwnershipTable.unlockCells(chunkX, chunkZ, owner);
         }
     }
 
@@ -519,49 +518,12 @@ public class FarLandsLightEngine extends ThreadedLevelLightEngine {
      */
     private final AtomicBoolean consumerActive = new AtomicBoolean();
 
-    /** 一个 tick 的时长（纳秒）：虚拟 tick 的间隔。 */
-    private static final long TICK_NANOS = 50_000_000L;
-
     /**
-     * 本 tick 剩余的任务配额。真 tick 是唯一权威边界，由
-     * {@code FarlandsTick.atEnd(server, tickCount)} 经 {@link #grantTickBudget()}
-     * 发牌。
-     *
-     * <p>
-     * 无 tick 阶段（prepareLevels 建世界、saveEverything 保存）必须另有边界来源，否则光照
-     * 永远等不到配额 → chunk 卡在 LIGHT → 到不了 FULL → saveAllChunks 死等。故
-     * {@link #acquireBudget()} 在"距上次放行满一个 tick"时发一次虚拟 tick 配额。
-     */
-    private final AtomicInteger tickBudget = new AtomicInteger();
-
-    /** 上次放行边界（真 tick 与虚拟 tick 共用）。真 tick 每 50ms 一次 ⇒ 稳态下虚拟 tick 永不触发。 */
-    private volatile long lastGrantNanos = System.nanoTime();
-
-    /** 每 tick 配额发牌：由 FarlandsTick.atEnd 调用，真 tick 是唯一权威边界。 */
-    public void grantTickBudget() {
-        tickBudget.set(Math.max(1, FarlandsConfig.maxLightTasksPerTick));
-        lastGrantNanos = System.nanoTime();
-        if (queue.hasWork()) {
-            wakeConsumer();
-        }
-    }
-
-    /**
-     * 取本次 drain 轮的任务配额：真 tick 配额优先；则退而求其次，距上次放行满一个 tick 时
-     * 发一次虚拟 tick 配额并**推进边界**（推进是关键——否则"无 tick 就放行"会退化成忙转）。
-     * 返回 0 表示本窗配额已用完，调用方应退出等下一个边界。
+     * 取本次 drain 轮的批次上界。计时已删，改为每次唤醒从配置直取；无 tick 阶段的边界由入队即唤醒
+     * 与主线程泵的 tryScheduleUpdate 提供。
      */
     private int acquireBudget() {
-        int fromTick = tickBudget.getAndSet(0);
-        if (fromTick > 0) {
-            return fromTick;
-        }
-        long now = System.nanoTime();
-        if (now - lastGrantNanos >= TICK_NANOS) {
-            lastGrantNanos = now;
-            return Math.max(1, FarlandsConfig.maxLightTasksPerTick);
-        }
-        return 0;
+        return Math.max(1, FarlandsConfig.maxLightTasksPerTick);
     }
 
     /**
@@ -570,7 +532,7 @@ public class FarLandsLightEngine extends ThreadedLevelLightEngine {
      *
      * <p>
      * 只有本轮真的提交过任务才自唤。撞满重试上限而一次都没提交的那一轮必须停手：否则「每轮有界、
-     * 轮数无界」，自唤把有界重试接成新的无限自旋。那种情况交给下一个 tick 的 grantTickBudget。
+     * 轮数无界」，自唤把有界重试接成新的无限自旋。那种情况交给下一次入队或主线程泵的唤醒。
      *
      * <p>
      * 注意这里**不能**无条件重排自己：配额未到就重排会让 drain 轮无缝接续，退化成不受限的忙转。
@@ -580,7 +542,7 @@ public class FarLandsLightEngine extends ThreadedLevelLightEngine {
      */
     private void exitDrain(boolean progressed) {
         consumerActive.set(false);
-        if (progressed && queue.hasWork() && tickBudget.get() > 0) {
+        if (progressed && queue.hasWork()) {
             wakeConsumer();
         }
     }
@@ -636,7 +598,8 @@ public class FarLandsLightEngine extends ThreadedLevelLightEngine {
                 }
                 int cx = tasks.chunkX();
                 int cz = tasks.chunkZ();
-                long lockOwner = taskLock.tryLock(cx, cz);
+                long lockOwner = com.inf.farlands.terrain.pipeline.OwnershipTable.tryLockLightTask(
+                        (ServerLevel) this.chunkSource.getLevel(), cx, cz);
                 if (lockOwner == 0L) {
                     queue.requeue(tasks); // 相邻任务占用，重排队尾下轮重试
                     if (++retries >= limit) {
@@ -650,8 +613,8 @@ public class FarLandsLightEngine extends ThreadedLevelLightEngine {
                 } catch (Throwable t) {
                     // 池已关闭或提交被拒：锁必须还、任务必须放回。否则这个 ChunkWork 既不在
                     // workMap 也不在 pendingWork，没人执行也没人 requeue，onComplete 永不完成，
-                    // LIGHT_IN_FLIGHT 永久为真，块锁也永远不释放。与 wakeConsumer 的处理对齐。
-                    taskLock.unlock(cx, cz, lockOwner);
+                    // LIGHTED 认领永久为真，块锁也永远不释放。与 wakeConsumer 的处理对齐。
+                    com.inf.farlands.terrain.pipeline.OwnershipTable.unlockCells(cx, cz, lockOwner);
                     queue.requeue(tasks);
                     InfsFarlands.LOGGER.error("farlands: light submit failed chunk={},{}", cx, cz, t);
                     return;
@@ -676,20 +639,15 @@ public class FarLandsLightEngine extends ThreadedLevelLightEngine {
         return Math.max(8, budgetGranted * 2);
     }
 
-    /** 当前值不值得唤醒 drain：有配额，或距上次放行已满一个 tick，即虚拟 tick 的边界。 */
-    private boolean budgetAvailable() {
-        return tickBudget.get() > 0 || System.nanoTime() - lastGrantNanos >= TICK_NANOS;
-    }
-
     /**
-     * 每 tick / 每次主线程泵的调度入口：只在有配额或已过边界时才唤醒——否则每个主线程泵
-     * 都会往池里塞一个拿不到配额的空 drain。
+     * 每 tick / 每次主线程泵的调度入口：计时已删，有活就唤醒；`wakeConsumer` 自身 CAS 限流，
+     * 不会往池里塞重复的空 drain。
      */
     private void scheduleTasks() {
         if (queue == null) {
             return;
         }
-        if (budgetAvailable()) {
+        if (queue.hasWork()) {
             wakeConsumer();
         }
     }
@@ -723,15 +681,11 @@ public class FarLandsLightEngine extends ThreadedLevelLightEngine {
         } catch (Throwable t) {
             InfsFarlands.LOGGER.error("Light task exception chunk={},{}", cx, cz, t);
         } finally {
-            taskLock.unlock(cx, cz, lockOwner);
+            com.inf.farlands.terrain.pipeline.OwnershipTable.unlockCells(cx, cz, lockOwner);
             tasks.onComplete.complete(null);
             // 任务完成补唤醒：防 drainLight 单例漏调度 残留任务由在跑任务的
-            // 完成链式续接，light future 落地 -> 生成继续 -> getChunk 解除阻塞。
-            // 只在有配额或已过虚拟 tick 边界时真唤醒，而下一个 tick 的 grantTickBudget 里
-            // 有 if (queue.hasWork()) 兜底，不会漏活。
-            if (budgetAvailable()) {
-                wakeConsumer();
-            }
+            // 任务完成即唤醒：计时已删，唤醒自身 CAS 限流，不会自旋。
+            wakeConsumer();
             // ticket 移除必须主线程，ticket 操作非线程安全
             mainExecutor().execute(() -> {
                 if (queue.removeWorkRef(tasks.chunkKey) <= 0) {
@@ -746,10 +700,8 @@ public class FarLandsLightEngine extends ThreadedLevelLightEngine {
 
     /** 入队后加 light ticket，必须主线程；非主线程调用点如生成线程先回主线程。 */
     private void onEnqueued(FarLandsLightQueue.ChunkWork tasks) {
-        // 入队即唤醒后台调度，不依赖主线程下一 tick。同样只在有价值时真唤醒，见 executeTask 那处的说明。
-        if (budgetAvailable()) {
-            wakeConsumer();
-        }
+        // 入队即唤醒后台调度，不依赖主线程下一 tick。
+        wakeConsumer();
         if (tasks.isTicketAdded) {
             return;
         }

@@ -1,16 +1,15 @@
 package com.inf.farlands.mixin.terrain.pipeline;
 
 import com.inf.farlands.InfsFarlands;
-import com.inf.farlands.serialize.ChunkReadiness;
 import com.inf.farlands.serialize.SectionIO;
 import com.inf.farlands.serialize.SectionLifecycle;
-import com.inf.farlands.serialize.SectionStage;
 import com.inf.farlands.terrain.ChunkBeardifier;
 import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.biomeFiller.BiomeFiller;
 import com.inf.farlands.terrain.debug.StageMetrics;
 import com.inf.farlands.terrain.decorationFiller.DecorationFiller;
 import com.inf.farlands.terrain.pipeline.GenQueue;
+import com.inf.farlands.terrain.pipeline.Scheduler;
 import com.inf.farlands.terrain.structure.StructureDriver;
 
 import java.lang.reflect.Field;
@@ -164,34 +163,28 @@ public abstract class GenerationChunkHolderMixin {
                 }
                 farlandsCompleteFuture(status, levelchunk);
             }
-            ChunkReadiness.watch((GenerationChunkHolder) (Object) this, levelchunk);
-            // 这一格的壳出现了：等它的装饰项要重判门，等它的结构挂起项要重判 ±8。
-            DecorationFiller.cellChanged(levelchunk.getPos().pack());
+            // 这一格的壳出现了：等它的装饰项要重判门，等它的结构引用相要重判 ±8。
+            DecorationFiller.cellChanged(level, levelchunk.getPos().pack());
             StructureDriver.cellChanged();
 
             // 结构相早于 Beardifier，Beardifier 早于 fill。这是铁的顺序，但它只约束 fill，不约束就绪。
-            // 所以这里只挂起引用相与 Beardifier 那一小段，尾部照跑，尾部是 biome、读回、入队与 drive。
-            // setInitialSpawn 那条阻塞 FULL 早于预加载循环，加载期没有第二次 drive 的机会。
+            // 所以这里只做起点相，引用相与 Beardifier 的时机交给调度器的准入：准入判 hasBeardifier 为假
+            // 时，若 referencesBuildable 就现场建，建完再提交一次。
             //
-            // 顺序由 GenTask.execute 的门保证，而那道门查的是不变量本身，即没有 Beardifier 就不填，
-            // 不是「有没有登记为等结构相」这个代理：登记的落点晚于本 chunk 对 latestChunk 可见的那一刻。
+            // 起点相归地物族：自己算还是走宿主基座、这一族要不要走结构相，都由族回答，见
+            // {@code DecorationSystem#createStructures}。返回假表示按无结构处理：那时起点表为空，而
+            // forStructuresInChunk 对空起点表返回的就是 Beardifier.EMPTY。照调它而不是直接塞 EMPTY，
+            // 是为了不让这里成为唯一算得出特例的地方。
             //
-            // 两道与内容无关的安全门，放在调用点保证任何族都绕不过：维度关掉结构生成的，以及可玩界之外
-            // 的 chunk，都不进起点相。后者的成因见 StructureDriver#inStructureRange。
+            // 两道与内容无关的安全门放在调用点，任何族都绕不过：维度关掉结构生成的，以及可玩界之外的
+            // chunk。后者没有可玩方块，起点相也不该跑，取到的是同一个 EMPTY。
             boolean mayHaveStructures = StructureDriver.structuresEnabled(level)
                     && StructureDriver.inStructureRange(levelchunk);
-            // 起点相归地物族：自己算还是走宿主基座由族决定，见 DecorationSystem#createStructures。
-            boolean started = mayHaveStructures
+            boolean hasStructures = mayHaveStructures
                     && ((LevelSystems) level).decorationSystem().createStructures(level, levelchunk);
-            if (!started) {
-                // 无结构：起点表为空，引用表也为空，Beardifier 取空起点表的结果即 EMPTY。照调它而不是
-                // 直接塞 EMPTY，是为了不让这里成为唯一算得出特例的地方。
+            if (!hasStructures) {
                 ((ChunkBeardifier) levelchunk).setBeardifier(
                         Beardifier.forStructuresInChunk(level.structureManager(), levelchunk.getPos()));
-            } else if (StructureDriver.referencesBuildable(level, levelchunk)) {
-                farlandsStructureReady(level, levelchunk);
-            } else {
-                StructureDriver.await(level, levelchunk, () -> farlandsStructureReady(level, levelchunk));
             }
             farlandsGenerateTail(level, levelchunk);
         } catch (Exception e) {
@@ -201,13 +194,9 @@ public abstract class GenerationChunkHolderMixin {
     }
 
     /**
-     * 结构相：引用相，然后 Beardifier，最后补一次生成入队。
+     * 结构相的引用段：引用相，然后 Beardifier。由调度器的准入按需调，见 {@code Scheduler.admit}。
      *
-     * <p>与挂起标记的摘除同线程、同一次调用内相邻完成，{@code StructureDriver.tick} 先摘再跑，
-     * 所以不存在「门已开、Beardifier 未设」的窗口。
-     *
-     * <p>末尾必须补一次入队：存在流程尾部那次 {@code enqueueChunk} 会被 GenTask 的门早退掉，而挂起
-     * 期的 chunk 在扫描里也重排不上，预加载期没有窗口段，hasUnprocessed 迭代不到任何段。
+     * <p>必须在主线程：结构放置与 Beardifier 都经 StructureManager 走 ServerChunkCache 的取 chunk。
      */
     @Unique
     private void farlandsStructureReady(ServerLevel level, LevelChunk levelchunk) {
@@ -220,32 +209,15 @@ public abstract class GenerationChunkHolderMixin {
         ((ChunkBeardifier) levelchunk).setBeardifier(
                 Beardifier.forStructuresInChunk(level.structureManager(), levelchunk.getPos()));
 
-        // 补一次生成入队。三个入口只有 preload 能用：enqueueChunk 的首句是 isNearPlayer 过滤，
-        // 预加载期没有玩家，会被直接挡回；enqueue(chunk, sy) 走窗口并集，预加载期窗口为空，扫不出
-        // 任何段；preload(chunk, min, max) 走显式段范围，正是走查那一路用的入口。
-        // 范围取该 chunk 已物化过的段，走查的 biome 阶段已经把它们建出来了。
-        int[] range = { Integer.MAX_VALUE, Integer.MIN_VALUE };
-        SectionStage.forEachStage(levelchunk, (sy, stage) -> {
-            if (sy < range[0]) {
-                range[0] = sy;
-            }
-            if (sy > range[1]) {
-                range[1] = sy;
-            }
-        });
-        if (range[0] <= range[1]) {
-            GenQueue.preload(levelchunk, range[0], range[1]);
-        } else {
-            // 空范围：这一支今天发不出任何入队。被门挡下的 chunk 从没进过 collectSegments，它的
-            // stage 表就是空的，于是「门开了」这件事传不出去，只能等扫描那一轮。
-        }
+        // 建完引用相即可交回准入：TERRAIN 的依赖是 hasBeardifier，调度器会再提交一次。
+        Scheduler.submit(levelchunk);
     }
 
     /**
-     * 结构相之后照跑的那一支：biome、fsa 读回、入队。
+     * 结构相之后照跑的那一支：biome、fsa 读回、交准入。
      *
-     * <p>它不依赖 {@code Beardifier}，所以结构相被延后时也照跑，加载期的 FULL 就靠它末尾那次
-     * {@code ChunkReadiness.drive()} 补上，而 {@code setInitialSpawn} 的阻塞读早于预加载循环。
+     * <p>它不依赖 {@code Beardifier}，所以结构相被延后时也照跑。加载期的 FULL 由调度器的第七行补，
+     * 而 {@code setInitialSpawn} 的阻塞读早于预加载循环，所以这条链必须在存在流程内跑完。
      */
     @Unique
     private void farlandsGenerateTail(ServerLevel level, LevelChunk levelchunk) {
@@ -283,8 +255,8 @@ public abstract class GenerationChunkHolderMixin {
                         // 从清掉到 loadChunkSections 落下读回标记之间会出现一个既无在途也无读回的
                         // 缝，ChunkReadiness 会把这个缝判成就绪。
                         GenQueue.endBiomeFill(levelchunk);
-                        // 群系标志清掉后，一个已读回且已点亮的 chunk 可能刚好就绪，这里补一次。
-                        ChunkReadiness.drive();
+                        // 群系标志清掉后，一个已读回且已点亮的 chunk 可能刚好就绪，交准入。
+                        Scheduler.submit(levelchunk);
                         // fsa 读回：先查磁盘窗口内 section，有则读回恢复数据、光照、stage 并补发。
                         // 完成后才 enqueueChunk，collectSegments 的 isOrAfter(TERRAIN) 自动跳过已读回的，
                         // 磁盘没有的 section 正常入生成队列。

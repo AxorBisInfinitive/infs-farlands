@@ -1,7 +1,11 @@
 package com.inf.farlands.mixin.expand.y;
 
 import com.inf.farlands.light.FarLandsLightEngine;
+import com.inf.farlands.serialize.ChunkCounters;
+import com.inf.farlands.serialize.CounterIdentities;
+import com.inf.farlands.serialize.CounterIdentity;
 import com.inf.farlands.serialize.PendingBlockEntities;
+import com.inf.farlands.serialize.SectionStage;
 import com.inf.farlands.terrain.CarvingMaskStorage;
 import com.inf.farlands.terrain.ChunkBeardifier;
 import com.inf.farlands.util.window.EntitySectionWindow;
@@ -54,6 +58,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import net.minecraft.world.level.chunk.ImposterProtoChunk;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.ProtoChunk;
 
@@ -61,10 +66,17 @@ import org.slf4j.Logger;
 
 @Mixin(ChunkAccess.class)
 public abstract class ChunkAccessMixin
-        implements WindowedChunk, CarvingMaskStorage, ChunkBeardifier, PendingBlockEntities {
+        implements WindowedChunk, CarvingMaskStorage, ChunkBeardifier, PendingBlockEntities, CounterIdentity {
 
     @Unique
     private final Map<Integer, LevelChunkSection> allSections = new ConcurrentHashMap<>();
+
+    /**
+     * 记账身份，构造末尾分配，只给服务端的 LevelChunk，0 表示未分配。不靠字段初始化器，因为
+     * 目标类没有无参构造器，而赋值点就在本类的注入里。
+     */
+    @Unique
+    private long farlands$counterId;
 
     @Unique
     private volatile LevelChunkSection[] windowSections = new LevelChunkSection[0];
@@ -82,9 +94,6 @@ public abstract class ChunkAccessMixin
 
     @Unique
     private int lastPacketMaxY = Integer.MIN_VALUE;
-
-    @Unique
-    private final Map<Integer, Boolean> dirtySections = new ConcurrentHashMap<>();
 
     @Unique
     private final IntRBTreeSet activeSectionYs = new IntRBTreeSet();
@@ -200,6 +209,11 @@ public abstract class ChunkAccessMixin
             BlendingData blendingData,
             CallbackInfo ci) {
         this.containerFactory = containerFactory;
+        // 身份只发给服务端的 LevelChunk：ProtoChunk 的段由它变成 LevelChunk 时那次统一扫补记，
+        // 客户端 chunk 不参与记账。判端读入参 lha，不读 this.level，后者在 super 之内必为 null。
+        if ((Object) this instanceof LevelChunk && lha instanceof Level level && !level.isClientSide()) {
+            this.farlands$counterId = CounterIdentities.register();
+        }
         if (sectionsParam != null) {
             for (int i = 0; i < sectionsParam.length; i++) {
                 if (sectionsParam[i] != null) {
@@ -210,6 +224,16 @@ public abstract class ChunkAccessMixin
             }
         }
         buildDefaultWindow();
+        // 构造期建的段不逐条记，改成这里统一扫一遍容器：它同时覆盖构造器数组里的段与窗口默认段，
+        // 且不依赖那时读不到的 this.level。
+        if (this.farlands$counterId != 0L) {
+            ChunkCounters.sweep((LevelChunk) (Object) this);
+        }
+    }
+
+    @Override
+    public long counterId() {
+        return this.farlands$counterId;
     }
 
     private void buildDefaultWindow() {
@@ -319,17 +343,21 @@ public abstract class ChunkAccessMixin
 
     @Override
     public void markSectionDirty(int sectionY) {
-        this.dirtySections.put(sectionY, Boolean.TRUE);
+        if ((Object) this instanceof LevelChunk lc) {
+            SectionStage.markDirty(lc, sectionY);
+        }
     }
 
     @Override
     public boolean isSectionDirty(int sectionY) {
-        return this.dirtySections.containsKey(sectionY);
+        return (Object) this instanceof LevelChunk lc && SectionStage.isDirty(lc, sectionY);
     }
 
     @Override
     public void clearSectionDirty(int sectionY) {
-        this.dirtySections.remove(sectionY);
+        if ((Object) this instanceof LevelChunk lc) {
+            SectionStage.clearDirty(lc, sectionY);
+        }
     }
 
     @Override
@@ -349,7 +377,10 @@ public abstract class ChunkAccessMixin
     @Override
     public void forEachOutsideWindows(int margin, IntConsumer consumer) {
         IntSet collected = new IntOpenHashSet();
-        int[] ranges = EntitySectionWindow.ranges();
+        // 窗口按维度分表：调用点只有服务端清理，走 LevelChunk；拿不到维度时退回全维度并集。
+        int[] ranges = (Object) this instanceof LevelChunk lc
+                ? EntitySectionWindow.ranges(lc.getLevel().dimension())
+                : EntitySectionWindow.unionAllDimensions();
         synchronized (this.activeSectionYs) {
             for (int i = 0; i < ranges.length; i += 2) {
                 int min = ranges[i];
@@ -407,6 +438,21 @@ public abstract class ChunkAccessMixin
         return beardifier;
     }
 
+    /**
+     * 物化记账。身份是 0 的 chunk 由 {@link ChunkCounters} 自己空转，所以这里不判端也不判身份。
+     *
+     * <p>ImposterProtoChunk 要解包成它包着的 LevelChunk：账记在真正的容器持有者身上，否则会记到
+     * 另一个身份上。
+     */
+    @Unique
+    private void farlands$countMaterialized(int sectionY) {
+        if ((Object) this instanceof LevelChunk lc) {
+            ChunkCounters.onMaterialize(lc, sectionY);
+        } else if ((Object) this instanceof ImposterProtoChunk imposter) {
+            ChunkCounters.onMaterialize(imposter.getWrapped(), sectionY);
+        }
+    }
+
     @Overwrite
     public LevelChunkSection[] getSections() {
         return this.windowSections;
@@ -420,6 +466,7 @@ public abstract class ChunkAccessMixin
             s = new LevelChunkSection(this.containerFactory);
             this.allSections.put(sy, s);
             addActiveSection(sy);
+            farlands$countMaterialized(sy);
         }
         try {
             LevelChunkSection[] arr = this.sections;

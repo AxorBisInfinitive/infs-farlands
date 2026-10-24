@@ -1,15 +1,12 @@
 package com.inf.farlands;
 
 import com.inf.farlands.light.FarLandsLightEngine;
-import com.inf.farlands.serialize.ChunkReadiness;
 import com.inf.farlands.serialize.SectionIO;
 import com.inf.farlands.serialize.SectionLifecycle;
 import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.debug.StageMetrics;
-import com.inf.farlands.terrain.decorationFiller.DecorationFiller;
-import com.inf.farlands.terrain.pipeline.GenQueue;
 import com.inf.farlands.terrain.pipeline.NeighborhoodTickets;
-import com.inf.farlands.terrain.structure.StructureDriver;
+import com.inf.farlands.terrain.pipeline.Scheduler;
 import com.inf.farlands.terrain.system.terrain.noise.overworld.Beta173.Beta173NoiseSystem;
 import com.inf.farlands.terrain.system.terrain.noise.overworld.Vanilla.VanillaNoiseSystem;
 import com.inf.farlands.util.maps.AquiferUtil;
@@ -18,6 +15,7 @@ import com.inf.farlands.util.maps.SectionUtil;
 import com.inf.farlands.util.network.ChunkDataSender;
 import com.inf.farlands.util.network.SystemsSender;
 import com.inf.farlands.util.window.EntitySectionWindow;
+import com.inf.farlands.util.window.PlayerSnapshot;
 
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -178,6 +176,30 @@ public class FarlandsTick {
         TICK_SINKS.add(sink);
     }
 
+    /**
+     * 只刷两张表：玩家位置快照与实体 section 窗口并集。
+     *
+     * <p>准入的两道门读的就是这两张：{@code isNearPlayer} 读快照，{@code Scheduler.sectionsFor} 的竖直面
+     * 读窗口并集。抽出来的理由是提交点也要能只刷这一层：提交发生在阻塞取数之内，而票据的加减不该跟着
+     * 提前到那一处。
+     */
+    public static void refreshGates(MinecraftServer server) {
+        List<ServerPlayer> players = server.getPlayerList().getPlayers();
+        PlayerSnapshot.capture(players);
+        EntitySectionWindow.update(players);
+    }
+
+    /**
+     * 每 tick 的三步刷新：两张表加驱动面 ±8 的保加载票。
+     *
+     * <p>抽成方法是为了让真 tick 的末尾与阻塞等待期的泵共用同一份顺序。两处各写一份顺序，就会刷出与真
+     * tick 不同源的状态，而两边同时被准入读。
+     */
+    public static void refreshTickState(MinecraftServer server) {
+        refreshGates(server);
+        NeighborhoodTickets.tick(server);
+    }
+
     /** 服务端 tick 末尾统一入口。 */
     public static void atEnd(MinecraftServer server, int tickCount) {
         setNow(tickCount);
@@ -189,35 +211,25 @@ public class FarlandsTick {
             trimAquiferLookup(tickCount);
             // 就绪吞吐读数：与本周期同档，约 10 秒一行。只报读数，不报解读。
             StageMetrics.flush();
-        }
-        // 装饰驱动：判门、认领、提交到 farlands-gen。排在光照配额之前，使取域与本拍那簇光照任务的放行
-        // 错开：那簇任务一放行就取走半径 2 的锁并持有 1 到 3 毫秒，而装饰取域是整块成功或整块失败，撞上
-        // 要多等一个重试窗。代价是本拍由扫描新登记的项要等下一轮尝试。
-        DecorationFiller.tick();
-        // 光照引擎每 tick 的任务配额：真 tick 是唯一权威边界。
-        // 无 tick 阶段由引擎自己按 tick 间隔兜底，两个入口是 prepareLevels 建世界与 saveEverything 保存。
-        for (ServerLevel level : server.getAllLevels()) {
-            if (level.getChunkSource().getLightEngine() instanceof FarLandsLightEngine lightEngine) {
-                lightEngine.grantTickBudget();
-            }
+            // 残留条目回收：档位表有、段容器没有的那些，与装饰写门同宽。
+            SectionLifecycle.reclaimOrphanStages(server);
+            // 视距内兜底重扫：把有活却不在候选表里的 chunk 补交一次，本拍末尾的 tick 统一派发。
+            com.inf.farlands.terrain.pipeline.InViewSweep.run(server);
         }
         // 窗口差量与限量发包；返回值同时驱动 fsa 的窗口清理判定。
         boolean windowChanged = ChunkDataSender.tick(server);
         // 世界系统选择下发：玩家进服或换维度后补一次，客户端据此显示当前 level 用哪五族系统。
         SystemsSender.tick(server);
-        // 玩家跨 chunk 移动时，地形与光照队列按当前距离重排。
+        // 玩家跨 chunk 移动时，光照队列按当前距离重排。地形侧的候选表在准入时按快照排序，不需要重排。
         if (ChunkDataSender.consumePlayersMoved()) {
-            GenQueue.rebuildQueue();
             for (ServerLevel level : server.getAllLevels()) {
                 if (level.getChunkSource().getLightEngine() instanceof FarLandsLightEngine lightEngine) {
                     lightEngine.rebuildLightQueue();
                 }
             }
         }
-        // 实体 section 窗口并集更新。terrain 的窗口段收集与 fsa 的清理判定都读它，必须先刷新。
-        EntitySectionWindow.update(server.getPlayerList().getPlayers());
-        // 驱动面 ±8 邻域的保加载：玩家自己的票圈只到视距加 2，门要的那 289 格有约 94% 落在圈外。
-        NeighborhoodTickets.tick(server);
+        // 玩家快照、窗口并集与驱动面票圈，同一份玩家列表、同一时点落地。阻塞等待期的泵也走这一条。
+        refreshTickState(server);
 
         // fsa 序列化
 
@@ -232,22 +244,9 @@ public class FarlandsTick {
         if (windowChanged || cleanupOpen) {
             cleanupOpen = SectionLifecycle.cleanup(server);
         }
-        // 重进瞬间窗口未建立时加载的 chunk 读回兜底；内部 budget 32/tick、窗口空时零开销早退。
-        if (tickCount % 5 == 0) {
-            SectionLifecycle.retryPendingReads(server);
-        }
-        // 每 tick 唤醒编码消费者：编码在 ENCODE_POOL 上做，主线程只做唤醒与记账。这里同时是被「写入者
-        // 在途」挡回的单元的兜底唤醒来源，延迟上限一 tick。
-        SectionLifecycle.tick();
 
-        // 地形管线：每 tick 唤醒生成消费，不超过 maxGenTasksPerTick。
-        GenQueue.tick();
-        // 动态扫描：每 tick 从玩家当前位置螺旋扫描视距内未生成的 chunk 补入队。
-        GenQueue.scanAndEnqueue(server);
-        // 结构相驱动：重试那些在等 ±8 壳齐的 chunk，过了就跑挂起的续作。
-        StructureDriver.tick();
-        // 数据就绪驱动：当 tick 变成就绪的 chunk 在同一 tick 放行 promotion 的两个 future。
-        ChunkReadiness.drive();
+        // 地形管线：调度器是地形侧唯一的每 tick 入口，准入、派发、重扫都在里面。
+        Scheduler.tick();
         // 兼容层的每 tick 钩子，排在所有核心驱动之后：它只驱动本 port 之外的请求方，例如 Chunky 预生成。
         for (Consumer<MinecraftServer> sink : TICK_SINKS) {
             sink.accept(server);

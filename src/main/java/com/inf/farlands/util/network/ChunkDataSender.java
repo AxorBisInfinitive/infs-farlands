@@ -174,6 +174,8 @@ public final class ChunkDataSender {
         PlayerWindowState state = WINDOW_STATES.get(id);
 
         if (state == null || !state.dimension.equals(dim)) {
+            // 换维度或首次：键里没有维度，旧维度的同坐标条目必须先清掉，否则会被当成新维度的待发项。
+            PENDING_QUEUES.remove(id);
             WINDOW_STATES.put(id, new PlayerWindowState(centerY, dim));
             int min = windowMinSection(centerY);
             int max = windowMaxSection(centerY);
@@ -332,6 +334,11 @@ public final class ChunkDataSender {
         outer: for (Map.Entry<Long, Set<Integer>> e : sorted) {
             int cx = ChunkPos.getX(e.getKey());
             int cz = ChunkPos.getZ(e.getKey());
+            // 不在跟踪面：剪掉，否则队列随探索单调增长；换维度后残留的同坐标条目也在这一句里被剪。
+            if (!player.getChunkTrackingView().contains(new ChunkPos(cx, cz))) {
+                queue.remove(e.getKey());
+                continue;
+            }
             LevelChunk lc = SectionLifecycle.latestChunk(level, cx, cz);
             if (lc == null) {
                 queue.remove(e.getKey()); // 未加载：剪掉，重载时标记或 chunk 包会补

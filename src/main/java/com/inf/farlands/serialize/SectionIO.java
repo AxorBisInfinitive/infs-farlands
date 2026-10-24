@@ -11,15 +11,11 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.function.Consumer;
-
-import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
-import it.unimi.dsi.fastutil.ints.IntSet;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ChunkMap;
@@ -63,9 +59,7 @@ public final class SectionIO {
     private static final Map<Path, SectionStorage> cache = new LinkedHashMap<>(FarlandsConfig.fsaCacheLimit, 0.75f,
             true);
 
-    /** chunkKey 到读回在途 sectionY 集合。 */
-    private static final ConcurrentHashMap<Long, IntSet> readingInFlight = new ConcurrentHashMap<>();
-
+    /** 读回在途的载体已搬进 {@link SectionState#READING}，本类只做转调。 */
     public record DecodedWithSy(int sectionY, SectionSerializer.DecodedSection decoded) {
     }
 
@@ -341,57 +335,41 @@ public final class SectionIO {
         }
     }
 
-    // ---- 读回在途 ----
+    // ---- 读回在途，载体在 SectionState ----
 
-    public static IntSet readingSet(long chunkKey) {
-        return readingInFlight.get(chunkKey);
+    public static boolean isReading(LevelChunk chunk, int sectionY) {
+        SectionState state = SectionStage.stateOrNull(chunk, sectionY);
+        return state != null && state.isReading();
     }
 
-    public static boolean isReading(long chunkKey, int sectionY) {
-        IntSet set = readingInFlight.get(chunkKey);
-        return set != null && set.contains(sectionY);
-    }
-
-    /** 该 chunk 是否有读回在途。只回答有无，不把可变的集合交给调用方。 */
-    public static boolean isReadingAny(long chunkKey) {
-        IntSet set = readingInFlight.get(chunkKey);
-        return set != null && !set.isEmpty();
+    /** 该 chunk 是否有读回在途。只回答有无。 */
+    public static boolean isReadingAny(LevelChunk chunk) {
+        return SectionStage.anyReading(chunk);
     }
 
     public static void markReading(LevelChunk chunk, int sectionY) {
-        readingInFlight.computeIfAbsent(chunk.getPos().pack(), k -> new IntOpenHashSet()).add(sectionY);
+        SectionState state = SectionStage.stateOf(chunk, sectionY);
+        if (state != null) {
+            state.markReading();
+        }
     }
 
     public static void markReadingBatch(LevelChunk chunk, Iterable<Integer> sectionYs) {
-        long key = chunk.getPos().pack();
-        IntSet set = readingInFlight.computeIfAbsent(key, k -> new IntOpenHashSet());
         for (int sy : sectionYs) {
-            set.add(sy);
+            markReading(chunk, sy);
         }
     }
 
     public static void unmarkReading(LevelChunk chunk, int sectionY) {
-        long key = chunk.getPos().pack();
-        IntSet set = readingInFlight.get(key);
-        if (set != null) {
-            set.remove(sectionY);
-            if (set.isEmpty()) {
-                readingInFlight.remove(key, set);
-            }
+        SectionState state = SectionStage.stateOrNull(chunk, sectionY);
+        if (state != null) {
+            state.clearReading();
         }
     }
 
     public static void unmarkReadingBatch(LevelChunk chunk, Iterable<Integer> sectionYs) {
-        long key = chunk.getPos().pack();
-        IntSet set = readingInFlight.get(key);
-        if (set == null) {
-            return;
-        }
         for (int sy : sectionYs) {
-            set.remove(sy);
-        }
-        if (set.isEmpty()) {
-            readingInFlight.remove(key, set);
+            unmarkReading(chunk, sy);
         }
     }
 
@@ -414,5 +392,23 @@ public final class SectionIO {
         } catch (Exception e) {
             task.run(); // 反射失败就在当前线程执行，属防御
         }
+    }
+
+    /**
+     * 当前线程是否是该 level 的主线程执行器所在线程。
+     *
+     * <p>落档体据此决定内联执行还是 marshal：主线程上内联，因为阻塞取数期间 tick 不会跑；池线程上
+     * marshal，因为档位只能由主线程写。
+     */
+    public static boolean isMainThread(ServerLevel level) {
+        try {
+            Object main = F_MAIN_EXECUTOR.get(level.getChunkSource().chunkMap);
+            if (main instanceof net.minecraft.util.thread.BlockableEventLoop<?> loop) {
+                return loop.isSameThread();
+            }
+        } catch (Exception e) {
+            // 反射失败按非主线程处理，走 marshal 更保守。
+        }
+        return false;
     }
 }

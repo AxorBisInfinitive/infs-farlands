@@ -32,6 +32,7 @@ public abstract class ServerLevelEntityTickMixin {
         if (tickRateManager.isEntityFrozen(entity)) {
             return true;
         }
-        return !entity.isAlwaysTicking() && !EntitySectionWindow.inAnyWindow(entity.getBlockY() >> 4);
+        return !entity.isAlwaysTicking() && !EntitySectionWindow.inAnyWindow(entity.level().dimension(),
+                entity.getBlockY() >> 4);
     }
 }

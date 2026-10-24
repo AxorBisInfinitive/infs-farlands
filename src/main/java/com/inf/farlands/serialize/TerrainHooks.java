@@ -1,17 +1,21 @@
 package com.inf.farlands.serialize;
 
 import com.inf.farlands.terrain.pipeline.GenQueue;
+import com.inf.farlands.terrain.pipeline.Scheduler;
 
 import net.minecraft.world.level.chunk.LevelChunk;
 
 /**
  * fsa 与 terrain 的接线点。
  *
- * 旧仓库这两处是 GenQueue 的直接调用，本 port 收口到本类，让 fsa 侧只依赖这里：
- *   isChunkBusy 对应 GenQueue.isChunkBusy。生成或光照在途时 fsa 不清理、不卸载写盘，属于保守跳过。
- *   isBiomeFilling 对应 GenQueue.isBiomeFilling。群系填充会换掉段的 biomes 容器，编码时同样不能撞上。
- *   enqueueGen 对应 GenQueue.enqueueChunk 与 GenQueue.enqueue。读回完成后把 chunk 或单个 section
- *               送入生成队列，由 isOrAfter(TERRAIN) 自动跳过已读回的 section。
+ * <p>三条：
+ *
+ * <ul>
+ * <li>{@code isChunkBusy} 与 {@code isBiomeFilling} 是「此刻不能序列化这个段」的两个判据，前者读
+ * 所有权表的三相，后者读群系在途集合。</li>
+ * <li>{@code enqueueGen} 是读回完成之后的信号：通知调度器该 chunk 在窗口内可能想要工作。入队的判据
+ * 在调度器的准入，本类不做过滤。</li>
+ * </ul>
  */
 public final class TerrainHooks {
 
@@ -27,13 +31,8 @@ public final class TerrainHooks {
         return GenQueue.isBiomeFilling(chunk);
     }
 
-    /** 整 chunk 入生成队列，用于整个 chunk 读回完成。 */
-    public static void enqueueGen(LevelChunk chunk) {
-        GenQueue.enqueueChunk(chunk);
-    }
-
-    /** 单 section 入生成队列，用于窗口滑入时的单 section 读回完成。 */
+    /** 读回完成后的信号。sectionY 只表达语义，调度器按窗口并集或面重算范围。 */
     public static void enqueueGen(LevelChunk chunk, int sectionY) {
-        GenQueue.enqueue(chunk, sectionY);
+        Scheduler.submit(chunk);
     }
 }

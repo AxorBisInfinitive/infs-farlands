@@ -21,7 +21,8 @@ public abstract class LevelMixin {
 
     @Overwrite
     public boolean shouldTickBlocksAt(BlockPos pos) {
-        if ((Object) this instanceof ServerLevel && !EntitySectionWindow.inAnyWindow(pos.getY() >> 4)) {
+        if ((Object) this instanceof ServerLevel
+                && !EntitySectionWindow.inAnyWindow(((Level) (Object) this).dimension(), pos.getY() >> 4)) {
             return false;
         }
         return ((Level) (Object) this).shouldTickBlocksAt(ChunkPos.pack(pos));
@@ -36,7 +37,8 @@ public abstract class LevelMixin {
             return;
         }
         int sectionY = pos.getY() >> 4;
-        if (EntitySectionWindow.isOutsideAllWindows(sectionY, FarlandsConfig.sectionCleanupMargin)) {
+        if (EntitySectionWindow.isOutsideAllWindows(self.dimension(), sectionY,
+                FarlandsConfig.sectionCleanupMargin)) {
             cir.setReturnValue(false);
             return;
         }

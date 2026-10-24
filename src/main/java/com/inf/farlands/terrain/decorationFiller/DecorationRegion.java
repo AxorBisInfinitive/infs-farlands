@@ -90,7 +90,7 @@ import net.minecraft.world.ticks.ScheduledTick;
 public final class DecorationRegion implements WorldGenLevel {
 
     /**
-     * 写域半径。与 {@link DecorationClaim} 同源，两边都由 vanilla 的 blockStateWriteRadius(1) 定。
+     * 写域半径。与所有权表的 DECORATED 相同，两边都由 vanilla 的 blockStateWriteRadius(1) 定。
      */
     private static final int WRITE_RADIUS = 1;
 
@@ -294,8 +294,12 @@ public final class DecorationRegion implements WorldGenLevel {
     /**
      * 读域内视为有 chunk。语义与 vanilla 同名方法一致：只看这一生成步的依赖半径，不看 chunk 是否
      * 真的加载；本步的写依赖是写域，读依赖是读域，取后者。
+     *
+     * <p>父接口在 26.1.2 把这个方法标了 {@code @Deprecated}，但它仍是抽象方法，实现类必须给出实现；
+     * 屏蔽只覆盖这一处，本类其它弃用调用照旧会报。
      */
     @Override
+    @SuppressWarnings("deprecation")
     public boolean hasChunk(int chunkX, int chunkZ) {
         return Math.max(Math.abs(chunkX - this.centerChunkX), Math.abs(chunkZ - this.centerChunkZ)) <= this.readRadius;
     }

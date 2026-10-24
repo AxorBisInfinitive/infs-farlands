@@ -4,6 +4,7 @@ import com.inf.farlands.serialize.SectionStage;
 import com.inf.farlands.terrain.BiomeSystem;
 import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.debug.StageMetrics;
+import com.inf.farlands.terrain.pipeline.Scheduler;
 import com.inf.farlands.util.window.EntitySectionWindow;
 import com.inf.farlands.util.world.WorldBounds;
 
@@ -32,7 +33,7 @@ public final class BiomeFiller {
      */
     public static void fillChunkBiomes(ServerLevel level, LevelChunk chunk) {
         BiomeSystem sys = ((LevelSystems) level).biomeSystem();
-        EntitySectionWindow.forEachSectionInAnyWindow(sy -> seedSection(level, chunk, sys, sy));
+        EntitySectionWindow.forEachSectionInAnyWindow(level.dimension(), sy -> seedSection(level, chunk, sys, sy));
     }
 
     /** 窗口滑入补触发：单 section，stage 小于 BIOMES 才填。主线程。 */
@@ -66,7 +67,7 @@ public final class BiomeFiller {
             long t0 = System.nanoTime();
             sys.fillBiomes(level, chunk, sectionY, sectionY);
             StageMetrics.stageWork(StageMetrics.STAGE_BIOMES, System.nanoTime() - t0);
-            SectionStage.setStage(chunk, sectionY, SectionStage.BIOMES);
+            Scheduler.stage(chunk, new int[] { sectionY }, SectionStage.BIOMES);
             StageMetrics.sectionsIn(1L);
             StageMetrics.stageSections(StageMetrics.STAGE_BIOMES, 1);
         }
