@@ -126,7 +126,11 @@ public final class Scheduler {
     private static long budgetWindowStartMillis;
 
     /**
-     * 当前窗口剩余的成功提交额度。
+     * 当前窗口剩余的候选考察额度，单位是「看过几个候选」。
+     *
+     * <p>计费点在派发循环的顶部，不在提交成功处：一次派发只要走到某个候选身上就付出成本，无论它最终
+     * 被接受还是被拒。只计成功提交时，全被拒的状态下额度不降，早退永不触发，于是每一次 submit 都付一遍
+     * 全表快照与逐候选取段，读数上表现为服务端线程持续九成单核。
      *
      * <p>两个字段只在服务端主线程读写：{@code dispatch} 只由 {@link #tick()} 调用，而 tick 的入口是
      * 服务端 tick、两个等待泵与建世界期的预加载循环，前两者各自先判 runningThread；{@code submit} 在
@@ -292,11 +296,14 @@ public final class Scheduler {
      * 派发一次：按距离排序逐个准入，本窗口的额度用完就停。
      *
      * <p>额度是<b>跨派发共享</b>的，见 {@link #openBudgetWindow}：同一窗口内由 tick、两个等待泵与
-     * 各次 submit 触发的多次派发，合计最多提交 {@code maxGenTasksPerTick} 个作业。它不是「每次派发
+     * 各次 submit 触发的多次派发，合计最多考察 {@code maxGenTasksPerTick} 个候选。它不是「每次派发
      * 一份」，也不是「每 tick 一份」。正常 20 TPS 下窗口与 tick 同档，tick 被拉长时窗口仍按 50 毫秒
      * 滚动，那时真实刻度是墙钟。
      *
-     * <p>额度只计<b>成功提交</b>：认领失败等于没办事，不扣。
+     * <p>额度计<b>考察过的候选</b>，在循环顶部扣，与接受还是拒绝无关。一次考察要付快照位置、段集合
+     * 与欠账计的读，全被拒时这批成本照样付了；只计成功提交会让这条路径在全拒状态下无限重付。
+     *
+     * <p>退避未到期的候选不进快照：它们在循环里也只是被跳过，却要先占一次排序的位置。
      */
     private static void dispatch() {
         openBudgetWindow();
@@ -308,13 +315,19 @@ public final class Scheduler {
         if (CANDIDATES.isEmpty()) {
             return;
         }
+        long now = System.currentTimeMillis();
         List<Map.Entry<Long, Candidate>> snapshot = new ArrayList<>(CANDIDATES.entrySet());
+        snapshot.removeIf(e -> e.getValue().dueAtMillis > now);
+        if (snapshot.isEmpty()) {
+            return;
+        }
         snapshot.sort(Comparator.comparingLong(e -> distanceOf(e.getValue())));
         Map<ServerLevel, SectionLifecycle.ChunkCursor> cursors = new HashMap<>();
         for (Map.Entry<Long, Candidate> entry : snapshot) {
             if (budgetLeft <= 0) {
                 break;
             }
+            budgetLeft--;
             long key = entry.getKey();
             Candidate candidate = entry.getValue();
             LevelChunk chunk = candidate.chunk;
@@ -323,7 +336,6 @@ public final class Scheduler {
                 CANDIDATES.remove(key, candidate);
                 continue;
             }
-            long now = System.currentTimeMillis();
             if (now < candidate.dueAtMillis) {
                 continue;
             }
@@ -385,7 +397,6 @@ public final class Scheduler {
                 continue;
             }
             if (deco && DecorationFiller.trySubmitDecoration(chunk)) {
-                budgetLeft--;
                 continue;
             }
             if (!gen) {
@@ -410,9 +421,8 @@ public final class Scheduler {
                 }
                 continue;
             }
-            // 认领失败等于没派发，不扣预算：扣了就是把余量记在一件没发生的事上。
             if (GenQueue.enqueueTask(chunk, sections)) {
-                budgetLeft--;
+                continue;
             } else {
                 // 候选已在派发之前离表，这里必须重投。TERRAIN 认领是瞬时争用，退避上限约十二秒；
                 // 期间的收尾还会再提交一次同一个 chunk，两路都进候选表，同键覆盖，无害。

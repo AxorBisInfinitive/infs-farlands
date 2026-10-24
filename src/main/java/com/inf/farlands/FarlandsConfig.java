@@ -107,8 +107,8 @@ public class FarlandsConfig {
     // 地形管线
 
     public static final ConfigEntry<Integer> MAX_GEN_TASKS_PER_TICK = CONFIG.setInt("maxGenTasksPerTick")
-            .comment("en_us", "Max terrain-pipeline gen task submissions per 50ms window")
-            .comment("zh_cn", "每 50 毫秒窗口内提交的地形生成任务上限")
+            .comment("en_us", "Max terrain-pipeline candidates examined per 50ms window")
+            .comment("zh_cn", "每 50 毫秒窗口内考察的地形候选上限")
             .range(1, 65536)
             .define(2000)
             .build();
