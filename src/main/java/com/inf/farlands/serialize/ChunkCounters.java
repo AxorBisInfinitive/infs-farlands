@@ -200,6 +200,26 @@ public final class ChunkCounters {
         }
     }
 
+    /**
+     * 只读查 FULL 令牌是否已用，供加载页的网格读数。
+     *
+     * <p>不能拿 {@link #claimFull} 当查询：那是令牌，读一次就把这次补发吃掉，该 chunk 的 FULL 从此再也补不上，
+     * 加载页也就永不关闭。本方法与 {@link #isWindowReadDone} 同形，只读不写。
+     */
+    public static boolean isFullDone(LevelChunk chunk) {
+        long identity = identityOf(chunk);
+        if (identity == 0L) {
+            return false;
+        }
+        ChunkCounters c = COUNTERS.get(identity);
+        if (c == null) {
+            return false;
+        }
+        synchronized (c) {
+            return c.fullDone;
+        }
+    }
+
     // ---- 实例实现，全部在实例上同步 ----
 
     private synchronized void materialize(LevelChunk chunk, int sectionY) {

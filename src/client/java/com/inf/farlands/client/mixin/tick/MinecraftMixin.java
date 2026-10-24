@@ -2,6 +2,7 @@ package com.inf.farlands.client.mixin.tick;
 
 import com.inf.farlands.client.ClientWorldState;
 import com.inf.farlands.client.FarlandsClientTick;
+import com.inf.farlands.terrain.debug.LoadStageSnapshot;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 
@@ -21,7 +22,8 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * 客户端 tick 末尾入口，与服务端那条 tick 钩子对称；另外两条卸关卡清理，以及世界创建期的窗口消息泵。
+ * 客户端 tick 末尾入口，与服务端那条 tick 钩子对称；另外两条卸关卡清理、世界创建期的窗口消息泵，以及加载页
+ * 网格快照的清空。
  *
  * Minecraft.tick 每游戏 tick 恰一次，第一句就自增 clientTickCount，所以 RETURN 处拿到的就是
  * 当前 tick 号。入口签名与服务端那条一致取 int，故此处收窄。回收逻辑在
@@ -47,6 +49,8 @@ public class MinecraftMixin {
     private void farlands$clearOnDisconnect(Screen screen, boolean keepResourcePacks, boolean stopSound,
             CallbackInfo ci) {
         ClientWorldState.clearOnLevelDrop();
+        // 加载页的网格快照跟着旧世界一起丢掉，否则下一个世界的首帧会画上一个世界的格子。
+        LoadStageSnapshot.clear();
     }
 
     /**
@@ -55,6 +59,7 @@ public class MinecraftMixin {
     @Inject(method = "clearClientLevel(Lnet/minecraft/client/gui/screens/Screen;)V", at = @At("RETURN"))
     private void farlands$clearOnLevelClear(Screen screen, CallbackInfo ci) {
         ClientWorldState.clearOnLevelDrop();
+        LoadStageSnapshot.clear();
     }
 
     /**

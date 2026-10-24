@@ -9,6 +9,7 @@ import com.inf.farlands.serialize.SectionIO;
 import com.inf.farlands.serialize.SectionLifecycle;
 import com.inf.farlands.serialize.SectionStage;
 import com.inf.farlands.terrain.biomeFiller.BiomeFiller;
+import com.inf.farlands.terrain.debug.LoadStageSnapshot;
 import com.inf.farlands.terrain.pipeline.GenQueue;
 import com.inf.farlands.terrain.pipeline.Scheduler;
 import com.inf.farlands.terrain.pipeline.SpawnPreload;
@@ -244,6 +245,8 @@ public abstract class SpawnPreloadMixin {
                 cache.tick(() -> false, false);
                 SectionIO.drainMainThreadTasks(server);
                 Scheduler.tick();
+                // 加载页网格读数：快照自己按墙钟限流，这里每轮调一次是廉价的。
+                LoadStageSnapshot.publish(level, center, minSy, maxSy, FARLANDS_PRELOAD_TICKET_RADIUS);
                 rounds++;
                 // 兜底重扫：等邻居的候选会在退避上限处被丢掉，而邻居落档之后不一定有人再提交它。
                 // 每 N 轮把判据圈整圈重投一次，等于给这些等待续期；圈外不碰，所以不会把几何死区
@@ -392,6 +395,9 @@ public abstract class SpawnPreloadMixin {
                 // 而 prepareLevels 期间的 waitUntilNextTick 可能不再抽各 level 的 chunk 执行器，
                 // 与 GenQueue.awaitIdle 的同形处理一致。不抽它，收尾永远落不下来，认领被一直持有。
                 SectionIO.drainMainThreadTasks(server);
+                // 加载页网格读数：本循环本来就按 tick 节奏走，快照自己再按墙钟限流。
+                LoadStageSnapshot.publish(level, new ChunkPos(spawnCx, spawnCz), minSy, maxSy,
+                        FARLANDS_PRELOAD_TICKET_RADIUS);
                 ready = farlands$countReady(level, spawnCx, spawnCz, minSy, maxSy);
                 long now = System.currentTimeMillis();
                 if (ready != lastReady) {
