@@ -222,7 +222,7 @@ public final class GenQueue {
      *
      * <p>准入的判据在 {@link Scheduler#tick()}，本方法不再过滤：调用方已判过 A、B、C。
      */
-    static void enqueueTask(LevelChunk chunk, int[] preloadSections) {
+    static void enqueueTask(LevelChunk chunk, int[] preloadSections, long dispatchSeq) {
         if (!(chunk.getLevel() instanceof ServerLevel level)) {
             return;
         }
@@ -232,12 +232,8 @@ public final class GenQueue {
         }
         ACTIVE.incrementAndGet();
         try {
-            GenTask task = new GenTask(chunk, preloadSections, owner);
-            if (FarlandsConfig.logScheduler) {
-                InfsFarlands.LOGGER.info("FLJOB start dim={} chunk={},{} owner={} preload={}",
-                        level.dimension().identifier(), chunk.getPos().x(), chunk.getPos().z(), owner,
-                        preloadSections != null);
-            }
+            GenTask task = new GenTask(chunk, preloadSections, owner, dispatchSeq);
+            SchedulerMetrics.jobStarted();
             POOL.submit(task::execute);
         } catch (RejectedExecutionException e) {
             ACTIVE.decrementAndGet();
@@ -289,11 +285,7 @@ public final class GenQueue {
         LevelChunk chunk = task.chunk();
         if (chunk.getLevel() instanceof ServerLevel level) {
             OwnershipTable.releaseChunk(level, OwnershipTable.TERRAIN, chunk.getPos(), task.genOwner());
-            if (FarlandsConfig.logScheduler) {
-                InfsFarlands.LOGGER.info("FLJOB end dim={} chunk={},{} owner={} segs={} carved={}",
-                        level.dimension().identifier(), chunk.getPos().x(), chunk.getPos().z(), task.genOwner(),
-                        task.lastSegments(), task.lastCarved());
-            }
+            SchedulerMetrics.jobEnded(task.lastSegments(), task.lastCarved());
         }
         ACTIVE.decrementAndGet();
         Scheduler.submit(chunk);
@@ -308,7 +300,8 @@ public final class GenQueue {
      * 会撞调色板的检测；装饰的段写取那把锁，所以它不在此列。
      */
     public static boolean isGeneratingOrLighting(LevelChunk chunk) {
-        long key = identityOf(chunk);
+        // 所有权表按坐标键记，身份键喂进去恒不命中：生成侧的 TERRAIN 认领因此从来看不到。
+        long key = chunk.getPos().pack();
         return OwnershipTable.anyGenClaim(key)
                 || OwnershipTable.isLightedClaimed(chunk.getPos().x(), chunk.getPos().z());
     }

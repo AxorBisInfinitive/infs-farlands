@@ -1,5 +1,6 @@
 package com.inf.farlands.terrain.pipeline;
 
+import java.util.Map;
 import java.util.function.IntConsumer;
 
 import com.inf.farlands.serialize.SectionIO;
@@ -14,6 +15,7 @@ import net.minecraft.server.level.ChunkLevel;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 
 /**
@@ -235,12 +237,60 @@ public final class DependencyTable {
     }
 
     /**
+     * 给定段集合里档位低于 {@code limit} 的段数。
+     *
+     * <p>集合由 {@code Scheduler.sectionsFor} 产出，已按可玩界与在读过滤并升序去重。准入的欠账判据与
+     * 第七行的完成判据都走这里，两个判据因此与 {@code GenTask} 的收集读同一份段集合。
+     */
+    public static int pendingBelowIn(LevelChunk chunk, int[] sections, int limit) {
+        int count = 0;
+        for (int sy : sections) {
+            if (SectionStage.getStage(chunk, sy) < limit) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
      * 装饰的写域九格门，表侧的求值：每一格都在场、都有已物化的 section、且已有 section 都到
      * {@code CARVERS}，在读的 section 除外。不可玩界的邻居只要求在场，与今天那句例外同源。
      */
     public static boolean neighborGate(LevelChunk center) {
+        return gateFailure(center, false) == null;
+    }
+
+    /**
+     * 九格门第一个不成立的原因，形如 `1,-1:no-stage`、`0,1:stage=1@sy=-3`、`2,0:absent`；门成立返回 null。
+     *
+     * <p>与 {@link #neighborGate} 共用 {@link #gateFailure}，只有一份循环：诊断版与判据版分头实现会走偏。
+     * 只在门不成立时才构造串，正常路径不分配。
+     */
+    public static String neighborGateDetail(LevelChunk center) {
+        return gateFailure(center, true);
+    }
+
+    /**
+     * 门的求值本体。成立返回 null；不成立时，{@code describe} 为假返回空串常量，为真返回原因。
+     *
+     * <p>三个 false 出口分别对应三种互斥情形：壳不在场、可写集合为空、可写集合里有低于
+     * {@code CARVERS} 的段。第三条会把段号一起打出来。
+     *
+     * <p>判据面取**档位表与段容器的交集**，两头都不能放宽：
+     *
+     * <ul>
+     * <li>只遍历容器会把构造期的窗口默认段算成 {@code UNPROCESSED}。那些段被物化但从不落档，本来
+     * 就不在该被生成的集合里，按容器判会让九格恒假。</li>
+     * <li>只遍历档位表会把读回标记留下的残留算进来。那些条目容器里没有，装饰也写不进去，
+     * 按整表判会让周围九格的装饰被永久挡死。</li>
+     * </ul>
+     *
+     * <p>交集与写门同宽：{@code DecorationRegion.setBlock} 对未物化的段直接返回假。这条是一条耦合，
+     * 若将来写门改成会物化的取法，例如 {@code getSection}，判据面要重新算。
+     */
+    private static String gateFailure(LevelChunk center, boolean describe) {
         if (!(center.getLevel() instanceof ServerLevel level)) {
-            return false;
+            return describe ? "no-level" : "";
         }
         SectionLifecycle.ChunkCursor cursor = SectionLifecycle.cursor(level);
         ChunkPos pos = center.getPos();
@@ -250,24 +300,40 @@ public final class DependencyTable {
                 int cz = pos.z() + dz;
                 LevelChunk neighbor = cursor.at(cx, cz);
                 if (neighbor == null) {
-                    return false;
+                    return describe ? dx + "," + dz + ":absent" : "";
                 }
                 if (!WorldBounds.inChunkRange(cx, cz)) {
                     continue;
                 }
-                boolean[] any = { false };
-                boolean[] belowCarvers = { false };
+                int[] lowest = { -1 };
+                int[] lowestSy = { 0 };
+                int[] count = { 0 };
+                // 判据面是「档位表与段容器的交集」：只算流水线真的碰过、并且真的可写的段。
+                //
+                // 不能只遍历容器：构造期的窗口默认段会被物化但从不落档，它们读出来是 UNPROCESSED，
+                // 而它们本来就不在该被生成的集合里，按容器判会让每一格都恒假。
+                // 也不能只遍历档位表：读回标记会给盘上无数据的位置建条目，那些条目容器里没有、
+                // 装饰也写不进去，按整表判会让周围九格的装饰被永久挡死。
+                Map<Integer, LevelChunkSection> container = ((WindowedChunk) neighbor).windowedAllSections();
                 SectionStage.forEachStage(neighbor, (sy, stage) -> {
-                    any[0] = true;
-                    if (stage < SectionStage.CARVERS && !SectionIO.isReading(neighbor, sy)) {
-                        belowCarvers[0] = true;
+                    if (sy == null || !container.containsKey(sy)) {
+                        return;
+                    }
+                    count[0]++;
+                    if (stage < SectionStage.CARVERS && !SectionIO.isReading(neighbor, sy)
+                            && (lowest[0] < 0 || stage < lowest[0])) {
+                        lowest[0] = stage;
+                        lowestSy[0] = sy;
                     }
                 });
-                if (!any[0] || belowCarvers[0]) {
-                    return false;
+                if (count[0] == 0) {
+                    return describe ? dx + "," + dz + ":no-stage" : "";
+                }
+                if (lowest[0] >= 0) {
+                    return describe ? dx + "," + dz + ":stage=" + lowest[0] + "@sy=" + lowestSy[0] : "";
                 }
             }
         }
-        return true;
+        return null;
     }
 }

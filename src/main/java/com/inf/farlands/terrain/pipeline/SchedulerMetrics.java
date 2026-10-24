@@ -35,6 +35,17 @@ public final class SchedulerMetrics {
 
     private static final AtomicLong READBACK_QUOTA = new AtomicLong();
 
+    /** 本窗启动的生成作业数。 */
+    private static final AtomicLong JOBS = new AtomicLong();
+
+    /** 其中段与 carve 都为空的作业数，空转的直接读数。 */
+    private static final AtomicLong JOB_NOOP = new AtomicLong();
+
+    /** 本窗全部作业收集到的段数与 carve 出的段数之和。 */
+    private static final AtomicLong JOB_SEGMENTS = new AtomicLong();
+
+    private static final AtomicLong JOB_CARVED = new AtomicLong();
+
     private SchedulerMetrics() {
     }
 
@@ -78,14 +89,30 @@ public final class SchedulerMetrics {
         READBACK_QUOTA.incrementAndGet();
     }
 
+    /** 一个生成作业启动。 */
+    public static void jobStarted() {
+        JOBS.incrementAndGet();
+    }
+
+    /** 一个生成作业收尾，带上它收集到的段数与 carve 出的段数。 */
+    public static void jobEnded(int segments, int carved) {
+        JOB_SEGMENTS.addAndGet(segments);
+        JOB_CARVED.addAndGet(carved);
+        if (segments == 0 && carved == 0) {
+            JOB_NOOP.incrementAndGet();
+        }
+    }
+
     /** 打印并清零本窗计数。 */
     public static void flush() {
         InfsFarlands.LOGGER.info(
                 "FLSCHED emitted={} blocked={} repost={} rejectTicket={} rejectFace={} rejectReady={} "
-                        + "rejectWindow={} lightQuota={} decoQuota={} readbackQuota={} faces={}",
+                        + "rejectWindow={} lightQuota={} decoQuota={} readbackQuota={} jobs={} jobNoop={} "
+                        + "jobSegs={} jobCarved={} faces={}",
                 EMITTED.getAndSet(0), BLOCKED.getAndSet(0), REPOST.getAndSet(0), REJECT_TICKET.getAndSet(0),
                 REJECT_FACE.getAndSet(0), REJECT_READY.getAndSet(0), REJECT_WINDOW.getAndSet(0),
                 LIGHT_QUOTA.getAndSet(0), DECO_QUOTA.getAndSet(0), READBACK_QUOTA.getAndSet(0),
+                JOBS.getAndSet(0), JOB_NOOP.getAndSet(0), JOB_SEGMENTS.getAndSet(0), JOB_CARVED.getAndSet(0),
                 Scheduler.faces());
     }
 
@@ -101,6 +128,10 @@ public final class SchedulerMetrics {
         LIGHT_QUOTA.set(0);
         DECO_QUOTA.set(0);
         READBACK_QUOTA.set(0);
+        JOBS.set(0);
+        JOB_NOOP.set(0);
+        JOB_SEGMENTS.set(0);
+        JOB_CARVED.set(0);
     }
 
     /** 每 200 tick 调一次；开关在配置里，关掉时零日志。 */

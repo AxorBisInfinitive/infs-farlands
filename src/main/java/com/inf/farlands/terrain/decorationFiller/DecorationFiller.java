@@ -3,8 +3,11 @@ package com.inf.farlands.terrain.decorationFiller;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import com.inf.farlands.FarlandsConfig;
 import com.inf.farlands.InfsFarlands;
 import com.inf.farlands.light.FarLandsLightEngine;
 import com.inf.farlands.serialize.SectionIO;
@@ -64,6 +67,18 @@ public final class DecorationFiller {
      */
     private static final AtomicInteger ABORT_LOGGED = new AtomicInteger();
 
+    /** 诊断行的限流：同一 chunk 同一原因只打一次。形状与 Scheduler 的同名集合相同。 */
+    private static final Set<Long> REJECT_LOGGED = ConcurrentHashMap.newKeySet();
+
+    /**
+     * 取不到光照域锁时，下一次尝试的间隔，单位毫秒。
+     *
+     * <p>取锁失败来自同片区的光照任务或另一次装饰，持有期是毫秒级，所以这里只做固定间隔的重访，
+     * 不做递增退避：递增需要每个 chunk 一份失败计数，那是又一张在途表。立即重投会把每次失败接成
+     * 下一轮尝试，主线程与池子都烧在同一个 chunk 上。
+     */
+    private static final long LOCK_RETRY_MILLIS = 8L;
+
     /**
      * 某一格的状态变了，受影响的是该 chunk 的写域：把它的九格重新提交给调度器。
      *
@@ -101,31 +116,95 @@ public final class DecorationFiller {
             }
         });
         if (!anyCarvers[0]) {
+            logReject(center, "no-carvers");
             return false;
         }
         if (!DependencyTable.neighborGate(center)) {
+            logReject(center, "gate", FarlandsConfig.logScheduler
+                    ? DependencyTable.neighborGateDetail(center) : null);
             return false;
         }
         ServerLevel level = (ServerLevel) center.getLevel();
+        // 先取光照域锁，再收句柄。反过来的代价实测过：句柄在结构维度要查 729 格的读域，取锁却排在
+        // 它之后，取不到时这 729 次查询已经付掉，77 次失败就是约 5.6 万次无效查询加 77 个池任务。
+        // 代价是持有期含池排队，与那笔浪费相比量级更小。
+        FarLandsLightEngine lightEngine = lightEngineOf(level);
+        long lockOwner = 0L;
+        if (lightEngine != null) {
+            lockOwner = lightEngine.tryLockDomain(center.getPos().x(), center.getPos().z());
+            if (lockOwner == 0L) {
+                logReject(center, "lock");
+                return false;
+            }
+        }
         int readRadius = center.getAllReferences().isEmpty() ? DecorationRegion.READ_RADIUS
                 : StructureDriver.STRUCTURE_READ_RADIUS;
         Long2ObjectMap<LevelChunk> handles = collectHandles(level, center, readRadius);
         if (handles == null) {
+            unlockDomain(lightEngine, center, lockOwner);
+            logReject(center, "no-handles");
             return false;
         }
         long decoOwner = OwnershipTable.tryClaimChunk(level, OwnershipTable.DECORATED, center.getPos());
         if (decoOwner == 0L) {
+            unlockDomain(lightEngine, center, lockOwner);
+            logReject(center, "claimed");
             return false;
         }
         int descentFloorY = descentFloorY(handles, center);
         Key key = keyOf(center);
         DecorationTask task = new DecorationTask(level, center, key, handles, readRadius, descentFloorY,
-                decoOwner);
+                decoOwner, lockOwner);
         if (!GenQueue.submitDecoration(task)) {
             OwnershipTable.releaseChunk(level, OwnershipTable.DECORATED, center.getPos(), decoOwner);
+            unlockDomain(lightEngine, center, lockOwner);
+            logReject(center, "rejected");
             return false;
         }
         return true;
+    }
+
+    /** 释放本类的光照域锁。{@code lockOwner} 为 0 表示没取到，什么都不做。 */
+    private static void unlockDomain(FarLandsLightEngine lightEngine, LevelChunk center, long lockOwner) {
+        if (lockOwner != 0L && lightEngine != null) {
+            lightEngine.unlockDomain(center.getPos().x(), center.getPos().z(), lockOwner);
+        }
+    }
+
+    /**
+     * 诊断行：装饰提交被拒的原因。同一 chunk 同一原因只打一次。
+     *
+     * <p>四个出口原本都是静默的，而「提交了但取不到光照域锁」那条也静默，见
+     * {@link #finishRegionNull}。没有这一行就分不开「没提交」与「提交了但拿不到锁」，
+     * 也就数不出泄漏发生在认领还是域锁上。
+     */
+    private static void logReject(LevelChunk center, String reason) {
+        logReject(center, reason, null);
+    }
+
+    /**
+     * 同上，附带一条原因细节，例如九格门的第一个不成立位置与原因。
+     *
+     * <p>{@code detail} 由调用方在诊断开关打开时才构造，正常路径不分配。
+     */
+    private static void logReject(LevelChunk center, String reason, String detail) {
+        if (!FarlandsConfig.logScheduler) {
+            return;
+        }
+        // 键留 8 位给原因：只留 3 位时 gate、claimed、lock 三者撞在同一位上，先打的那条会把
+        // 后两条吞掉，于是「某个 chunk 后来才变成 claimed」在日志里根本不存在。
+        long key = (center.getPos().pack() << 8) | (reason.hashCode() & 0xFFL);
+        if (!REJECT_LOGGED.add(key)) {
+            return;
+        }
+        ServerLevel level = (ServerLevel) center.getLevel();
+        if (detail == null) {
+            InfsFarlands.LOGGER.info("FLDECO reject reason={} dim={} chunk={},{}",
+                    reason, level.dimension().identifier(), center.getPos().x(), center.getPos().z());
+        } else {
+            InfsFarlands.LOGGER.info("FLDECO reject reason={} detail={} dim={} chunk={},{}",
+                    reason, detail, level.dimension().identifier(), center.getPos().x(), center.getPos().z());
+        }
     }
 
     private record Key(ResourceKey<Level> dimension, long chunkPos) {
@@ -272,8 +351,14 @@ public final class DecorationFiller {
         /** 本任务持有的 DECORATED 认领编号，收尾时带回去释放。 */
         private final long decoOwner;
 
+        /**
+         * 本任务持有的光照域锁编号，0 表示没有引擎可取锁。锁在主线程取、在收尾放，任务体不再自己取：
+         * 取锁失败要在收句柄之前就返回，见 {@code trySubmitDecoration}。
+         */
+        private final long lockOwner;
+
         DecorationTask(ServerLevel level, LevelChunk center, Key key, Long2ObjectMap<LevelChunk> handles,
-                int readRadius, int descentFloorY, long decoOwner) {
+                int readRadius, int descentFloorY, long decoOwner, long lockOwner) {
             this.level = level;
             this.center = center;
             this.key = key;
@@ -281,23 +366,14 @@ public final class DecorationFiller {
             this.readRadius = readRadius;
             this.descentFloorY = descentFloorY;
             this.decoOwner = decoOwner;
+            this.lockOwner = lockOwner;
         }
 
         @Override
         public void run() {
             DecorationRegion region = null;
-            // 持有者编号在外层声明，finally 才捕获得到 try 内赋的值。取域失败时保持 0，收尾不释放。
-            long lockOwner = 0L;
+            long lockOwner = this.lockOwner;
             try {
-                // 光照域锁取在任务体开头，不在提交时：提交时取锁会把池排队的时间也算进持有期，
-                // 那段时间里这一片的光照任务全被挡着。此刻一个方块都还没写，失败直接放弃即可。
-                FarLandsLightEngine lightEngine = lightEngineOf(this.level);
-                if (lightEngine != null) {
-                    lockOwner = lightEngine.tryLockDomain(this.center.getPos().x(), this.center.getPos().z());
-                    if (lockOwner == 0L) {
-                        return; // 收尾照走：撤认领、清在途计数，lockOwner 为 0 不释放任何格
-                    }
-                }
                 DecorationContext.enter();
                 try {
                     region = new DecorationRegion(this.level, this.center, this.handles, this.readRadius,
@@ -372,6 +448,9 @@ public final class DecorationFiller {
      */
     private static void finishRegionNull(ServerLevel level, LevelChunk center, Key key, long lockOwner,
             long decoOwner) {
+        // 这一支是「提交过但没写成方块」的唯一出口。锁在提交时已经取到，所以这里的 lockOwner 非零；
+        // 只有引擎不在场的客户端构造才是 0，那种情况留作 lock 记一笔。
+        logReject(center, lockOwner == 0L ? "lock" : "abort");
         OwnershipTable.releaseChunk(level, OwnershipTable.DECORATED, center.getPos(), decoOwner);
         if (lockOwner != 0L) {
             FarLandsLightEngine lightEngine = lightEngineOf(level);
@@ -380,8 +459,9 @@ public final class DecorationFiller {
             }
         }
         GenQueue.finishDecoration();
-        // 认领已撤：该 chunk 的「装饰写域被占」这一条落了，可能就此就绪，交准入。
-        SectionIO.runOnMainThread(() -> Scheduler.submit(center), level);
+        // 认领已撤：该 chunk 的「装饰写域被占」这一条落了，可能就此就绪，交准入。取锁失败那一支要
+        // 隔一段再试：立即重投会把每次失败接成下一轮 collectHandles 与一次池任务，热环的来源。
+        SectionIO.runOnMainThread(() -> Scheduler.submitLater(center, LOCK_RETRY_MILLIS), level);
     }
 
     /**
@@ -432,6 +512,11 @@ public final class DecorationFiller {
                 BlockEntity blockEntity = e.getValue();
                 blockEntity.setLevel(level);
                 owner.setBlockEntity(blockEntity);
+                // 标脏在这里补：装饰期的方块实体改动发生在池线程上，而那条路上唯一的标脏入口
+                // BlockEntity.setChanged 到 Level.blockEntityChanged 会在非服务端线程上被短路，
+                // 因为它为了一个 unsaved 布尔值要做一次阻塞取数。不在这里补，方块实体的 NBT
+                // 只活在内存里，重进即回退。setBlockEntity 自己不标脏。
+                owner.markUnsaved();
             }
             // 下发标记：写域是九格，邻居的方块也被写过，它们各自的下发要跟着这次装饰走。与升段解耦：
             // 写过就得补发，不管本次有没有可升的段。
@@ -482,5 +567,6 @@ public final class DecorationFiller {
     /** 停服时清空本类的进程级状态。认领表由 `OwnershipTable.clearWorldState` 清。 */
     public static void clearWorldState() {
         ABORT_LOGGED.set(0);
+        REJECT_LOGGED.clear();
     }
 }

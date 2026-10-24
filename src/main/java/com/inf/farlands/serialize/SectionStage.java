@@ -1,13 +1,21 @@
 package com.inf.farlands.serialize;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
 
+import com.inf.farlands.debug.CarveLoopProbe;
+import com.inf.farlands.debug.StageSlotProbe;
+import com.inf.farlands.debug.StageWriteProbe;
 import com.inf.farlands.terrain.debug.StageMetrics;
 import com.inf.farlands.util.map.Long2ObjectStripedMap;
+import com.inf.farlands.util.window.WindowedChunk;
+import com.inf.farlands.util.world.WorldBounds;
+
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 
 import net.minecraft.world.level.chunk.LevelChunk;
 
@@ -106,7 +114,7 @@ public final class SectionStage {
     }
 
     /**
-     * 写档位并同步派生记账。
+     * 写档位并同步派生记账。档位单调不减，降档请求被丢弃；读回走 {@link #restoreStage}。
      *
      * <p>读旧值、写新值、记账三步在同一段的监视器内成对完成。少了这道同步，两个线程并发升同一段
      * 时会各自读到同一个旧档位，跨越同一道阈值的减计数各做一次，计数被多减。
@@ -115,26 +123,72 @@ public final class SectionStage {
      * 不反向取段监视器，因此不成环。
      */
     public static void setStage(LevelChunk chunk, int sectionY, int stage) {
+        write(chunk, sectionY, stage, true);
+    }
+
+    /**
+     * 读回专用的落档：按盘上档无条件写，绕过 {@link #setStage} 的单调闸。
+     *
+     * <p>唯一合法的降档来路是旧格式条目。fsa 条目缺 {@code stage} 键时解码成 {@code UNPROCESSED}，
+     * 读回把它原样恢复，此时段可能已经在内存里被推到更高的档。其余任何路径都不得降档。
+     */
+    public static void restoreStage(LevelChunk chunk, int sectionY, int stage) {
+        write(chunk, sectionY, stage, false);
+    }
+
+    /**
+     * 落档本体。{@code monotone} 为真时拒绝降档。
+     *
+     * <p>闸的必要性来自执行线程：落档体已不再把写转投主线程，池线程直接写，于是两个池线程对同一段
+     * 的两笔写可以乱序落地。一道迟到的低档写会把已经推进的段改回去，使该段重新变成欠账，而欠账会
+     * 立刻再触发一次同样的工作，形成自持环。闸把这一类的第二笔写丢掉。
+     */
+    private static void write(LevelChunk chunk, int sectionY, int stage, boolean monotone) {
         ConcurrentHashMap<Integer, SectionState> m = open(chunk);
         if (m == null) {
+            CarveLoopProbe.drop(chunk, sectionY, stage);
             return;
         }
-        SectionState state = m.computeIfAbsent(sectionY, k -> new SectionState(UNPROCESSED));
+        SectionState state = m.get(sectionY);
+        if (state == null) {
+            state = m.computeIfAbsent(sectionY, k -> new SectionState(UNPROCESSED));
+            // 诊断：新建条目时记一次，标签带入口与目标档，足以反推调用点。
+            StageSlotProbe.created(chunk, sectionY,
+                    (monotone ? "write:" : "restore:") + CarveLoopProbe.stageName(stage));
+        }
         int old;
         synchronized (state) {
             old = state.stage();
+            if (monotone && stage < old) {
+                StageWriteProbe.blockedDown(old, stage);
+                return;
+            }
             state.setStage(stage);
         }
+        // 诊断：新旧档一并交出去，写侧流量因此可按「同档、升档、降档」与旧档分布分开。
+        StageWriteProbe.applied(old, stage);
         ChunkCounters.onStageChange(chunk, sectionY, old, stage);
     }
 
     /** 该段的状态，不存在则建；身份为 0 或已注销返回 null。 */
     public static SectionState stateOf(LevelChunk chunk, int sectionY) {
+        return stateOf(chunk, sectionY, "stateOf:other");
+    }
+
+    /**
+     * 同 {@link #stateOf(LevelChunk, int)}，{@code tag} 只用于诊断，标出是谁在取或建这个条目。
+     */
+    public static SectionState stateOf(LevelChunk chunk, int sectionY, String tag) {
         ConcurrentHashMap<Integer, SectionState> m = open(chunk);
         if (m == null) {
             return null;
         }
-        return m.computeIfAbsent(sectionY, k -> new SectionState(UNPROCESSED));
+        SectionState state = m.get(sectionY);
+        if (state == null) {
+            state = m.computeIfAbsent(sectionY, k -> new SectionState(UNPROCESSED));
+            StageSlotProbe.created(chunk, sectionY, tag);
+        }
+        return state;
     }
 
     /** 该段的状态，不存在返回 null，不建条目。 */
@@ -149,7 +203,7 @@ public final class SectionStage {
 
     /** 标脏。身份为 0 的 chunk（ProtoChunk、客户端）没有状态，空转。 */
     public static void markDirty(LevelChunk chunk, int sectionY) {
-        SectionState state = stateOf(chunk, sectionY);
+        SectionState state = stateOf(chunk, sectionY, "stateOf:dirty");
         if (state != null) {
             state.markDirty();
         }
@@ -207,6 +261,7 @@ public final class SectionStage {
             synchronized (removed) {
                 ChunkCounters.onRemove(chunk, sectionY, removed.stage());
             }
+            CarveLoopProbe.removeSection(chunk, sectionY, removed.stage());
         }
     }
 
@@ -222,7 +277,8 @@ public final class SectionStage {
             return;
         }
         CounterIdentities.unregister(identity);
-        STAGES.remove(identity);
+        ConcurrentHashMap<Integer, SectionState> removed = STAGES.remove(identity);
+        CarveLoopProbe.clearChunk(chunk, identity, removed == null ? 0 : removed.size());
         ChunkCounters.clear(chunk);
     }
 
@@ -320,5 +376,60 @@ public final class SectionStage {
         if (m != null) {
             m.forEach((sy, state) -> consumer.accept(sy, state == null ? UNPROCESSED : state.stage()));
         }
+    }
+
+    /**
+     * 该 chunk 的段号并集：段容器的键并上档位表的键，按可玩段界过滤后升序。
+     *
+     * <p>两个面必须合起来用。档位可以落在容器里没有条目的段上，全空气的段就是这种：它被 fill 算作
+     * 做过地形，档位推到 {@code TERRAIN}，但没有任何方块，容器里没有它的条目。只遍历容器会让这类段
+     * 永远停在 {@code TERRAIN}，而准入按档位判「还有欠账」，于是该 chunk 被无限放行、作业次次空转。
+     */
+    public static int[] sectionYs(LevelChunk chunk) {
+        IntOpenHashSet set = new IntOpenHashSet();
+        for (Integer sy : ((WindowedChunk) chunk).windowedAllSections().keySet()) {
+            if (sy != null && WorldBounds.inSection(sy)) {
+                set.add(sy.intValue());
+            }
+        }
+        forEachStage(chunk, (sy, stage) -> {
+            if (WorldBounds.inSection(sy)) {
+                set.add(sy.intValue());
+            }
+        });
+        int[] years = set.toIntArray();
+        Arrays.sort(years);
+        return years;
+    }
+
+    /**
+     * 档位表里有、段容器里没有的段号，升序。
+     *
+     * <p>这类条目的来源是读回标记：{@link SectionIO#markReading} 会给整个读回窗口逐段建条目，而盘上
+     * 没有数据、段也没有物化的位置建完就再没人碰，标记清掉之后条目留着。它们不在容器的活跃集合里，
+     * 所以 fsa 清理枚举不到；而装饰门若按整张表判，它们会永久挡住周围九格的装饰。
+     *
+     * <p>判据只用容器键集，不涉及窗口：可写集合就是容器，与装饰的写门同宽。
+     */
+    public static int[] stagesWithoutSection(LevelChunk chunk) {
+        long identity = liveIdentity(chunk);
+        if (identity == 0L) {
+            return new int[0];
+        }
+        ConcurrentHashMap<Integer, SectionState> m = STAGES.get(identity);
+        if (m == null) {
+            return new int[0];
+        }
+        Map<Integer, net.minecraft.world.level.chunk.LevelChunkSection> container =
+                ((WindowedChunk) chunk).windowedAllSections();
+        IntOpenHashSet orphans = new IntOpenHashSet();
+        for (Integer sy : m.keySet()) {
+            if (sy != null && !container.containsKey(sy)) {
+                orphans.add(sy.intValue());
+            }
+        }
+        int[] arr = orphans.toIntArray();
+        Arrays.sort(arr);
+        return arr;
     }
 }

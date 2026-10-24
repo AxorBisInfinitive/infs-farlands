@@ -6,7 +6,8 @@ package com.inf.farlands.serialize;
  * <p>档位与标志跨线程可见：编码池读档位与 DIRTY，下发侧读 DIRTY，读回侧读 READING。持有者是主线程
  * 独占的普通字段，只由所有权表读写。
  *
- * <p>标志的读改写在实例锁内，读是 volatile 读。调度器接管之后写者收成主线程一个。
+ * <p>标志的读改写在实例锁内，读是 volatile 读。写点分布在主线程、genPool、backgroundExecutor 与
+ * lightPool 四处，所以档位与标志都按跨线程可见来用，持有者字段仍是主线程独占。
  */
 public final class SectionState {
 

@@ -1,7 +1,11 @@
 package com.inf.farlands.terrain.pipeline;
 
 import com.inf.farlands.InfsFarlands;
+import com.inf.farlands.debug.CarveLoopProbe;
+import com.inf.farlands.serialize.CounterIdentities;
+import com.inf.farlands.serialize.CounterIdentity;
 import com.inf.farlands.serialize.SectionIO;
+import com.inf.farlands.serialize.SectionLifecycle;
 import com.inf.farlands.serialize.SectionStage;
 import com.inf.farlands.terrain.biomeFiller.BiomeFiller;
 import com.inf.farlands.terrain.carverFiller.CarverFiller;
@@ -48,11 +52,15 @@ public final class GenTask {
     private int lastSegments;
     private int lastCarved;
 
-    public GenTask(LevelChunk chunk, int[] preloadSections, long genOwner) {
+    /** 诊断用：派发时领到的全局序号，与 `FLDISP` 那一行按序号对齐。 */
+    private final long dispatchSeq;
+
+    public GenTask(LevelChunk chunk, int[] preloadSections, long genOwner, long dispatchSeq) {
         this.chunk = chunk;
         this.preloadSections = preloadSections;
         this.priority = computePriority(chunk);
         this.genOwner = genOwner;
+        this.dispatchSeq = dispatchSeq;
     }
 
     /** 本任务的认领编号。 */
@@ -101,6 +109,7 @@ public final class GenTask {
             }
             List<int[]> segments = collectSegments();
             this.lastSegments = segments.size();
+            logTaskEntry(serverLevel, segments.size());
             for (int[] seg : segments) {
                 // 先补 biome 再推 TERRAIN。本方法是全流程唯一把 stage 推到 TERRAIN 的地方，放这里就与
                 // 入队顺序无关；若让生成先跑，stage 越过 BIOMES，fillSectionBiomes 的 stage < BIOMES 门
@@ -202,6 +211,59 @@ public final class GenTask {
     }
 
     /**
+     * 诊断：作业入口一行。临时仪器，与同批探针一并删除。
+     *
+     * <p>一次给全判断所需的几栏：对象身份与当前 chunk 是否同一个、记账身份是否还活着、容器段带的档位
+     * 分布、准入用的段数组长度与其中低于 CARVERS 的个数、本次真正收集到的段数，以及 surface 与 carvers
+     * 两道门当场是否成立。
+     *
+     * <p>限流分两条通道：空转与非空转各按 chunk 每秒一条。空转占了作业的绝大多数，共用一个通道会把
+     * 非空转那条挤掉，而判读要的是同一格里两种形态各自的样子。
+     */
+    private void logTaskEntry(ServerLevel level, int collect) {
+        ChunkPos pos = chunk.getPos();
+        boolean sur = SurfaceFiller.hasSurfacePending(chunk);
+        boolean car = CarverFiller.hasCarversPending(chunk);
+        boolean noop = collect == 0 && !sur && !car;
+        if (!CarveLoopProbe.shouldLogTask(pos.pack(), noop)) {
+            return;
+        }
+        long counterId = chunk instanceof CounterIdentity identity ? identity.counterId() : 0L;
+        LevelChunk current = SectionLifecycle.latestChunk(level, pos.x(), pos.z());
+        int[] sections = preloadSections != null ? preloadSections : Scheduler.sectionsFor(chunk);
+        int pending = DependencyTable.pendingBelowIn(chunk, sections, SectionStage.CARVERS);
+        int reading = 0;
+        for (int sy : sections) {
+            if (SectionIO.isReading(chunk, sy)) {
+                reading++;
+            }
+        }
+        InfsFarlands.LOGGER.info(
+                "FLTASK pos={},{} seq={} id={} ctr={} live={} same={} stages={} n={} pk={} rd={} collect={} sur={} car={} noop={}",
+                pos.x(), pos.z(), this.dispatchSeq, System.identityHashCode(chunk), counterId,
+                CounterIdentities.isLive(counterId), current == chunk,
+                stageHistogram(chunk), sections.length, pending, reading, collect, sur, car, noop);
+    }
+
+    /** 诊断：容器段带的档位直方图，下标即档位。 */
+    private static String stageHistogram(LevelChunk chunk) {
+        int[] counts = new int[SectionStage.LIGHTED + 1];
+        SectionStage.forEachStage(chunk, (sy, stage) -> {
+            if (stage >= 0 && stage < counts.length) {
+                counts[stage]++;
+            }
+        });
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < counts.length; i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append(counts[i]);
+        }
+        return sb.append(']').toString();
+    }
+
+    /**
      * 收集该 chunk 的待生成 section 连续段，来源是窗口并集或预加载指定集合。
      * 过滤已 TERRAIN 的 section 与可玩范围，窗口模式额外跳过读回在途的 section。
      */
@@ -217,7 +279,9 @@ public final class GenTask {
             if (SectionStage.isOrAfter(chunk, sy, SectionStage.TERRAIN)) {
                 return;
             }
-            if (preloadSections == null && SectionIO.isReading(chunk, sy)) {
+            // 两种模式都跳过在读段：读回会整体替换段对象，写进旧对象的内容被丢弃，而高度图已被改过。
+            // 过滤与 Scheduler.sectionsFor 同源，缺一条就会让准入放行而这里收不到段。
+            if (SectionIO.isReading(chunk, sy)) {
                 return;
             }
             if (open[0] && sy == curMax[0] + 1) {

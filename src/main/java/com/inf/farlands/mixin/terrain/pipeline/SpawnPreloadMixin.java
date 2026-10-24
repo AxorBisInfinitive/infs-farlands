@@ -4,12 +4,15 @@ import java.util.HashSet;
 import java.util.Set;
 
 import com.inf.farlands.InfsFarlands;
+import com.inf.farlands.serialize.ChunkCounters;
 import com.inf.farlands.serialize.ChunkReadiness;
 import com.inf.farlands.serialize.SectionIO;
 import com.inf.farlands.serialize.SectionLifecycle;
 import com.inf.farlands.serialize.SectionStage;
 import com.inf.farlands.terrain.biomeFiller.BiomeFiller;
+import com.inf.farlands.terrain.pipeline.DependencyTable;
 import com.inf.farlands.terrain.pipeline.GenQueue;
+import com.inf.farlands.terrain.pipeline.OwnershipTable;
 import com.inf.farlands.terrain.pipeline.Scheduler;
 import com.inf.farlands.terrain.pipeline.SpawnPreload;
 import com.inf.farlands.terrain.structure.StructureDriver;
@@ -65,9 +68,15 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(MinecraftServer.class)
 public abstract class SpawnPreloadMixin {
 
-    /** 出生点搜索的块级偏移最多跨一个 chunk，PLAYER_SPAWN 的半径是 3，取 4 覆盖两者。 */
+    /**
+     * 判据圈半径。它由入场等待决定，不由出生点搜索决定。
+     *
+     * <p>入场等待取 {@code PrepareSpawnTask} 给的半径 3，要求那 7 乘 7 的实体 chunk 全部就绪；而每
+     * 一格要就绪，要求它自己的 5 乘 5 邻域到 {@code FULL}，两者并起来是 11 乘 11，即半径 5。取 4 时
+     * 判据圈只有 9 乘 9，外圈 24 格的 5 乘 5 伸出圈外，那些格的确认永不完成，入场随即挂在实体等待上。
+     */
     @Unique
-    private static final int FARLANDS_PRELOAD_RADIUS = 4;
+    private static final int FARLANDS_PRELOAD_RADIUS = 5;
 
     /**
      * 驱动生成的半径。取判据半径 + 1，这是下界。
@@ -76,7 +85,7 @@ public abstract class SpawnPreloadMixin {
      * 门的判据是「中心所在 chunk 的 3×3 九格都过 CARVERS」。判据圈边界那格在偏移
      * {@code FARLANDS_PRELOAD_RADIUS}，它的九格含偏移
      * {@code FARLANDS_PRELOAD_RADIUS + 1}，所以那一圈
-     * 必须被驱动，即驱动半径至少比判据半径大 1。取成与判据相等时，9×9 边界那一列的门恒不过，那些段
+     * 必须被驱动，即驱动半径至少比判据半径大 1。取成与判据相等时，判据圈边界那一列的门恒不过，那些段
      * 到不了 LIGHTED，退出条件永不满足，而它们的壳在场、邻域也齐，症状看着像卡在别处。
      *
      * <p>
@@ -112,6 +121,44 @@ public abstract class SpawnPreloadMixin {
     /** 停滞明细最多列几个 chunk。 */
     @Unique
     private static final int FARLANDS_PRELOAD_STALL_LIST = 8;
+
+    /**
+     * 泵的停止判据半径：出生面每格的结构读域都已在场，即面半径加结构读半径，29×29 共 841 格。
+     *
+     * <p>壳要由票传播造出来，而票传播只在 {@code ServerChunkCache.tick} 里跑；{@code setInitialSpawn}
+     * 的阻塞取数又发生在 tick 循环之前。不在这里把票推一轮，结构引用相的 ±8 门在整个建世界期恒假，
+     * 出生块永远等不到 FULL。
+     */
+    @Unique
+    private static final int FARLANDS_CREATION_SHELL_RADIUS = FARLANDS_PRELOAD_DRIVE_RADIUS
+            + StructureDriver.STRUCTURE_READ_RADIUS;
+
+    /**
+     * 建世界期泵的墙钟上限。超时即放行，退回原来的阻塞等待，不把建世界期拖成无界。
+     *
+     * <p>取 45 秒而不是按轮数：泵的职责已经从「造壳」扩到「当管道清空前的钟」，退出点由两条判据决定，
+     * 即壳齐与判据圈全亮，时间只是兜底。实测装饰吞吐约 4 个/秒，判据圈 121 个需要约 30 秒才在数学上够，
+     * 15 秒的上限本身就会截断收敛。
+     */
+    @Unique
+    private static final long FARLANDS_CREATION_PUMP_MILLIS = 45000L;
+
+    /** 泵每轮让出的毫秒数，只在壳还没齐时让。 */
+    @Unique
+    private static final long FARLANDS_CREATION_PUMP_YIELD_MILLIS = 1L;
+
+    /** 数壳的轮数间隔。841 格一次数太密。 */
+    @Unique
+    private static final int FARLANDS_CREATION_SHELL_SAMPLE_ROUNDS = 8;
+
+    /**
+     * 兜底重扫的轮数间隔。
+     *
+     * <p>退避重投有次数上限，约 12.6 秒后在等邻居的候选会被丢掉，而邻居落档之后不一定有人再提交
+     * 它。每这么多轮把判据圈整圈重投一次，等于给这些等待续期。实测一轮约 0.28 毫秒，4096 轮约 1.1 秒。
+     */
+    @Unique
+    private static final int FARLANDS_CREATION_RESCAN_ROUNDS = 4096;
 
     @Shadow
     private long nextTickTimeNanos;
@@ -149,13 +196,251 @@ public abstract class SpawnPreloadMixin {
         int spawnSy = level.getChunkSource().getGenerator().getSpawnHeight(level) >> 4;
         int minSy = Math.max(spawnSy - FARLANDS_PRELOAD_HALF_Y, WorldBounds.MIN_SECTION);
         int maxSy = Math.min(spawnSy + FARLANDS_PRELOAD_HALF_Y, WorldBounds.MAX_SECTION);
-        // 半径取判据半径：出生搜索的偏移在这一圈内。
+        // 半径取驱动半径，不是判据半径。判据圈边界那格的九格含偏移判据半径加一，取成与判据相等时
+        // 那一圈的邻居在面外、没有段条目，九格门恒假，那 32 个 chunk 永远到不了 LIGHTED。
         Scheduler.Face face = new Scheduler.Face(level.dimension(), spawnChunk.x(), spawnChunk.z(),
-                FARLANDS_PRELOAD_RADIUS, minSy, maxSy);
+                FARLANDS_PRELOAD_DRIVE_RADIUS, minSy, maxSy);
         Scheduler.register(face);
         level.getChunkSource().addTicketWithRadius(GenQueue.STRUCTURE_PIN_TICKET, spawnChunk,
                 FARLANDS_PRELOAD_TICKET_RADIUS);
         SpawnPreload.registerCreation(level.dimension(), face, spawnChunk, FARLANDS_PRELOAD_TICKET_RADIUS);
+        farlands$pumpCreation(level, spawnChunk, minSy, maxSy);
+    }
+
+    /**
+     * 建世界期泵：票传播 -> 主线程回调 -> 调度器派发，直到壳齐且判据圈全亮，或到时间上限。
+     *
+     * <p>
+     * 三步缺一不可。{@code cache.tick} 把票换成 holder；壳的构造在
+     * {@code GenerationChunkHolderMixin} 的 thenAccept 里投回主线程，所以要抽一次主线程执行器；
+     * 派发是 tick 驱动的，而这里没有 tick，所以要显式调一次。
+     *
+     * <p>
+     * 两条退出判据都要：只判「壳齐」会在推进刚开始时退出，只判「判据圈全亮」会在壳还没造出来时
+     * 空转到上限。泵是这一段唯一的钟，判据必须覆盖它的全部职责。
+     *
+     * <p>
+     * 时间上限是硬约束：走到上限就放行，{@code setInitialSpawn} 回到原来的阻塞等待。预加载循环在
+     * {@code prepareLevels} 里还会再推一次，那时 tick 循环已就绪，派发不再依赖本方法。
+     */
+    @Unique
+    private static void farlands$pumpCreation(ServerLevel level, ChunkPos center, int minSy, int maxSy) {
+        MinecraftServer server = level.getServer();
+        if (server == null) {
+            return;
+        }
+        ServerChunkCache cache = level.getChunkSource();
+        int total = (FARLANDS_CREATION_SHELL_RADIUS * 2 + 1) * (FARLANDS_CREATION_SHELL_RADIUS * 2 + 1);
+        long startedAt = System.currentTimeMillis();
+        int rounds = 0;
+        int shells = farlands$countShells(level, center);
+        try {
+            while (System.currentTimeMillis() - startedAt < FARLANDS_CREATION_PUMP_MILLIS) {
+                // 两条同时成立才退出：壳齐、判据圈全亮。只判壳齐会在推进刚开始时就退出，而泵是这一段
+                // 唯一的钟，退早了管道就停在半路没人再派发。
+                //
+                // 不判「候选清空」：驱动面比判据圈大一圈，外圈那些格永远过不了装饰门，它们只能在退避
+                // 次数到顶时被丢掉，约 12.6 秒。判据圈已亮时它们与入场无关，再等只是白等。
+                if (shells >= total && farlands$bandLit(level, center, minSy, maxSy)) {
+                    break;
+                }
+                cache.tick(() -> false, false);
+                SectionIO.drainMainThreadTasks(server);
+                Scheduler.tick();
+                rounds++;
+                // 兜底重扫：等邻居的候选会在退避上限处被丢掉，而邻居落档之后不一定有人再提交它。
+                // 每 N 轮把判据圈整圈重投一次，等于给这些等待续期；圈外不碰，所以不会把几何死区
+                // 那几个 chunk 变成空转。
+                if (rounds % FARLANDS_CREATION_RESCAN_ROUNDS == 0) {
+                    farlands$rescanCriterion(level, center);
+                }
+                // 数壳与让出都按轮数间隔：841 格一次数不便宜，而每轮都让出会白等。
+                if (rounds % FARLANDS_CREATION_SHELL_SAMPLE_ROUNDS == 0) {
+                    shells = farlands$countShells(level, center);
+                    Thread.sleep(FARLANDS_CREATION_PUMP_YIELD_MILLIS);
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        shells = farlands$countShells(level, center);
+        // 逐格读数排在汇总行之前，汇总行留作尾行的最后一个锚点。
+        farlands$dumpCriterion(level, center, minSy, maxSy);
+        // 只报读数：轮数、耗时、壳覆盖、判据圈是否全亮、候选表是否已空、面内每格最终档位，以及判据圈
+        // 的九格门当场求值分布。后两项用来分开「门在退出时仍假」与「门已可过但没装饰成」。
+        InfsFarlands.LOGGER.info(
+                "farlands: creation pump rounds={} elapsed={} ms shells={}/{} bandLit={} cand={} face stages={} crit gate={}",
+                rounds, System.currentTimeMillis() - startedAt, shells, total,
+                farlands$bandLit(level, center, minSy, maxSy), Scheduler.hasPendingCandidates(),
+                farlands$faceStages(level, center, minSy, maxSy), farlands$critGate(level, center));
+    }
+
+    /**
+     * 判据圈里段带未全亮的 chunk 逐格一条：档位、门当场求值、装饰认领是否被占、候选表里有没有它。
+     *
+     * <p>只打未亮的那些，所以正常局是零行。这四项能一次分开三个互斥形态：认领泄漏、候选丢失、
+     * 门可过但提交没成。
+     */
+    @Unique
+    private static void farlands$dumpCriterion(ServerLevel level, ChunkPos center, int minSy, int maxSy) {
+        int radius = FARLANDS_PRELOAD_RADIUS;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                ChunkPos pos = new ChunkPos(center.x() + dx, center.z() + dz);
+                LevelChunk chunk = ChunkReadiness.chunkAt(level, pos);
+                if (chunk == null) {
+                    continue;
+                }
+                int lowest = SectionStage.LIGHTED;
+                for (int sy = minSy; sy <= maxSy; sy++) {
+                    if (!WorldBounds.inSection(sy)) {
+                        continue;
+                    }
+                    int stage = SectionStage.getStage(chunk, sy);
+                    if (stage < lowest) {
+                        lowest = stage;
+                    }
+                }
+                if (lowest >= SectionStage.LIGHTED) {
+                    continue;
+                }
+                String gate = DependencyTable.neighborGateDetail(chunk);
+                // wr 与 secs 是第七行另外两个门：窗口面是否读过盘、此刻的段集合有多大。三个门各一栏，
+                // 一次读数就能分开「没读过盘」「不在面/窗口覆盖内」「带内仍有低档段」。
+                InfsFarlands.LOGGER.info("FLCRIT chunk={},{} stage={} gate={} claimed={} cand={} wr={} secs={}",
+                        pos.x(), pos.z(), lowest, gate == null ? "ok" : gate,
+                        OwnershipTable.isChunkClaimed(OwnershipTable.DECORATED, pos.pack()),
+                        Scheduler.hasCandidate(chunk),
+                        ChunkCounters.isWindowReadDone(chunk),
+                        Scheduler.sectionsFor(chunk).length);
+            }
+        }
+    }
+
+    /** 判据圈逐格重投。主线程调用，圈半径取判据半径。 */
+    @Unique
+    private static void farlands$rescanCriterion(ServerLevel level, ChunkPos center) {
+        int radius = FARLANDS_PRELOAD_RADIUS;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                LevelChunk chunk = ChunkReadiness.chunkAt(level, new ChunkPos(center.x() + dx, center.z() + dz));
+                if (chunk != null) {
+                    Scheduler.submit(chunk);
+                }
+            }
+        }
+    }
+
+    /**
+     * 判据圈 121 格的九格门当场求值分布，形如 `ok=… absent=… noStage=… below=…`。
+     *
+     * <p>只在泵退出时算一次。`ok` 表示门此刻成立；其余三栏对应门的三类不成立原因，与
+     * {@code DependencyTable.neighborGateDetail} 的串同源。
+     */
+    @Unique
+    private static String farlands$critGate(ServerLevel level, ChunkPos center) {
+        int radius = FARLANDS_PRELOAD_RADIUS;
+        int ok = 0;
+        int absent = 0;
+        int noStage = 0;
+        int below = 0;
+        int noShell = 0;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                LevelChunk chunk = ChunkReadiness.chunkAt(level, new ChunkPos(center.x() + dx, center.z() + dz));
+                if (chunk == null) {
+                    noShell++;
+                    continue;
+                }
+                String detail = DependencyTable.neighborGateDetail(chunk);
+                if (detail == null) {
+                    ok++;
+                } else if (detail.endsWith(":absent") || detail.endsWith("no-level")) {
+                    absent++;
+                } else if (detail.endsWith(":no-stage")) {
+                    noStage++;
+                } else {
+                    below++;
+                }
+            }
+        }
+        return "ok=" + ok + " absent=" + absent + " noStage=" + noStage + " below=" + below
+                + " noShell=" + noShell;
+    }
+
+    /**
+     * 面内每格按「段带里最低的那一档」分桶，返回 `[n0,…,n6]`，另加 `noShell=N`。
+     *
+     * <p>桶号就是该 chunk 的阻塞档位：0 表示段带里还有未处理的段，空壳也落在这一桶；6 表示全带已点亮。
+     * 这一行把「面内 169 个 chunk 卡在哪一相」一次说清，避免再用过时的拒绝快照推断终态。
+     */
+    @Unique
+    private static String farlands$faceStages(ServerLevel level, ChunkPos center, int minSy, int maxSy) {
+        int radius = FARLANDS_PRELOAD_DRIVE_RADIUS;
+        int[] buckets = new int[SectionStage.LIGHTED + 1];
+        int noShell = 0;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                LevelChunk chunk = ChunkReadiness.chunkAt(level, new ChunkPos(center.x() + dx, center.z() + dz));
+                if (chunk == null) {
+                    noShell++;
+                    continue;
+                }
+                int lowest = SectionStage.LIGHTED;
+                for (int sy = minSy; sy <= maxSy; sy++) {
+                    if (!WorldBounds.inSection(sy)) {
+                        continue;
+                    }
+                    int stage = SectionStage.getStage(chunk, sy);
+                    if (stage < lowest) {
+                        lowest = stage;
+                    }
+                }
+                buckets[lowest]++;
+            }
+        }
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < buckets.length; i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append(buckets[i]);
+        }
+        return sb.append("] noShell=").append(noShell).toString();
+    }
+
+    /** 出生面的结构读域内已有壳的格数。主线程调用。 */
+    @Unique
+    private static int farlands$countShells(ServerLevel level, ChunkPos center) {
+        int present = 0;
+        for (int dx = -FARLANDS_CREATION_SHELL_RADIUS; dx <= FARLANDS_CREATION_SHELL_RADIUS; dx++) {
+            for (int dz = -FARLANDS_CREATION_SHELL_RADIUS; dz <= FARLANDS_CREATION_SHELL_RADIUS; dz++) {
+                if (ChunkReadiness.chunkAt(level, new ChunkPos(center.x() + dx, center.z() + dz)) != null) {
+                    present++;
+                }
+            }
+        }
+        return present;
+    }
+
+    /** 判据圈是否全部点亮。圈内任一格壳不在场，或段带里有一段未到 LIGHTED 即为假。 */
+    @Unique
+    private static boolean farlands$bandLit(ServerLevel level, ChunkPos center, int minSy, int maxSy) {
+        int radius = FARLANDS_PRELOAD_RADIUS;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                LevelChunk chunk = ChunkReadiness.chunkAt(level, new ChunkPos(center.x() + dx, center.z() + dz));
+                if (chunk == null) {
+                    return false;
+                }
+                for (int sy = minSy; sy <= maxSy; sy++) {
+                    if (WorldBounds.inSection(sy) && !SectionStage.isOrAfter(chunk, sy, SectionStage.LIGHTED)) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
     }
 
     @Inject(method = "prepareLevels", at = @At("TAIL"))

@@ -190,6 +190,14 @@ public class FarlandsTick {
             StageMetrics.flush();
             // 调度器读数：与本周期同档。本行挪到这里，不再随每次派发打印。
             SchedulerMetrics.flushIfEnabled();
+            // 候选离开候选表的读数：两条静默路各丢了多少、其中多少是在欠账时丢的。
+            com.inf.farlands.debug.CandidateProbe.flush();
+            // 档位写入侧读数：与本周期同档，请求段数与执行次数的比值是这一栏的靶心。
+            com.inf.farlands.debug.StageWriteProbe.flush();
+            // 残留条目回收：档位表有、段容器没有的那些，与装饰写门同宽。排在读数之前，同窗可对账。
+            SectionLifecycle.reclaimOrphanStages(server);
+            // 档位条目建立读数：带外与无容器两类条目各是谁建的，以及本窗回收了多少。
+            com.inf.farlands.debug.StageSlotProbe.flush();
             // 派生记账的自检：与重数一遍逐 chunk 比对。只报失配。
             if (FarlandsConfig.logStageCounters) {
                 SectionLifecycle.verifyCounters(server);

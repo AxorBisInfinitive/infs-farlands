@@ -88,6 +88,8 @@ public final class ChunkCounters {
 
     /** 段被物化时计入。已计入则空转，所以重复物化与读回重放都安全；身份已死也空转。 */
     public static void onMaterialize(LevelChunk chunk, int sectionY) {
+        // 诊断：物化按 chunk 计数，与同一格的移除数并排，看「移除后重建」这条环。
+        com.inf.farlands.debug.CarveLoopProbe.materialize(chunk, sectionY);
         long identity = liveIdentityOf(chunk);
         if (identity != 0L) {
             ChunkCounters counters = ofLive(identity);

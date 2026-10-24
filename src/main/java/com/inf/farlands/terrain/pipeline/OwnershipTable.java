@@ -3,6 +3,7 @@ package com.inf.farlands.terrain.pipeline;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicLong;
 
+import com.inf.farlands.debug.TicketFlowProbe;
 import com.inf.farlands.util.map.Long2ObjectStripedMap;
 
 import net.minecraft.server.level.ServerLevel;
@@ -36,7 +37,7 @@ public final class OwnershipTable {
     /** 取域编号，全局递增；0 表示空闲。 */
     private static final AtomicLong OWNER_SEQ = new AtomicLong();
 
-    /** 段级相：chunkKey 到（段号到持有者编号）。 */
+    /** 段级相：chunkKey 映射到段号到持有者编号。 */
     @SuppressWarnings("unchecked")
     private static final Long2ObjectStripedMap<Long2ObjectStripedMap<AtomicLong>>[] SECTION_CELLS =
             new Long2ObjectStripedMap[PHASES];
@@ -112,7 +113,9 @@ public final class OwnershipTable {
     public static long tryClaimChunk(ServerLevel level, int phase, ChunkPos pos) {
         AtomicLong cell = CHUNK_CLAIMS[phase].computeIfAbsent(pos.pack(), k -> new AtomicLong());
         long owner = OWNER_SEQ.incrementAndGet();
-        if (!cell.compareAndSet(0L, owner)) {
+        boolean ok = cell.compareAndSet(0L, owner);
+        TicketFlowProbe.claim(phase, pos.pack(), owner, ok);
+        if (!ok) {
             return 0L;
         }
         GenQueue.addGenTicket(level, pos);
@@ -125,7 +128,9 @@ public final class OwnershipTable {
             return;
         }
         AtomicLong cell = CHUNK_CLAIMS[phase].get(pos.pack());
-        if (cell != null && cell.compareAndSet(owner, 0L)) {
+        boolean ok = cell != null && cell.compareAndSet(owner, 0L);
+        TicketFlowProbe.release(phase, pos.pack(), owner, ok);
+        if (ok) {
             GenQueue.removeGenTicket(level, pos);
         }
     }
@@ -165,6 +170,9 @@ public final class OwnershipTable {
         }
         Arrays.sort(keys, 0, n);
         long owner = OWNER_SEQ.incrementAndGet();
+        // 取到一格记一格。九格豁免在排序之后才跳过，所以已取集合不是数组的前缀：按数量推位置会
+        // 漏放跳过格之后那些已取的格，漏掉的格属于一个再也不会来放域的 owner，从此永久占用。
+        long[] taken = new long[n];
         int acquired = 0;
         for (int i = 0; i < n; i++) {
             if (isOwnWriteDomain(keys[i], centerChunkKey)) {
@@ -172,14 +180,14 @@ public final class OwnershipTable {
             }
             // 装饰正在写这一片：让路，回滚已取项。
             if (isChunkClaimed(DECORATED, keys[i])) {
-                rollbackCells(keys, acquired, owner);
+                rollbackCells(taken, acquired, owner);
                 return 0L;
             }
             AtomicLong cell = LIGHT_TASK.computeIfAbsent(keys[i], k -> new AtomicLong());
             if (cell.compareAndSet(0L, owner)) {
-                acquired++;
+                taken[acquired++] = keys[i];
             } else {
-                rollbackCells(keys, acquired, owner);
+                rollbackCells(taken, acquired, owner);
                 return 0L;
             }
         }
@@ -196,10 +204,10 @@ public final class OwnershipTable {
         return dx <= 1 && dz <= 1;
     }
 
-    /** 回滚：清已取项。 */
-    private static void rollbackCells(long[] keys, int acquired, long owner) {
+    /** 回滚：只清本次真的取到的那几格，按记录的键而不是按数量推出来的前缀。 */
+    private static void rollbackCells(long[] taken, int acquired, long owner) {
         for (int j = 0; j < acquired; j++) {
-            AtomicLong held = LIGHT_TASK.get(keys[j]);
+            AtomicLong held = LIGHT_TASK.get(taken[j]);
             if (held != null) {
                 held.compareAndSet(owner, 0L);
             }

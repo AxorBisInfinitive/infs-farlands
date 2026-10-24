@@ -6,10 +6,11 @@ import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.debug.StageMetrics;
 import com.inf.farlands.terrain.pipeline.Scheduler;
 import com.inf.farlands.util.window.WindowedChunk;
-import com.inf.farlands.util.world.WorldBounds;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -23,21 +24,19 @@ import net.minecraft.world.level.chunk.LevelChunk;
  * SURFACE。补触发：读回 stage 为 TERRAIN 的 section 由调度器的准入重发整 chunk 作业。
  *
  * 失败策略：applySurface 异常由 GenTask 捕获，section 停留 TERRAIN，下一次提交的准入会重试。
+ *
+ * 遍历面取「容器并档位表」，见 {@link SectionStage#sectionYs}：全空气的段只有档位没有条目，
+ * 只遍历容器会让它永远停在 TERRAIN，而准入按档位判欠账，该 chunk 因此被无限放行。
+ * 标脏只用容器内的段：容器里没有条目的段编码时取不到，脏标记会永久残留。
  */
 public final class SurfaceFiller {
 
     private SurfaceFiller() {
     }
 
-    /**
-     * 该 chunk 是否已有 TERRAIN 未 SURFACE 且非读回的 section。
-     * 全 chunk 检测，非窗口并集，预加载场景窗口为空时也能触发。
-     */
+    /** 该 chunk 是否已有 TERRAIN 未 SURFACE 且非读回的 section。 */
     public static boolean hasSurfacePending(LevelChunk chunk) {
-        for (Integer sy : ((WindowedChunk) chunk).windowedAllSections().keySet()) {
-            if (!WorldBounds.inSection(sy)) {
-                continue;
-            }
+        for (int sy : SectionStage.sectionYs(chunk)) {
             if (SectionStage.isOrAfter(chunk, sy, SectionStage.TERRAIN)
                     && !SectionStage.isOrAfter(chunk, sy, SectionStage.SURFACE)
                     && !SectionIO.isReading(chunk, sy)) {
@@ -57,20 +56,31 @@ public final class SurfaceFiller {
         StageMetrics.stageWork(StageMetrics.STAGE_SURFACE, System.nanoTime() - t0);
         // surface 修改方块，读回的 section 未标脏，不标就会写盘丢 surface 结果。
         // fill 已标脏的重复标无害，幂等。
+        Set<Integer> inContainer = new HashSet<>(((WindowedChunk) chunk).windowedAllSections().keySet());
         List<Integer> list = new ArrayList<>();
-        for (Integer sy : ((WindowedChunk) chunk).windowedAllSections().keySet()) {
+        List<Integer> dirty = new ArrayList<>();
+        for (int sy : SectionStage.sectionYs(chunk)) {
             if (SectionStage.isOrAfter(chunk, sy, SectionStage.TERRAIN)
                     && !SectionStage.isOrAfter(chunk, sy, SectionStage.SURFACE)) {
                 list.add(sy);
+                if (inContainer.contains(sy)) {
+                    dirty.add(sy);
+                }
             }
         }
-        int[] surfaced = new int[list.size()];
-        for (int i = 0; i < list.size(); i++) {
-            surfaced[i] = list.get(i);
-        }
+        int[] surfaced = toArray(list);
         Scheduler.stage(chunk, surfaced, SectionStage.SURFACE);
-        Scheduler.dirty(chunk, surfaced, true);
+        Scheduler.dirty(chunk, toArray(dirty), true);
         StageMetrics.stageSections(StageMetrics.STAGE_SURFACE, surfaced.length);
         return surfaced;
+    }
+
+    /** 列表转数组。 */
+    private static int[] toArray(List<Integer> list) {
+        int[] arr = new int[list.size()];
+        for (int i = 0; i < list.size(); i++) {
+            arr[i] = list.get(i);
+        }
+        return arr;
     }
 }

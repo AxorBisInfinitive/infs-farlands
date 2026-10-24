@@ -18,6 +18,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import com.inf.farlands.InfsFarlands;
 import com.inf.farlands.FarlandsConfig;
+import com.inf.farlands.debug.CarveLoopProbe;
+import com.inf.farlands.debug.StageSlotProbe;
 import com.inf.farlands.light.FarLandsLightEngine;
 import com.inf.farlands.terrain.carverFiller.CarverFiller;
 import com.inf.farlands.terrain.debug.StageMetrics;
@@ -182,6 +184,35 @@ public final class SectionLifecycle {
         }
         wakeEncodeConsumer();
         return cleanupOpen;
+    }
+
+    /**
+     * 回收「档位表有、段容器没有」的残留条目。
+     *
+     * <p>不进 {@link #cleanup}：那一支每 tick 在窗口变化时对全部 chunk 跑，而这条只是清静态残留，
+     * 200 tick 一遍就够。判据只用容器键集，与装饰写门同宽；在读的段跳过，读回结束会自行落档。
+     *
+     * <p>删除对记账是中性的：这类条目从未经过 {@code onMaterialize} 或 {@code onStageChange}，
+     * 记账的已计入集合里没有它，{@code onRemove} 的第一步就会返回。
+     */
+    public static void reclaimOrphanStages(MinecraftServer server) {
+        int reclaimed = 0;
+        for (ServerLevel level : server.getAllLevels()) {
+            for (ChunkHolder holder : getChunks(level)) {
+                ChunkAccess ca = holder.getLatestChunk();
+                if (!(ca instanceof LevelChunk lc)) {
+                    continue;
+                }
+                for (int sy : SectionStage.stagesWithoutSection(lc)) {
+                    if (SectionIO.isReading(lc, sy)) {
+                        continue;
+                    }
+                    SectionStage.removeStage(lc, sy);
+                    reclaimed++;
+                }
+            }
+        }
+        StageSlotProbe.reclaimed(reclaimed);
     }
 
     /** 卸载编码在途任务数，关服等待用，任务出口递减。 */
@@ -825,7 +856,9 @@ public final class SectionLifecycle {
                 le.queueSectionData(LightLayer.SKY, pos, decoded.skyLight());
             }
         }
-        Scheduler.stage(lc, new int[] { sy }, decoded.stage());
+        CarveLoopProbe.restore(lc, sy, decoded.stage());
+        // 读回按盘上档恢复，可能低于内存里的当前档，所以走无条件的恢复入口而不是单调闸那一支。
+        Scheduler.restore(lc, new int[] { sy }, decoded.stage());
         if (decoded.stage() >= SectionStage.LIGHTED) {
             // 读回不推进档位，但它的 LIGHTED 要计进吞吐，否则重进的 chunk 不进 CPS 与 SPS。
             StageMetrics.lightedSections(1);

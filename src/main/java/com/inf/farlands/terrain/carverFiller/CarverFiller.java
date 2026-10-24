@@ -8,10 +8,10 @@ import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.debug.StageMetrics;
 import com.inf.farlands.terrain.pipeline.Scheduler;
 import com.inf.farlands.util.window.WindowedChunk;
-import com.inf.farlands.util.world.WorldBounds;
 
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -46,10 +46,7 @@ public final class CarverFiller {
      * 后的回调再触发入队。
      */
     public static boolean hasCarversPending(LevelChunk chunk) {
-        for (Integer sy : ((WindowedChunk) chunk).windowedAllSections().keySet()) {
-            if (!WorldBounds.inSection(sy)) {
-                continue;
-            }
+        for (int sy : SectionStage.sectionYs(chunk)) {
             if (SectionStage.isOrAfter(chunk, sy, SectionStage.SURFACE)
                     && !SectionStage.isOrAfter(chunk, sy, SectionStage.CARVERS)
                     && !SectionIO.isReading(chunk, sy)) {
@@ -67,25 +64,37 @@ public final class CarverFiller {
         long t0 = System.nanoTime();
         ((LevelSystems) level).carverSystem().applyCarvers(level, chunk);
         // carve 会修改方块，必须标脏，否则写盘丢雕刻结果。fill 与 surface 已标脏的重复标无害。
+        // 标脏只用容器内的段：容器里没有条目的段编码时取不到，脏标记会永久残留。
+        Set<Integer> inContainer = new HashSet<>(((WindowedChunk) chunk).windowedAllSections().keySet());
         List<Integer> list = new ArrayList<>();
-        for (Integer sy : ((WindowedChunk) chunk).windowedAllSections().keySet()) {
+        List<Integer> dirty = new ArrayList<>();
+        for (int sy : SectionStage.sectionYs(chunk)) {
             if (SectionStage.isOrAfter(chunk, sy, SectionStage.SURFACE)
                     && !SectionStage.isOrAfter(chunk, sy, SectionStage.CARVERS)) {
                 list.add(sy);
+                if (inContainer.contains(sy)) {
+                    dirty.add(sy);
+                }
             }
         }
-        int[] carved = new int[list.size()];
-        for (int i = 0; i < list.size(); i++) {
-            carved[i] = list.get(i);
-        }
+        int[] carved = toArray(list);
         Scheduler.stage(chunk, carved, SectionStage.CARVERS);
-        Scheduler.dirty(chunk, carved, true);
+        Scheduler.dirty(chunk, toArray(dirty), true);
         if (carved.length > 0) {
             primeFinalHeightmaps(chunk);
         }
         StageMetrics.stageWork(StageMetrics.STAGE_CARVERS, System.nanoTime() - t0);
         StageMetrics.stageSections(StageMetrics.STAGE_CARVERS, carved.length);
         return carved;
+    }
+
+    /** 列表转数组。 */
+    private static int[] toArray(List<Integer> list) {
+        int[] arr = new int[list.size()];
+        for (int i = 0; i < list.size(); i++) {
+            arr[i] = list.get(i);
+        }
+        return arr;
     }
 
     // 自研最终高度图 prime，规避 vanilla primeHeightmaps 的极端 Y 扫描炸弹
