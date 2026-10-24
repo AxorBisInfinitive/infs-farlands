@@ -82,9 +82,12 @@ public final class CarveLoopProbe {
     /**
      * 一段被物化。按 chunk 累计，每 {@link #MATERIALIZE_SUMMARY_EVERY} 次打一行前若干格，把物化数与
      * 移除数并排给出。
+     *
+     * <p>参数可以为 null：调用方在 {@code ImposterProtoChunk} 的构造期解包 {@code getWrapped()}，那时
+     * 包装字段还没有赋值。这一层只是读数，不能因此把区块读盘的异常抛出去。
      */
     public static void materialize(LevelChunk chunk, int sectionY) {
-        if (!FarlandsConfig.logScheduler) {
+        if (!FarlandsConfig.logScheduler || chunk == null) {
             return;
         }
         ChunkPos pos = chunk.getPos();

@@ -300,6 +300,15 @@ public final class Scheduler {
                     && DependencyTable.pendingBelowIn(chunk, sections, SectionStage.CARVERS) > 0;
             boolean deco = anyStage(chunk, SectionStage.CARVERS);
             if (!gen && !deco) {
+                // 光照支：整窗段都停在 DECORATED 时，缺口在「装饰已完成、光照没触发」这一档。这一档没有
+                // 别的出口，LIGHTED 只能由 notifyGenerated 的认领触发一次，那一次没成就永远没人再来。
+                // 所以它必须在这里被当成活：重触发，并按固定节奏留在候选表里，不消耗重投次数。
+                if (anyStage(chunk, SectionStage.DECORATED)) {
+                    GenQueue.notifyGenerated(chunk);
+                    logReject(level, chunk, "LIGHT", "");
+                    requeuePersistent(key, candidate);
+                    continue;
+                }
                 SchedulerMetrics.blocked();
                 logReject(level, chunk, "WORK", "");
                 requeue(key, candidate, "WORK");
@@ -311,9 +320,12 @@ public final class Scheduler {
                 continue;
             }
             if (!gen) {
+                // 装饰这一支同样不封顶：提交失败只有两条原因，九格门与光照域锁，两者都是瞬时争用，
+                // 而退避到顶只要约十三秒。争用一旦超过这个窗口，候选会离表，此后没有周期性重扫把它
+                // 放回来，段就永久停在 CARVERS。固定节奏重投把它变成有界等待。
                 SchedulerMetrics.blocked();
                 logReject(level, chunk, "DECO", "");
-                requeue(key, candidate, "DECO");
+                requeuePersistent(key, candidate);
                 continue;
             }
             // C 依赖：适配数据就位。未建时若 ±8 的壳齐就现场建引用相与 Beardifier，建完凭下一次提交重试。
@@ -433,6 +445,20 @@ public final class Scheduler {
         candidate.attempts++;
         long backoff = RETRY_BACKOFF_MILLIS[Math.min(candidate.attempts - 1, RETRY_BACKOFF_MILLIS.length - 1)];
         candidate.dueAtMillis = System.currentTimeMillis() + backoff;
+        CANDIDATES.put(key, candidate);
+        SchedulerMetrics.repost();
+    }
+
+    /**
+     * 光照与装饰两支的重投：固定一档退避，不递增次数，因此永不被丢。
+     *
+     * <p>与 {@link #requeue} 分开的理由是语义不同。那边的次数上限表达「暂时性原因，重试几下就放弃」，
+     * 而停在 {@code DECORATED} 或装饰提交被门与锁挡回都不是可以放弃的状态：放弃等于永久停摆，所以它
+     * 只能有节奏，不能有上限。
+     */
+    private static void requeuePersistent(long key, Candidate candidate) {
+        candidate.dueAtMillis = System.currentTimeMillis()
+                + RETRY_BACKOFF_MILLIS[RETRY_BACKOFF_MILLIS.length - 1];
         CANDIDATES.put(key, candidate);
         SchedulerMetrics.repost();
     }
