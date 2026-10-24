@@ -1,5 +1,6 @@
 package com.inf.farlands.client.register.packet;
 
+import com.inf.farlands.client.TintInvalidator;
 import com.inf.farlands.client.network.ClientPacketHandlers;
 import com.inf.farlands.network.expand.y.ChunkDataPacket;
 import com.inf.farlands.util.maps.Common;
@@ -68,6 +69,8 @@ public class ChunkDataPacketRegister {
                         if (ca instanceof LevelChunk lc) {
                             applySectionData(level, le, lc, e, minY);
                             if (e.chunkX() != curCx || e.chunkZ() != curCz) {
+                                // 先清颜色再标脏：本 chunk 的段已全部应用，邻居边缘列下次编译就能取到新群系。
+                                invalidateTint(level, curCx, curCz);
                                 flushSectionDirty(level, curCx, curCz, hasInWindow, dirtyMinSy, dirtyMaxSy,
                                         curWinMin, curWinMax);
                                 curCx = e.chunkX();
@@ -99,6 +102,7 @@ public class ChunkDataPacketRegister {
                                     e.chunkX(), e.chunkZ(), minY, e);
                         }
                     }
+                    invalidateTint(level, curCx, curCz);
                     flushSectionDirty(level, curCx, curCz, hasInWindow, dirtyMinSy, dirtyMaxSy,
                             curWinMin, curWinMax);
                 });
@@ -144,7 +148,27 @@ public class ChunkDataPacketRegister {
                 }
             }
         }
+        invalidateTint(level, cx, cz);
         flushSectionDirty(level, cx, cz, hasInWindow, dirtyMinSy, dirtyMaxSy, winMin, winMax);
+    }
+
+    /**
+     * 失效该 chunk 与其 3×3 邻域的方块染色缓存。
+     *
+     * <p>颜色按列缓存在 {@code ClientLevel} 上，缓存只在 chunk 加载完成与整表重载时失效。段包
+     * 到达晚于 chunk 包，而 chunk 包那一次失效发生在空壳时刻，随后邻居边缘的列可能已按「对侧是
+     * 空气」算过色并缓存；真段到达后若不补一次，那几列的颜色要等整表重载才会变。
+     *
+     * <p>只影响下一次编译取色，不触发重建。缓存自身按 chunk 记，{@code invalidateForChunk} 内部
+     * 已经把 3×3 一起清掉，所以这里只传一个坐标。
+     */
+    private static void invalidateTint(ClientLevel level, int cx, int cz) {
+        if (cx == Integer.MIN_VALUE || cz == Integer.MIN_VALUE) {
+            return; // 批内还没出现过 chunk 时的占位值，不是坐标
+        }
+        if (level instanceof TintInvalidator tint) {
+            tint.invalidateTintAround(cx, cz);
+        }
     }
 
     /**
