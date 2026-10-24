@@ -211,8 +211,6 @@ public class FarlandsTick {
             trimAquiferLookup(tickCount);
             // 就绪吞吐读数：与本周期同档，约 10 秒一行。只报读数，不报解读。
             StageMetrics.flush();
-            // 残留条目回收：档位表有、段容器没有的那些，与装饰写门同宽。
-            SectionLifecycle.reclaimOrphanStages(server);
             // 视距内兜底重扫：把有活却不在候选表里的 chunk 补交一次，本拍末尾的 tick 统一派发。
             com.inf.farlands.terrain.pipeline.InViewSweep.run(server);
         }

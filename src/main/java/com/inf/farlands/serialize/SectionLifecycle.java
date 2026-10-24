@@ -180,28 +180,18 @@ public final class SectionLifecycle {
     }
 
     /**
-     * 回收「档位表有、段容器没有」的残留条目。
+     * 读回收尾：把本次发起读回的段逐个过一遍，摘掉「既没落档也没物化」的空条目。
      *
-     * <p>不进 {@link #cleanup}：那一支每 tick 在窗口变化时对全部 chunk 跑，而这条只是清静态残留，
-     * 200 tick 一遍就够。判据只用容器键集，与装饰写门同宽；在读的段跳过，读回结束会自行落档。
+     * <p>调用点必须在 {@code applyDecoded} 之后：恢复的段一旦进了容器，判据里的「容器有它」就成立，
+     * 不会被误摘；而在恢复之前调，那些即将写回去的段在那一刻恰好是「无档位、无容器」，会被当场删掉。
      *
-     * <p>删除对记账是中性的：这类条目从未经过 {@code onMaterialize} 或 {@code onStageChange}，
-     * 记账的已计入集合里没有它，{@code onRemove} 的第一步就会返回。
+     * <p>判据与记账中性见 {@link SectionStage#dropReadMark}。这段逻辑原先是一个每 200 tick 扫全部
+     * 已加载 chunk 的回收器，它按「容器里没有」一条判死，会把非噪声生成器维度里整条 band 的
+     * {@code TERRAIN} 记录一起删掉；现在收窄到「读回收尾 + 档位仍是 UNPROCESSED」两条同时成立。
      */
-    public static void reclaimOrphanStages(MinecraftServer server) {
-        for (ServerLevel level : server.getAllLevels()) {
-            for (ChunkHolder holder : getChunks(level)) {
-                ChunkAccess ca = holder.getLatestChunk();
-                if (!(ca instanceof LevelChunk lc)) {
-                    continue;
-                }
-                for (int sy : SectionStage.stagesWithoutSection(lc)) {
-                    if (SectionIO.isReading(lc, sy)) {
-                        continue;
-                    }
-                    SectionStage.removeStage(lc, sy);
-                }
-            }
+    private static void dropReadMarks(LevelChunk lc, Iterable<Integer> sectionYs) {
+        for (int sy : sectionYs) {
+            SectionStage.dropReadMark(lc, sy);
         }
     }
 
@@ -700,6 +690,7 @@ public final class SectionLifecycle {
         }
         if (byFile.isEmpty()) {
             SectionIO.unmarkReadingBatch(lc, windowSy);
+            dropReadMarks(lc, windowSy);
             onDone.run();
             return;
         }
@@ -712,6 +703,8 @@ public final class SectionLifecycle {
                         }
                         if (pending.decrementAndGet() <= 0) {
                             SectionIO.unmarkReadingBatch(lc, windowSy);
+                            // 排在所有 applyDecoded 之后：恢复过的段已经在容器里，判据不会误摘它们。
+                            dropReadMarks(lc, windowSy);
                             ChunkCounters.markWindowReadDone(lc);
                             promotePendingSections(lc, windowSy);
                             skySourcesReady(lc);
@@ -768,6 +761,7 @@ public final class SectionLifecycle {
         boolean exist = Files.exists(path);
         if (!exist) {
             SectionIO.unmarkReading(lc, sectionY);
+            dropReadMarks(lc, List.of(sectionY));
             // 读回在途这一条落了，且没有数据要恢复：该 chunk 可能就此就绪，交准入。
             Scheduler.submit(lc);
             onDone.run();
@@ -778,6 +772,7 @@ public final class SectionLifecycle {
                 SectionStorage.slotIndex(cp.x() & 31, cp.z() & 31, sectionY & 31), sectionY);
         if (ref == null) {
             SectionIO.unmarkReading(lc, sectionY);
+            dropReadMarks(lc, List.of(sectionY));
             // 同上：无槽位即无数据，读回在途这一条落，交准入。
             Scheduler.submit(lc);
             onDone.run();
@@ -785,10 +780,14 @@ public final class SectionLifecycle {
         }
         PalettedContainerFactory factory = ((WindowedChunk) lc).containerFactory();
         SectionIO.submitRead(level, path, List.of(ref), factory, decodedList -> {
+            // unmark 必须排在 applyDecoded 之前：恢复过程本身要读「段是否可写」那道门。
             SectionIO.unmarkReading(lc, sectionY);
             for (SectionIO.DecodedWithSy d : decodedList) {
                 applyDecoded(lc, d.sectionY(), d.decoded());
             }
+            // 摘空条目排在这里：恢复过的段已经进容器，判据不会误摘它；无数据的段此时仍是
+            // 「无档位、无容器」，正是要摘的那些。
+            dropReadMarks(lc, List.of(sectionY));
             promotePendingSections(lc, List.of(sectionY));
             skySourcesReady(lc);
             Scheduler.submit(lc);

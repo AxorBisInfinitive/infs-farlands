@@ -145,16 +145,25 @@ public final class SectionStage {
         if (m == null) {
             return;
         }
-        SectionState state = m.computeIfAbsent(sectionY, k -> new SectionState(UNPROCESSED));
-        int old;
-        synchronized (state) {
-            old = state.stage();
-            if (monotone && stage < old) {
-                return;
+        // 读回收尾会把这类的空记录摘掉，见 dropReadMark。摘下与这里落档之间有一个微秒级的窗：
+        // 本方法在监视器内复核 map 里仍是自己这张，不是就重取一次，重取会把一张新表挂回去。
+        // 重试上限只为防活锁，实际只可能撞上一次读回收尾。
+        for (int attempt = 0; attempt < 4; attempt++) {
+            SectionState state = m.computeIfAbsent(sectionY, k -> new SectionState(UNPROCESSED));
+            int old;
+            synchronized (state) {
+                if (m.get(sectionY) != state) {
+                    continue;
+                }
+                old = state.stage();
+                if (monotone && stage < old) {
+                    return;
+                }
+                state.setStage(stage);
             }
-            state.setStage(stage);
+            ChunkCounters.onStageChange(chunk, sectionY, old, stage);
+            return;
         }
-        ChunkCounters.onStageChange(chunk, sectionY, old, stage);
     }
 
     /** 该段的状态，不存在则建；身份为 0 或已注销返回 null。 */
@@ -354,9 +363,13 @@ public final class SectionStage {
     /**
      * 该 chunk 的段号并集：段容器的键并上档位表的键，按可玩段界过滤后升序。
      *
-     * <p>两个面必须合起来用。档位可以落在容器里没有条目的段上，全空气的段就是这种：它被 fill 算作
-     * 做过地形，档位推到 {@code TERRAIN}，但没有任何方块，容器里没有它的条目。只遍历容器会让这类段
-     * 永远停在 {@code TERRAIN}，而准入按档位判「还有欠账」，于是该 chunk 被无限放行、作业次次空转。
+     * <p>两个面必须合起来用。档位可以落在容器里没有条目的段上：非噪声生成器的维度里 fill 直接早退，
+     * 一个段都没物化，而生成任务照样把整条 band 落到 {@code TERRAIN}；读回窗口里那些盘上没有数据的
+     * 段，也会先建出 {@code UNPROCESSED} 的条目再等到收尾才摘。只遍历容器会让前一类段永远停在
+     * {@code TERRAIN}，而准入按档位判「还有欠账」，于是该 chunk 被无限放行、作业次次空转。
+     *
+     * <p>噪声生成器的维度里，fill 会把 Y 循环经过的每个段都 {@code getSection} 出来，
+     * 所以「全空气的段没有容器条目」在这条路径上不成立，物化过的空段也是段。
      */
     public static int[] sectionYs(LevelChunk chunk) {
         IntOpenHashSet set = new IntOpenHashSet();
@@ -376,33 +389,43 @@ public final class SectionStage {
     }
 
     /**
-     * 档位表里有、段容器里没有的段号，升序。
+     * 读回收尾：把「标记建出来、但既没落档也没物化」的空条目摘掉。
      *
-     * <p>这类条目的来源是读回标记：{@link SectionIO#markReading} 会给整个读回窗口逐段建条目，而盘上
-     * 没有数据、段也没有物化的位置建完就再没人碰，标记清掉之后条目留着。它们不在容器的活跃集合里，
-     * 所以 fsa 清理枚举不到；而装饰门若按整张表判，它们会永久挡住周围九格的装饰。
+     * <p>读回标记会给整个窗口逐段建条目，盘上没有数据的那些建完就再没人碰。判据三条，缺一不可：
+     * 档位仍是 {@code UNPROCESSED}，有档位就是有工作，空段也算；容器里没有这个段，缺段即空气，
+     * 但物化过的空段仍然是段；此刻不在读，unmark 之后窗口可能又滑回来重新标记。
      *
-     * <p>判据只用容器键集，不涉及窗口：可写集合就是容器，与装饰的写门同宽。
+     * <p>删除对记账是中性的：标记条目从未经过 {@code onMaterialize} 或 {@code onStageChange}，
+     * 记账的已计入集合里没有它。这正是它能在这里被摘掉、而读回恢复过的段不能的原因。
+     *
+     * <p>与落档体的竞态：{@link #write} 在监视器内复核条目仍是自己那张，所以在这里的监视器内摘下
+     * 不会让一笔正在落的档写到已经脱离表的对象上。
      */
-    public static int[] stagesWithoutSection(LevelChunk chunk) {
+    public static void dropReadMark(LevelChunk chunk, int sectionY) {
         long identity = liveIdentity(chunk);
         if (identity == 0L) {
-            return new int[0];
+            return;
         }
         ConcurrentHashMap<Integer, SectionState> m = STAGES.get(identity);
         if (m == null) {
-            return new int[0];
+            return;
         }
-        Map<Integer, net.minecraft.world.level.chunk.LevelChunkSection> container =
-                ((WindowedChunk) chunk).windowedAllSections();
-        IntOpenHashSet orphans = new IntOpenHashSet();
-        for (Integer sy : m.keySet()) {
-            if (sy != null && !container.containsKey(sy)) {
-                orphans.add(sy.intValue());
+        SectionState state = m.get(sectionY);
+        if (state == null) {
+            return;
+        }
+        boolean removed;
+        synchronized (state) {
+            if (state.isReading() || state.stage() != UNPROCESSED) {
+                return;
             }
+            if (((WindowedChunk) chunk).windowedAllSections().containsKey(sectionY)) {
+                return;
+            }
+            removed = m.remove(sectionY, state);
         }
-        int[] arr = orphans.toIntArray();
-        Arrays.sort(arr);
-        return arr;
+        if (removed) {
+            ChunkCounters.onRemove(chunk, sectionY, UNPROCESSED);
+        }
     }
 }

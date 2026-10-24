@@ -25,8 +25,9 @@ import net.minecraft.world.level.chunk.LevelChunk;
  *
  * 失败策略：applySurface 异常由 GenTask 捕获，section 停留 TERRAIN，下一次提交的准入会重试。
  *
- * 遍历面取「容器并档位表」，见 {@link SectionStage#sectionYs}：全空气的段只有档位没有条目，
- * 只遍历容器会让它永远停在 TERRAIN，而准入按档位判欠账，该 chunk 因此被无限放行。
+ * 遍历面取「容器并档位表」，见 {@link SectionStage#sectionYs}：档位可以落在容器里没有条目的段上，
+ * 非噪声生成器的维度里 fill 早退、一个段都没物化，而生成任务照样把整条 band 落到 TERRAIN。只遍历
+ * 容器会让这类段永远停在 TERRAIN，而准入按档位判欠账，该 chunk 因此被无限放行。
  * 标脏只用容器内的段：容器里没有条目的段编码时取不到，脏标记会永久残留。
  */
 public final class SurfaceFiller {
