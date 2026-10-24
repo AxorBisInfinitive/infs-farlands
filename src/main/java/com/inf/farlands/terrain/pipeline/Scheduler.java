@@ -88,6 +88,9 @@ public final class Scheduler {
     public static void clearWorldState() {
         FACES.clear();
         CANDIDATES.clear();
+        // 窗口状态跟着清：换世界后第一次派发必须重新开窗，而不是继承上一个世界的余额与起点。
+        budgetWindowStartMillis = 0L;
+        budgetLeft = 0;
     }
 
     // ---- 候选与准入 ----
@@ -116,7 +119,38 @@ public final class Scheduler {
     /** 同一候选被暂时性原因拒绝的上限，超过即放弃，等下一次显式提交。 */
     private static final int RETRY_MAX_ATTEMPTS = 64;
 
+    /** 预算窗口长度，毫秒。与 maxLightTasksPerTick 那一族「每 50 毫秒」的口径同源。 */
+    private static final long BUDGET_WINDOW_MILLIS = 50L;
+
+    /** 当前窗口的起点，毫秒墙钟。 */
+    private static long budgetWindowStartMillis;
+
+    /**
+     * 当前窗口剩余的成功提交额度。
+     *
+     * <p>两个字段只在服务端主线程读写：{@code dispatch} 只由 {@link #tick()} 调用，而 tick 的入口是
+     * 服务端 tick、两个等待泵与建世界期的预加载循环，前两者各自先判 runningThread；{@code submit} 在
+     * 非主线程上一律 marshal 回主线程。因此不加锁也不需要 volatile，但新增 tick 入口时必须守住这条。
+     */
+    private static int budgetLeft;
+
     private static final int[] EMPTY_SECTIONS = new int[0];
+
+    /**
+     * 开窗：距上次开窗满一个窗口就重置额度。
+     *
+     * <p>用墙钟而不是 tick：预加载与建世界期没有 tick，而那两个等待泵也在主线程上推进调度器，窗口制是
+     * 把 tick、泵与 submit 三条来源折进同一个刻度的唯一办法。
+     *
+     * <p>时钟回拨按过期处理。差值为负时若只判「未满一个窗口」，额度会永远停在 0，派发就此停摆。
+     */
+    private static void openBudgetWindow() {
+        long now = System.currentTimeMillis();
+        if (now < budgetWindowStartMillis || now - budgetWindowStartMillis >= BUDGET_WINDOW_MILLIS) {
+            budgetWindowStartMillis = now;
+            budgetLeft = FarlandsConfig.maxGenTasksPerTick;
+        }
+    }
 
     /** 该 chunk 的记账身份，0 表示客户端或 ProtoChunk。 */
     private static long identityOf(LevelChunk chunk) {
@@ -254,16 +288,31 @@ public final class Scheduler {
         }
     }
 
+    /**
+     * 派发一次：按距离排序逐个准入，本窗口的额度用完就停。
+     *
+     * <p>额度是<b>跨派发共享</b>的，见 {@link #openBudgetWindow}：同一窗口内由 tick、两个等待泵与
+     * 各次 submit 触发的多次派发，合计最多提交 {@code maxGenTasksPerTick} 个作业。它不是「每次派发
+     * 一份」，也不是「每 tick 一份」。正常 20 TPS 下窗口与 tick 同档，tick 被拉长时窗口仍按 50 毫秒
+     * 滚动，那时真实刻度是墙钟。
+     *
+     * <p>额度只计<b>成功提交</b>：认领失败等于没办事，不扣。
+     */
     private static void dispatch() {
+        openBudgetWindow();
+        if (budgetLeft <= 0) {
+            // 本窗口额度已用完：连候选快照都不建。没有这一段，一次 tick 里的每个 submit 都会付一遍
+            // 全表快照与排序，而它们一个作业也交不出去。
+            return;
+        }
         if (CANDIDATES.isEmpty()) {
             return;
         }
-        int budget = FarlandsConfig.maxGenTasksPerTick;
         List<Map.Entry<Long, Candidate>> snapshot = new ArrayList<>(CANDIDATES.entrySet());
         snapshot.sort(Comparator.comparingLong(e -> distanceOf(e.getValue())));
         Map<ServerLevel, SectionLifecycle.ChunkCursor> cursors = new HashMap<>();
         for (Map.Entry<Long, Candidate> entry : snapshot) {
-            if (budget <= 0) {
+            if (budgetLeft <= 0) {
                 break;
             }
             long key = entry.getKey();
@@ -336,7 +385,7 @@ public final class Scheduler {
                 continue;
             }
             if (deco && DecorationFiller.trySubmitDecoration(chunk)) {
-                budget--;
+                budgetLeft--;
                 continue;
             }
             if (!gen) {
@@ -363,7 +412,7 @@ public final class Scheduler {
             }
             // 认领失败等于没派发，不扣预算：扣了就是把余量记在一件没发生的事上。
             if (GenQueue.enqueueTask(chunk, sections)) {
-                budget--;
+                budgetLeft--;
             } else {
                 // 候选已在派发之前离表，这里必须重投。TERRAIN 认领是瞬时争用，退避上限约十二秒；
                 // 期间的收尾还会再提交一次同一个 chunk，两路都进候选表，同键覆盖，无害。

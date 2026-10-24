@@ -31,9 +31,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  *
  * <p>{@code pollTask} 每轮都被调，所以这里推一轮，等待因此有进展。原版等待本身不动，本类只加一次推进。
  *
- * <p>三条约束与既有的泵同形。只在服务端线程上推；按墙钟节流到 50 毫秒，使
- * {@code maxGenTasksPerTick} 保持「每档一次」的语义，不节流时等待循环会退化成零长度 park 加每秒上万次
- * 派发；关服期不推。
+ * <p>三条约束与既有的泵同形。只在服务端线程上推；按墙钟节流到 50 毫秒，与调度器的预算窗口同档，
+ * 否则等待循环会退化成零长度 park 加每秒上万次刷新快照与派发尝试；关服期不推。
  *
  * <p>第四条是本类独有的：泵自己会经准入的 READY 支调到 {@code Beardifier.forStructuresInChunk}，那条路
  * 经 {@code ServerChunkCache} 取 chunk，主线程上同样会阻塞。所以用一个线程局部闸把嵌套那一层降级成原版
