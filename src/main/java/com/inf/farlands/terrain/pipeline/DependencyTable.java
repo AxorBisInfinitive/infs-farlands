@@ -1,13 +1,10 @@
 package com.inf.farlands.terrain.pipeline;
 
 import java.util.Map;
-import java.util.function.IntConsumer;
 
 import com.inf.farlands.serialize.SectionIO;
 import com.inf.farlands.serialize.SectionLifecycle;
 import com.inf.farlands.serialize.SectionStage;
-import com.inf.farlands.util.window.EntitySectionWindow;
-import com.inf.farlands.util.window.PlayerSnapshot;
 import com.inf.farlands.util.window.WindowedChunk;
 import com.inf.farlands.util.world.WorldBounds;
 
@@ -19,7 +16,7 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 
 /**
- * 依赖表的静态声明，加票位到允许档的换算。本类不驱动任何作业，只被自检读。
+ * 依赖表的静态声明，加票位到允许档的换算。
  *
  * <p>
  * 版本绑定：vanilla 的 {@code ChunkStatus} 常量名与 {@code ChunkLevel} 的算式取自
@@ -30,18 +27,16 @@ import net.minecraft.world.level.chunk.status.ChunkStatus;
  * 三部分组成，缺一不可：
  *
  * <ul>
- * <li>{@link Row#universe()}，枚举来源。今天四条判据的来源并不统一，本表逐行复刻各自的来源，
- * 不统一：统一成「section 容器与档位表的并集」是行为变化，留给调度器接管的下一步。</li>
+ * <li>{@link Row#universe()}，枚举来源。四条判据的来源并不统一，本表逐行复刻各自的来源。</li>
  * <li>{@link Row#pendingMask()}，哪些档算欠账，按位。它按行义写，即「该行推进到的档之下的全部档」，
  * SURFACE 行是 TERRAIN 一位，LIGHTED 行是 UNPROCESSED 到 CARVERS，FULL 行是 UNPROCESSED 到
- * DECORATED。不按光照会升的那一档集合写：那个集合是升格判据的匹配面，与「欠账档位」不是同一个
- * 概念，跟着它写会让本行认为停在 TERRAIN 的段不算欠账。</li>
- * <li>{@link Row#excludeReading()}，是否把正在读回的 section 排除。今天四条判据里三条排，装饰
- * 那条按档位表整表扫。</li>
+ * DECORATED。</li>
+ * <li>{@link Row#excludeReading()}，是否把正在读回的 section 排除。</li>
  * </ul>
  *
  * <p>
- * {@link Row#requires()} 与 {@link Row#writeRadius()} 是给调度器接管那一步用的声明，本节无调用点。
+ * 运行时读者只有两处：{@link #allowedStage(int)} 与 {@link #pendingBelowIn}；行声明本身是模型口径的
+ * 声明面，调度器接管依赖判据时按它取值。
  */
 public final class DependencyTable {
 
@@ -143,99 +138,6 @@ public final class DependencyTable {
         return -1;
     }
 
-    /** FULL 是否允许，即允许状态就是 FULL。判据同 {@link #allowedStage(int)}。 */
-    public static boolean fullAllowed(int ticketLevel) {
-        return ticketLevel >= 0 && ChunkLevel.generationStatus(ticketLevel) == ChunkStatus.FULL;
-    }
-
-    /**
-     * 票位分带，供读数对照那个三带推断：0 是允许 FULL，1 是允许状态逐档下降，2 是未加载。
-     */
-    public static int bandOf(int ticketLevel) {
-        if (ticketLevel < 0 || ChunkLevel.generationStatus(ticketLevel) == null) {
-            return 2;
-        }
-        return ChunkLevel.generationStatus(ticketLevel) == ChunkStatus.FULL ? 0 : 1;
-    }
-
-    /**
-     * 该 chunk 到该维度最近玩家的 Chebyshev 距离，读每 tick 的玩家快照；无玩家时返回 0。
-     * 排序键复用本方法，不许另写一份。
-     */
-    public static int nearestPlayerDistance(ServerLevel level, int cx, int cz) {
-        return PlayerSnapshot.nearestDistance(level.dimension(), cx, cz);
-    }
-
-    /** 该维度的有效视距，读玩家快照；无玩家时回退 8。 */
-    public static int viewDistance(ServerLevel level) {
-        return PlayerSnapshot.viewDistance(level.dimension());
-    }
-
-    /**
-     * 该行的欠账 section 个数。表侧与准入侧共用同一个入口：准入问「有没有活」也走它。
-     *
-     * <p>
-     * 过滤顺序：可玩界、档位落在 mask 内、按需排除在读。档位一律现读，不复用枚举回调给的
-     * stage，这样三条来源共用同一条过滤路径。
-     */
-    public static int pendingCount(LevelChunk chunk, Row row) {
-        if (row.pendingMask() == 0) {
-            return 0;
-        }
-        int[] count = { 0 };
-        IntConsumer consider = sy -> {
-            if (!WorldBounds.inSection(sy)) {
-                return;
-            }
-            if ((row.pendingMask() & (1 << SectionStage.getStage(chunk, sy))) == 0) {
-                return;
-            }
-            if (row.excludeReading() && SectionIO.isReading(chunk, sy)) {
-                return;
-            }
-            count[0]++;
-        };
-        switch (row.universe()) {
-            case CONTAINER -> {
-                for (Integer sy : ((WindowedChunk) chunk).windowedAllSections().keySet()) {
-                    if (sy != null) {
-                        consider.accept(sy);
-                    }
-                }
-            }
-            case STAGE_MAP -> SectionStage.forEachStage(chunk, (sy, stage) -> consider.accept(sy));
-            case WINDOW_UNION -> EntitySectionWindow.forEachSectionInAnyWindow(
-                    chunk.getLevel().dimension(), consider);
-            case NONE -> {
-            }
-        }
-        return count[0];
-    }
-
-    /**
-     * 窗口并集里档位低于 {@code limit} 的段数。
-     */
-    public static int pendingBelow(LevelChunk chunk, int limit) {
-        int[] count = { 0 };
-        EntitySectionWindow.forEachSectionInAnyWindow(chunk.getLevel().dimension(), sy -> {
-            if (WorldBounds.inSection(sy) && SectionStage.getStage(chunk, sy) < limit) {
-                count[0]++;
-            }
-        });
-        return count[0];
-    }
-
-    /** 显式段范围内档位低于 {@code limit} 的段数，供力面用。 */
-    public static int pendingBelow(LevelChunk chunk, int limit, int minSection, int maxSection) {
-        int[] count = { 0 };
-        for (int sy = minSection; sy <= maxSection; sy++) {
-            if (WorldBounds.inSection(sy) && SectionStage.getStage(chunk, sy) < limit) {
-                count[0]++;
-            }
-        }
-        return count[0];
-    }
-
     /**
      * 给定段集合里档位低于 {@code limit} 的段数。
      *
@@ -253,44 +155,24 @@ public final class DependencyTable {
     }
 
     /**
-     * 装饰的写域九格门，表侧的求值：每一格都在场、都有已物化的 section、且已有 section 都到
-     * {@code CARVERS}，在读的 section 除外。不可玩界的邻居只要求在场，与今天那句例外同源。
+     * 装饰的写域九格门：每一格都在场、都有已物化的 section、且已有 section 都到 {@code CARVERS}，
+     * 在读的 section 除外。不可玩界的邻居只要求在场。
+     *
+     * <p>判据面取档位表与段容器的交集，两头都不能放宽：
+     *
+     * <ul>
+     * <li>只遍历容器会把构造期的窗口默认段算成 {@code UNPROCESSED}。那些段被物化但从不落档，本来
+     * 就不在该被生成的集合里，按容器判会让九格恒假。</li>
+     * <li>只遍历档位表会把读回标记留下的残留算进来。那些条目容器里没有，装饰也写不进去，
+     * 按整表判会让周围九格的装饰被永久挡死。</li>
+     * </ul>
+     *
+     * <p>交集与写门同宽：{@code DecorationRegion.setBlock} 对未物化的段直接返回假。这条是一条耦合，
+     * 若将来写门改成会物化的取法，例如 {@code getSection}，判据面要重新算。
      */
     public static boolean neighborGate(LevelChunk center) {
-        return gateFailure(center, false) == null;
-    }
-
-    /**
-     * 九格门第一个不成立的原因，形如 `1,-1:no-stage`、`0,1:stage=1@sy=-3`、`2,0:absent`；门成立返回 null。
-     *
-     * <p>与 {@link #neighborGate} 共用 {@link #gateFailure}，只有一份循环：诊断版与判据版分头实现会走偏。
-     * 只在门不成立时才构造串，正常路径不分配。
-     */
-    public static String neighborGateDetail(LevelChunk center) {
-        return gateFailure(center, true);
-    }
-
-    /**
-     * 门的求值本体。成立返回 null；不成立时，{@code describe} 为假返回空串常量，为真返回原因。
-     *
-     * <p>三个 false 出口分别对应三种互斥情形：壳不在场、可写集合为空、可写集合里有低于
-     * {@code CARVERS} 的段。第三条会把段号一起打出来。
-     *
-     * <p>判据面取**档位表与段容器的交集**，两头都不能放宽：
-     *
-     * <ul>
-     * <li>只遍历容器会把构造期的窗口默认段算成 {@code UNPROCESSED}。那些段被物化但从不落档，本来
-     * 就不在该被生成的集合里，按容器判会让九格恒假。</li>
-     * <li>只遍历档位表会把读回标记留下的残留算进来。那些条目容器里没有，装饰也写不进去，
-     * 按整表判会让周围九格的装饰被永久挡死。</li>
-     * </ul>
-     *
-     * <p>交集与写门同宽：{@code DecorationRegion.setBlock} 对未物化的段直接返回假。这条是一条耦合，
-     * 若将来写门改成会物化的取法，例如 {@code getSection}，判据面要重新算。
-     */
-    private static String gateFailure(LevelChunk center, boolean describe) {
         if (!(center.getLevel() instanceof ServerLevel level)) {
-            return describe ? "no-level" : "";
+            return false;
         }
         SectionLifecycle.ChunkCursor cursor = SectionLifecycle.cursor(level);
         ChunkPos pos = center.getPos();
@@ -298,97 +180,34 @@ public final class DependencyTable {
             for (int dz = -1; dz <= 1; dz++) {
                 int cx = pos.x() + dx;
                 int cz = pos.z() + dz;
-                String failure = cellFailure(cursor.at(cx, cz), dx, dz, cx, cz);
-                if (failure != null) {
-                    return describe ? failure : "";
+                if (!cellReady(cursor.at(cx, cz), cx, cz)) {
+                    return false;
                 }
             }
         }
-        return null;
+        return true;
     }
 
-    /**
-     * 九格逐格的形态，只列不成立的那些格，每格再带两栏后续问题。
-     *
-     * <p>与判据共用 {@link #cellFailure}：一个判断两种驱动，判据版遇第一个失败即返回，诊断版收全九格。
-     * 判断本身只有一份，两份驱动不会走偏。
-     *
-     * <p>两栏目的是分开「门只是暂时不成立」与「这一格再也不会有变化」：{@code cand} 是该格是否仍在
-     * 候选表里，{@code claim} 是该格是否被某次装饰认领。两者都假时，这一格不会再有任何推进者。
-     */
-    public static String neighborGateAll(LevelChunk center) {
-        if (!(center.getLevel() instanceof ServerLevel level)) {
-            return "no-level";
-        }
-        SectionLifecycle.ChunkCursor cursor = SectionLifecycle.cursor(level);
-        ChunkPos pos = center.getPos();
-        StringBuilder sb = new StringBuilder();
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dz = -1; dz <= 1; dz++) {
-                int cx = pos.x() + dx;
-                int cz = pos.z() + dz;
-                LevelChunk neighbor = cursor.at(cx, cz);
-                String failure = cellFailure(neighbor, dx, dz, cx, cz);
-                if (failure == null) {
-                    continue;
-                }
-                if (sb.length() > 0) {
-                    sb.append(' ');
-                }
-                sb.append(failure);
-                if (neighbor != null) {
-                    sb.append(",cand=").append(Scheduler.hasCandidate(neighbor));
-                    sb.append(",claim=").append(
-                            OwnershipTable.isChunkClaimed(OwnershipTable.DECORATED, neighbor.getPos().pack()));
-                }
-            }
-        }
-        return sb.length() == 0 ? "ok" : sb.toString();
-    }
-
-    /**
-     * 九格里某一格的判据。成立返回 null，否则返回该格的原因。
-     *
-     * <p>判据面是「档位表与段容器的交集」：只算流水线真的碰过、并且真的可写的段。
-     *
-     * <ul>
-     * <li>只遍历容器会把构造期的窗口默认段算成 {@code UNPROCESSED}。那些段被物化但从不落档，本来
-     * 就不在该被生成的集合里，按容器判会让九格恒假。</li>
-     * <li>只遍历档位表会把读回标记留下的残留算进来。那些条目容器里没有，装饰也写不进去，
-     * 按整表判会让周围九格的装饰被永久挡死。</li>
-     * </ul>
-     *
-     * <p>交集与写门同宽：{@code DecorationRegion.setBlock} 对未物化的段直接返回假。这条是一条耦合，
-     * 若将来写门改成会物化的取法，例如 {@code getSection}，判据面要重新算。
-     */
-    private static String cellFailure(LevelChunk neighbor, int dx, int dz, int cx, int cz) {
+    /** 九格里某一格是否可过：在场、可玩界、可写集合非空、且其中没有低于 {@code CARVERS} 的段。 */
+    private static boolean cellReady(LevelChunk neighbor, int cx, int cz) {
         if (neighbor == null) {
-            return dx + "," + dz + ":absent";
+            return false;
         }
         if (!WorldBounds.inChunkRange(cx, cz)) {
-            return null;
+            return true;
         }
-        int[] lowest = { -1 };
-        int[] lowestSy = { 0 };
         int[] count = { 0 };
+        boolean[] below = { false };
         Map<Integer, LevelChunkSection> container = ((WindowedChunk) neighbor).windowedAllSections();
         SectionStage.forEachStage(neighbor, (sy, stage) -> {
             if (sy == null || !container.containsKey(sy)) {
                 return;
             }
             count[0]++;
-            if (stage < SectionStage.CARVERS && !SectionIO.isReading(neighbor, sy)
-                    && (lowest[0] < 0 || stage < lowest[0])) {
-                lowest[0] = stage;
-                lowestSy[0] = sy;
+            if (stage < SectionStage.CARVERS && !SectionIO.isReading(neighbor, sy)) {
+                below[0] = true;
             }
         });
-        if (count[0] == 0) {
-            return dx + "," + dz + ":no-stage";
-        }
-        if (lowest[0] >= 0) {
-            return dx + "," + dz + ":stage=" + lowest[0] + "@sy=" + lowestSy[0];
-        }
-        return null;
+        return count[0] > 0 && !below[0];
     }
 }

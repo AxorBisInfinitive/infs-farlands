@@ -2,9 +2,6 @@ package com.inf.farlands.serialize;
 
 import java.lang.reflect.Field;
 
-import com.inf.farlands.FarlandsConfig;
-import com.inf.farlands.InfsFarlands;
-
 import net.minecraft.server.level.ChunkHolder;
 import net.minecraft.server.level.ChunkLevel;
 import net.minecraft.server.level.FullChunkStatus;
@@ -51,40 +48,25 @@ public final class ReadyEntityChunks {
      * 请求读盘。
      */
     public static void sync(ServerLevel level, ChunkPos center, int radius) {
-        int synced = 0;
-        int noHolder = 0;
-        int levelShort = 0;
-        int dead = 0;
-        int below = 0;
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 ChunkPos pos = new ChunkPos(center.x() + dx, center.z() + dz);
                 ChunkHolder holder = SectionLifecycle.latestHolder(level, pos.x(), pos.z());
                 if (holder == null) {
-                    noHolder++;
                     continue;
                 }
                 if (!ChunkLevel.fullStatus(holder.getTicketLevel()).isOrAfter(FullChunkStatus.FULL)) {
-                    levelShort++;
                     continue;
                 }
                 LevelChunk chunk = SectionLifecycle.latestChunk(level, pos.x(), pos.z());
                 if (chunk == null || !CounterIdentities.owned(chunk)) {
-                    dead++;
                     continue;
                 }
                 if (SectionStage.hasBelowLighted(chunk)) {
-                    below++;
                     continue;
                 }
                 push(level, pos);
-                synced++;
             }
-        }
-        if (FarlandsConfig.logScheduler) {
-            InfsFarlands.LOGGER.info(
-                    "FLSYNC center={},{} r={} synced={} noHolder={} levelShort={} dead={} below={}",
-                    center.x(), center.z(), radius, synced, noHolder, levelShort, dead, below);
         }
     }
 

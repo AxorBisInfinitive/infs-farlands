@@ -4,15 +4,12 @@ import java.util.HashSet;
 import java.util.Set;
 
 import com.inf.farlands.InfsFarlands;
-import com.inf.farlands.serialize.ChunkCounters;
 import com.inf.farlands.serialize.ChunkReadiness;
 import com.inf.farlands.serialize.SectionIO;
 import com.inf.farlands.serialize.SectionLifecycle;
 import com.inf.farlands.serialize.SectionStage;
 import com.inf.farlands.terrain.biomeFiller.BiomeFiller;
-import com.inf.farlands.terrain.pipeline.DependencyTable;
 import com.inf.farlands.terrain.pipeline.GenQueue;
-import com.inf.farlands.terrain.pipeline.OwnershipTable;
 import com.inf.farlands.terrain.pipeline.Scheduler;
 import com.inf.farlands.terrain.pipeline.SpawnPreload;
 import com.inf.farlands.terrain.structure.StructureDriver;
@@ -246,7 +243,7 @@ public abstract class SpawnPreloadMixin {
                 }
                 cache.tick(() -> false, false);
                 SectionIO.drainMainThreadTasks(server);
-                Scheduler.tick("create");
+                Scheduler.tick();
                 rounds++;
                 // 兜底重扫：等邻居的候选会在退避上限处被丢掉，而邻居落档之后不一定有人再提交它。
                 // 每 N 轮把判据圈整圈重投一次，等于给这些等待续期；圈外不碰，所以不会把几何死区
@@ -263,58 +260,6 @@ public abstract class SpawnPreloadMixin {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
-        shells = farlands$countShells(level, center);
-        // 逐格读数排在汇总行之前，汇总行留作尾行的最后一个锚点。
-        farlands$dumpCriterion(level, center, minSy, maxSy);
-        // 只报读数：轮数、耗时、壳覆盖、判据圈是否全亮、候选表是否已空、面内每格最终档位，以及判据圈
-        // 的九格门当场求值分布。后两项用来分开「门在退出时仍假」与「门已可过但没装饰成」。
-        InfsFarlands.LOGGER.info(
-                "farlands: creation pump rounds={} elapsed={} ms shells={}/{} bandLit={} cand={} face stages={} crit gate={}",
-                rounds, System.currentTimeMillis() - startedAt, shells, total,
-                farlands$bandLit(level, center, minSy, maxSy), Scheduler.hasPendingCandidates(),
-                farlands$faceStages(level, center, minSy, maxSy), farlands$critGate(level, center));
-    }
-
-    /**
-     * 判据圈里段带未全亮的 chunk 逐格一条：档位、门当场求值、装饰认领是否被占、候选表里有没有它。
-     *
-     * <p>只打未亮的那些，所以正常局是零行。这四项能一次分开三个互斥形态：认领泄漏、候选丢失、
-     * 门可过但提交没成。
-     */
-    @Unique
-    private static void farlands$dumpCriterion(ServerLevel level, ChunkPos center, int minSy, int maxSy) {
-        int radius = FARLANDS_PRELOAD_RADIUS;
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dz = -radius; dz <= radius; dz++) {
-                ChunkPos pos = new ChunkPos(center.x() + dx, center.z() + dz);
-                LevelChunk chunk = ChunkReadiness.chunkAt(level, pos);
-                if (chunk == null) {
-                    continue;
-                }
-                int lowest = SectionStage.LIGHTED;
-                for (int sy = minSy; sy <= maxSy; sy++) {
-                    if (!WorldBounds.inSection(sy)) {
-                        continue;
-                    }
-                    int stage = SectionStage.getStage(chunk, sy);
-                    if (stage < lowest) {
-                        lowest = stage;
-                    }
-                }
-                if (lowest >= SectionStage.LIGHTED) {
-                    continue;
-                }
-                String gate = DependencyTable.neighborGateDetail(chunk);
-                // wr 与 secs 是第七行另外两个门：窗口面是否读过盘、此刻的段集合有多大。三个门各一栏，
-                // 一次读数就能分开「没读过盘」「不在面/窗口覆盖内」「带内仍有低档段」。
-                InfsFarlands.LOGGER.info("FLCRIT chunk={},{} stage={} gate={} claimed={} cand={} wr={} secs={}",
-                        pos.x(), pos.z(), lowest, gate == null ? "ok" : gate,
-                        OwnershipTable.isChunkClaimed(OwnershipTable.DECORATED, pos.pack()),
-                        Scheduler.hasCandidate(chunk),
-                        ChunkCounters.isWindowReadDone(chunk),
-                        Scheduler.sectionsFor(chunk).length);
-            }
-        }
     }
 
     /** 判据圈逐格重投。主线程调用，圈半径取判据半径。 */
@@ -325,88 +270,10 @@ public abstract class SpawnPreloadMixin {
             for (int dz = -radius; dz <= radius; dz++) {
                 LevelChunk chunk = ChunkReadiness.chunkAt(level, new ChunkPos(center.x() + dx, center.z() + dz));
                 if (chunk != null) {
-                    Scheduler.submit("exist", chunk);
+                    Scheduler.submit(chunk);
                 }
             }
         }
-    }
-
-    /**
-     * 判据圈 121 格的九格门当场求值分布，形如 `ok=… absent=… noStage=… below=…`。
-     *
-     * <p>只在泵退出时算一次。`ok` 表示门此刻成立；其余三栏对应门的三类不成立原因，与
-     * {@code DependencyTable.neighborGateDetail} 的串同源。
-     */
-    @Unique
-    private static String farlands$critGate(ServerLevel level, ChunkPos center) {
-        int radius = FARLANDS_PRELOAD_RADIUS;
-        int ok = 0;
-        int absent = 0;
-        int noStage = 0;
-        int below = 0;
-        int noShell = 0;
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dz = -radius; dz <= radius; dz++) {
-                LevelChunk chunk = ChunkReadiness.chunkAt(level, new ChunkPos(center.x() + dx, center.z() + dz));
-                if (chunk == null) {
-                    noShell++;
-                    continue;
-                }
-                String detail = DependencyTable.neighborGateDetail(chunk);
-                if (detail == null) {
-                    ok++;
-                } else if (detail.endsWith(":absent") || detail.endsWith("no-level")) {
-                    absent++;
-                } else if (detail.endsWith(":no-stage")) {
-                    noStage++;
-                } else {
-                    below++;
-                }
-            }
-        }
-        return "ok=" + ok + " absent=" + absent + " noStage=" + noStage + " below=" + below
-                + " noShell=" + noShell;
-    }
-
-    /**
-     * 面内每格按「段带里最低的那一档」分桶，返回 `[n0,…,n6]`，另加 `noShell=N`。
-     *
-     * <p>桶号就是该 chunk 的阻塞档位：0 表示段带里还有未处理的段，空壳也落在这一桶；6 表示全带已点亮。
-     * 这一行把「面内 169 个 chunk 卡在哪一相」一次说清，避免再用过时的拒绝快照推断终态。
-     */
-    @Unique
-    private static String farlands$faceStages(ServerLevel level, ChunkPos center, int minSy, int maxSy) {
-        int radius = FARLANDS_PRELOAD_DRIVE_RADIUS;
-        int[] buckets = new int[SectionStage.LIGHTED + 1];
-        int noShell = 0;
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dz = -radius; dz <= radius; dz++) {
-                LevelChunk chunk = ChunkReadiness.chunkAt(level, new ChunkPos(center.x() + dx, center.z() + dz));
-                if (chunk == null) {
-                    noShell++;
-                    continue;
-                }
-                int lowest = SectionStage.LIGHTED;
-                for (int sy = minSy; sy <= maxSy; sy++) {
-                    if (!WorldBounds.inSection(sy)) {
-                        continue;
-                    }
-                    int stage = SectionStage.getStage(chunk, sy);
-                    if (stage < lowest) {
-                        lowest = stage;
-                    }
-                }
-                buckets[lowest]++;
-            }
-        }
-        StringBuilder sb = new StringBuilder("[");
-        for (int i = 0; i < buckets.length; i++) {
-            if (i > 0) {
-                sb.append(',');
-            }
-            sb.append(buckets[i]);
-        }
-        return sb.append("] noShell=").append(noShell).toString();
     }
 
     /** 出生面的结构读域内已有壳的格数。主线程调用。 */
@@ -514,13 +381,13 @@ public abstract class SpawnPreloadMixin {
                             for (int i = 0; i < range.length; i++) {
                                 range[i] = minSy + i;
                             }
-                            Scheduler.submit("exist", chunk, range);
+                            Scheduler.submit(chunk, range);
                         }
                     }
                 }
                 // 调度器在这里驱动：它由 tick 驱动，而预加载跑在 tick 之前。不补这一步，判据圈的段会永远停在
                 // CARVERS，而本循环的退出条件是范围内全部点亮，那就永远等不到。
-                Scheduler.tick("preload");
+                Scheduler.tick();
                 // 抽一次主线程执行器。装饰的收尾把升段与撤认领投在这里，fsa 的编码提交也在这里，
                 // 而 prepareLevels 期间的 waitUntilNextTick 可能不再抽各 level 的 chunk 执行器，
                 // 与 GenQueue.awaitIdle 的同形处理一致。不抽它，收尾永远落不下来，认领被一直持有。

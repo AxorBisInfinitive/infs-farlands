@@ -59,23 +59,6 @@ public final class PlayerSnapshot {
         return entries;
     }
 
-    /**
-     * 快照里出现的维度，按出现顺序去重，元素是维度 id 的字符串。
-     *
-     * <p>只给冻结期的读数用。准入读的是 {@link #entries()} 的逐条内容，这一格回答「这份快照里有没有
-     * 那个维度」；与窗口表那一侧的回答并排看，就能分开「泵没跑」与「泵跑了但没写进这个维度」。
-     */
-    public static List<String> dimensions() {
-        List<String> dims = new ArrayList<>();
-        for (Entry e : entries) {
-            String id = String.valueOf(e.dimension().identifier());
-            if (!dims.contains(id)) {
-                dims.add(id);
-            }
-        }
-        return dims;
-    }
-
     /** 该 chunk 到该维度最近玩家的 Chebyshev 距离；该维度无玩家时返回 0。 */
     public static int nearestDistance(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
         int best = Integer.MAX_VALUE;

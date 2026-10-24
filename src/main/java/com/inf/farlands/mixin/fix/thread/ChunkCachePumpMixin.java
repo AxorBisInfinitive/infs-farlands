@@ -38,11 +38,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * <p>第四条是本类独有的：泵自己会经准入的 READY 支调到 {@code Beardifier.forStructuresInChunk}，那条路
  * 经 {@code ServerChunkCache} 取 chunk，主线程上同样会阻塞。所以用一个线程局部闸把嵌套那一层降级成原版
  * 等待，不让它再进本方法。
- *
- * <p>优先级显式写 900，因为同一注入点上还有读数用的 {@code ChunkSourcePollTaskMixin}（默认 1000）。泵先
- * 跑、探针后采样，{@code FLWAIT} 那一行的 {@code ticks} 才会把这一拍的推进算进同一行。
  */
-@Mixin(targets = "net.minecraft.server.level.ServerChunkCache$MainThreadExecutor", priority = 900)
+@Mixin(targets = "net.minecraft.server.level.ServerChunkCache$MainThreadExecutor")
 public abstract class ChunkCachePumpMixin {
 
     /**
@@ -102,7 +99,7 @@ public abstract class ChunkCachePumpMixin {
         farlands$IN_PUMP.set(Boolean.TRUE);
         try {
             FarlandsTick.refreshTickState(server);
-            Scheduler.tick("poll");
+            Scheduler.tick();
         } catch (Throwable t) {
             if (farlands$pumpFailed.compareAndSet(false, true)) {
                 InfsFarlands.LOGGER.error("farlands: chunk cache pump failed during a blocked wait", t);

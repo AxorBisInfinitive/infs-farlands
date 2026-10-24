@@ -1,11 +1,7 @@
 package com.inf.farlands.terrain.pipeline;
 
 import com.inf.farlands.InfsFarlands;
-import com.inf.farlands.debug.CarveLoopProbe;
-import com.inf.farlands.serialize.CounterIdentities;
-import com.inf.farlands.serialize.CounterIdentity;
 import com.inf.farlands.serialize.SectionIO;
-import com.inf.farlands.serialize.SectionLifecycle;
 import com.inf.farlands.serialize.SectionStage;
 import com.inf.farlands.terrain.biomeFiller.BiomeFiller;
 import com.inf.farlands.terrain.carverFiller.CarverFiller;
@@ -48,19 +44,11 @@ public final class GenTask {
     /** 本任务持有的 TERRAIN 认领编号，收尾时带回去释放。 */
     private final long genOwner;
 
-    /** 诊断用：本次收集到的段数与 carve 出的段数。 */
-    private int lastSegments;
-    private int lastCarved;
-
-    /** 诊断用：派发时领到的全局序号，与 `FLDISP` 那一行按序号对齐。 */
-    private final long dispatchSeq;
-
-    public GenTask(LevelChunk chunk, int[] preloadSections, long genOwner, long dispatchSeq) {
+    public GenTask(LevelChunk chunk, int[] preloadSections, long genOwner) {
         this.chunk = chunk;
         this.preloadSections = preloadSections;
         this.priority = computePriority(chunk);
         this.genOwner = genOwner;
-        this.dispatchSeq = dispatchSeq;
     }
 
     /** 本任务的认领编号。 */
@@ -71,16 +59,6 @@ public final class GenTask {
     /** 本任务的 chunk，诊断行用。 */
     LevelChunk chunk() {
         return this.chunk;
-    }
-
-    /** 诊断用：本次执行收集到的段数。 */
-    int lastSegments() {
-        return this.lastSegments;
-    }
-
-    /** 诊断用：本次执行 carve 出的段数。 */
-    int lastCarved() {
-        return this.lastCarved;
     }
 
     int priority() {
@@ -108,8 +86,6 @@ public final class GenTask {
                 return;
             }
             List<int[]> segments = collectSegments();
-            this.lastSegments = segments.size();
-            logTaskEntry(serverLevel, segments.size());
             for (int[] seg : segments) {
                 // 先补 biome 再推 TERRAIN。本方法是全流程唯一把 stage 推到 TERRAIN 的地方，放这里就与
                 // 入队顺序无关；若让生成先跑，stage 越过 BIOMES，fillSectionBiomes 的 stage < BIOMES 门
@@ -157,7 +133,6 @@ public final class GenTask {
                 InfsFarlands.LOGGER.error("GENTASK carvers ex chunk={},{} {}",
                         chunk.getPos().x(), chunk.getPos().z(), e.toString());
             }
-            this.lastCarved = carved.length;
             // 雕刻完成即宣告写域就绪：这一格从低于 CARVERS 变成就绪，九格门要重判。装饰的发现与
             // 提交由调度器在准入时做，本任务不再登记。
             if (carved.length > 0) {
@@ -172,7 +147,7 @@ public final class GenTask {
                 // 这一处没有伴随档位变化，单独投一条脏事件，走落档体。
                 Scheduler.dirty(chunk, awaitingLight, true);
                 // 交准入：光照由调度器的第六行发，本任务只把该 chunk 推回候选表。
-                Scheduler.submit("task", chunk);
+                Scheduler.submit(chunk);
                 // fill、surface、carvers 直接写 section，没有 vanilla 广播；这里只标记该 chunk
                 // 内容已变，由 ChunkDataSender 每 tick 按玩家当前窗口物化后再发段包。光照会先完成，
                 // flush 时 LIGHTED 认领为真，于是留队列等光照完成，方块与光照同到。
@@ -211,61 +186,8 @@ public final class GenTask {
     }
 
     /**
-     * 诊断：作业入口一行。临时仪器，与同批探针一并删除。
-     *
-     * <p>一次给全判断所需的几栏：对象身份与当前 chunk 是否同一个、记账身份是否还活着、容器段带的档位
-     * 分布、准入用的段数组长度与其中低于 CARVERS 的个数、本次真正收集到的段数，以及 surface 与 carvers
-     * 两道门当场是否成立。
-     *
-     * <p>限流分两条通道：空转与非空转各按 chunk 每秒一条。空转占了作业的绝大多数，共用一个通道会把
-     * 非空转那条挤掉，而判读要的是同一格里两种形态各自的样子。
-     */
-    private void logTaskEntry(ServerLevel level, int collect) {
-        ChunkPos pos = chunk.getPos();
-        boolean sur = SurfaceFiller.hasSurfacePending(chunk);
-        boolean car = CarverFiller.hasCarversPending(chunk);
-        boolean noop = collect == 0 && !sur && !car;
-        if (!CarveLoopProbe.shouldLogTask(pos.pack(), noop)) {
-            return;
-        }
-        long counterId = chunk instanceof CounterIdentity identity ? identity.counterId() : 0L;
-        LevelChunk current = SectionLifecycle.latestChunk(level, pos.x(), pos.z());
-        int[] sections = preloadSections != null ? preloadSections : Scheduler.sectionsFor(chunk);
-        int pending = DependencyTable.pendingBelowIn(chunk, sections, SectionStage.CARVERS);
-        int reading = 0;
-        for (int sy : sections) {
-            if (SectionIO.isReading(chunk, sy)) {
-                reading++;
-            }
-        }
-        InfsFarlands.LOGGER.info(
-                "FLTASK pos={},{} seq={} id={} ctr={} live={} same={} stages={} n={} pk={} rd={} collect={} sur={} car={} noop={}",
-                pos.x(), pos.z(), this.dispatchSeq, System.identityHashCode(chunk), counterId,
-                CounterIdentities.isLive(counterId), current == chunk,
-                stageHistogram(chunk), sections.length, pending, reading, collect, sur, car, noop);
-    }
-
-    /** 诊断：容器段带的档位直方图，下标即档位。 */
-    private static String stageHistogram(LevelChunk chunk) {
-        int[] counts = new int[SectionStage.LIGHTED + 1];
-        SectionStage.forEachStage(chunk, (sy, stage) -> {
-            if (stage >= 0 && stage < counts.length) {
-                counts[stage]++;
-            }
-        });
-        StringBuilder sb = new StringBuilder("[");
-        for (int i = 0; i < counts.length; i++) {
-            if (i > 0) {
-                sb.append(',');
-            }
-            sb.append(counts[i]);
-        }
-        return sb.append(']').toString();
-    }
-
-    /**
      * 收集该 chunk 的待生成 section 连续段，来源是窗口并集或预加载指定集合。
-     * 过滤已 TERRAIN 的 section 与可玩范围，窗口模式额外跳过读回在途的 section。
+     * 过滤已 TERRAIN 的 section 与可玩范围，两种模式都跳过读回在途的 section。
      */
     private List<int[]> collectSegments() {
         List<int[]> segments = new ArrayList<>();

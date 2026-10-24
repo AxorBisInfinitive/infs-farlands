@@ -10,7 +10,6 @@ import com.inf.farlands.terrain.pipeline.GenQueue;
 import com.inf.farlands.terrain.pipeline.NeighborhoodTickets;
 import com.inf.farlands.terrain.pipeline.OwnershipTable;
 import com.inf.farlands.terrain.pipeline.Scheduler;
-import com.inf.farlands.terrain.pipeline.SchedulerMetrics;
 import com.inf.farlands.terrain.pipeline.SpawnPreload;
 import com.inf.farlands.terrain.structure.StructureDriver;
 import com.inf.farlands.util.network.ChunkDataSender;
@@ -72,7 +71,6 @@ public abstract class MinecraftServerMixin {
         DecorationFiller.clearWorldState();
         OwnershipTable.clearWorldState();
         Scheduler.clearWorldState();
-        SchedulerMetrics.clearWorldState();
         StructureDriver.clearWorldState();
         ChunkDataSender.clearWorldState();
         SpawnPreload.clearAll();

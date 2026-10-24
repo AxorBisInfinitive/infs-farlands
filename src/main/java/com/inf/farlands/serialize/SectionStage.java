@@ -7,9 +7,6 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
 
-import com.inf.farlands.debug.CarveLoopProbe;
-import com.inf.farlands.debug.StageSlotProbe;
-import com.inf.farlands.debug.StageWriteProbe;
 import com.inf.farlands.terrain.debug.StageMetrics;
 import com.inf.farlands.util.map.Long2ObjectStripedMap;
 import com.inf.farlands.util.window.WindowedChunk;
@@ -146,49 +143,27 @@ public final class SectionStage {
     private static void write(LevelChunk chunk, int sectionY, int stage, boolean monotone) {
         ConcurrentHashMap<Integer, SectionState> m = open(chunk);
         if (m == null) {
-            CarveLoopProbe.drop(chunk, sectionY, stage);
             return;
         }
-        SectionState state = m.get(sectionY);
-        if (state == null) {
-            state = m.computeIfAbsent(sectionY, k -> new SectionState(UNPROCESSED));
-            // 诊断：新建条目时记一次，标签带入口与目标档，足以反推调用点。
-            StageSlotProbe.created(chunk, sectionY,
-                    (monotone ? "write:" : "restore:") + CarveLoopProbe.stageName(stage));
-        }
+        SectionState state = m.computeIfAbsent(sectionY, k -> new SectionState(UNPROCESSED));
         int old;
         synchronized (state) {
             old = state.stage();
             if (monotone && stage < old) {
-                StageWriteProbe.blockedDown(old, stage);
                 return;
             }
             state.setStage(stage);
         }
-        // 诊断：新旧档一并交出去，写侧流量因此可按「同档、升档、降档」与旧档分布分开。
-        StageWriteProbe.applied(old, stage);
         ChunkCounters.onStageChange(chunk, sectionY, old, stage);
     }
 
     /** 该段的状态，不存在则建；身份为 0 或已注销返回 null。 */
     public static SectionState stateOf(LevelChunk chunk, int sectionY) {
-        return stateOf(chunk, sectionY, "stateOf:other");
-    }
-
-    /**
-     * 同 {@link #stateOf(LevelChunk, int)}，{@code tag} 只用于诊断，标出是谁在取或建这个条目。
-     */
-    public static SectionState stateOf(LevelChunk chunk, int sectionY, String tag) {
         ConcurrentHashMap<Integer, SectionState> m = open(chunk);
         if (m == null) {
             return null;
         }
-        SectionState state = m.get(sectionY);
-        if (state == null) {
-            state = m.computeIfAbsent(sectionY, k -> new SectionState(UNPROCESSED));
-            StageSlotProbe.created(chunk, sectionY, tag);
-        }
-        return state;
+        return m.computeIfAbsent(sectionY, k -> new SectionState(UNPROCESSED));
     }
 
     /** 该段的状态，不存在返回 null，不建条目。 */
@@ -203,7 +178,7 @@ public final class SectionStage {
 
     /** 标脏。身份为 0 的 chunk（ProtoChunk、客户端）没有状态，空转。 */
     public static void markDirty(LevelChunk chunk, int sectionY) {
-        SectionState state = stateOf(chunk, sectionY, "stateOf:dirty");
+        SectionState state = stateOf(chunk, sectionY);
         if (state != null) {
             state.markDirty();
         }
@@ -261,7 +236,6 @@ public final class SectionStage {
             synchronized (removed) {
                 ChunkCounters.onRemove(chunk, sectionY, removed.stage());
             }
-            CarveLoopProbe.removeSection(chunk, sectionY, removed.stage());
         }
     }
 
@@ -277,8 +251,7 @@ public final class SectionStage {
             return;
         }
         CounterIdentities.unregister(identity);
-        ConcurrentHashMap<Integer, SectionState> removed = STAGES.remove(identity);
-        CarveLoopProbe.clearChunk(chunk, identity, removed == null ? 0 : removed.size());
+        STAGES.remove(identity);
         ChunkCounters.clear(chunk);
     }
 

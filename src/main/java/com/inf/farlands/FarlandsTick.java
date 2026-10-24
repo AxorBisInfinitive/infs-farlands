@@ -7,7 +7,6 @@ import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.debug.StageMetrics;
 import com.inf.farlands.terrain.pipeline.NeighborhoodTickets;
 import com.inf.farlands.terrain.pipeline.Scheduler;
-import com.inf.farlands.terrain.pipeline.SchedulerMetrics;
 import com.inf.farlands.terrain.system.terrain.noise.overworld.Beta173.Beta173NoiseSystem;
 import com.inf.farlands.terrain.system.terrain.noise.overworld.Vanilla.VanillaNoiseSystem;
 import com.inf.farlands.util.maps.AquiferUtil;
@@ -183,14 +182,11 @@ public class FarlandsTick {
      * <p>准入的两道门读的就是这两张：{@code isNearPlayer} 读快照，{@code Scheduler.sectionsFor} 的竖直面
      * 读窗口并集。抽出来的理由是提交点也要能只刷这一层：提交发生在阻塞取数之内，而票据的加减不该跟着
      * 提前到那一处。
-     *
-     * @return 刷新后存在窗口的维度数
      */
-    public static int refreshGates(MinecraftServer server) {
+    public static void refreshGates(MinecraftServer server) {
         List<ServerPlayer> players = server.getPlayerList().getPlayers();
         PlayerSnapshot.capture(players);
         EntitySectionWindow.update(players);
-        return EntitySectionWindow.dimensions();
     }
 
     /**
@@ -198,13 +194,10 @@ public class FarlandsTick {
      *
      * <p>抽成方法是为了让真 tick 的末尾与阻塞等待期的泵共用同一份顺序。两处各写一份顺序，就会刷出与真
      * tick 不同源的状态，而两边同时被准入读。
-     *
-     * @return 刷新后存在窗口的维度数，供泵的读数对照
      */
-    public static int refreshTickState(MinecraftServer server) {
-        int dims = refreshGates(server);
+    public static void refreshTickState(MinecraftServer server) {
+        refreshGates(server);
         NeighborhoodTickets.tick(server);
-        return dims;
     }
 
     /** 服务端 tick 末尾统一入口。 */
@@ -218,34 +211,11 @@ public class FarlandsTick {
             trimAquiferLookup(tickCount);
             // 就绪吞吐读数：与本周期同档，约 10 秒一行。只报读数，不报解读。
             StageMetrics.flush();
-            // 调度器读数：与本周期同档。本行挪到这里，不再随每次派发打印。
-            SchedulerMetrics.flushIfEnabled();
-            // 装饰各出口的次数：逐条那几行被限流，量级只能看这一行。
-            com.inf.farlands.terrain.decorationFiller.DecorationFiller.flushRejects();
-            // 候选离开候选表的读数：两条静默路各丢了多少、其中多少是在欠账时丢的。
-            com.inf.farlands.debug.CandidateProbe.flush();
-            // 档位写入侧读数：与本周期同档，请求段数与执行次数的比值是这一栏的靶心。
-            com.inf.farlands.debug.StageWriteProbe.flush();
-            // 残留条目回收：档位表有、段容器没有的那些，与装饰写门同宽。排在读数之前，同窗可对账。
+            // 残留条目回收：档位表有、段容器没有的那些，与装饰写门同宽。
             SectionLifecycle.reclaimOrphanStages(server);
-            // 档位条目建立读数：带外与无容器两类条目各是谁建的，以及本窗回收了多少。
-            com.inf.farlands.debug.StageSlotProbe.flush();
             // 视距内兜底重扫：把有活却不在候选表里的 chunk 补交一次，本拍末尾的 tick 统一派发。
             com.inf.farlands.terrain.pipeline.InViewSweep.run(server);
-            // 空闲面读数：读上一句那一窗的计数，不再自己扫一遍。
-            com.inf.farlands.debug.StallWatch.flush(server);
-            // 派生记账的自检：与重数一遍逐 chunk 比对。只报失配。
-            if (FarlandsConfig.logStageCounters) {
-                SectionLifecycle.verifyCounters(server);
-            }
-            // 依赖表与票位的自检：表侧与今天的判据两侧都算，只报失配与读数。
-            if (FarlandsConfig.logStageDependencies) {
-                SectionLifecycle.verifyDependencies(server);
-            }
         }
-        // 装饰驱动：判门、认领、提交到 farlands-gen。排在光照配额之前，使取域与本拍那簇光照任务的放行
-        // 错开：那簇任务一放行就取走半径 2 的锁并持有 1 到 3 毫秒，而装饰取域是整块成功或整块失败，撞上
-        // 要多等一个重试窗。代价是本拍由扫描新登记的项要等下一轮尝试。
         // 窗口差量与限量发包；返回值同时驱动 fsa 的窗口清理判定。
         boolean windowChanged = ChunkDataSender.tick(server);
         // 世界系统选择下发：玩家进服或换维度后补一次，客户端据此显示当前 level 用哪五族系统。
@@ -276,7 +246,7 @@ public class FarlandsTick {
         }
 
         // 地形管线：调度器是地形侧唯一的每 tick 入口，准入、派发、重扫都在里面。
-        Scheduler.tick("end");
+        Scheduler.tick();
         // 兼容层的每 tick 钩子，排在所有核心驱动之后：它只驱动本 port 之外的请求方，例如 Chunky 预生成。
         for (Consumer<MinecraftServer> sink : TICK_SINKS) {
             sink.accept(server);

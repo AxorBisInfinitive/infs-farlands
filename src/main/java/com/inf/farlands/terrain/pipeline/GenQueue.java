@@ -173,12 +173,12 @@ public final class GenQueue {
         if (SectionIO.isReading(chunk, sectionY)) {
             return;
         }
-        Scheduler.submit("enq", chunk);
+        Scheduler.submit(chunk);
     }
 
     /** XZ 触发：chunk 在主线程短路完成。判据在调度器的准入，这里只提交。 */
     public static void enqueueChunk(LevelChunk chunk) {
-        Scheduler.submit("enq", chunk);
+        Scheduler.submit(chunk);
     }
 
     /**
@@ -214,7 +214,7 @@ public final class GenQueue {
         for (int i = 0; i < range.length; i++) {
             range[i] = minSy + i;
         }
-        Scheduler.submit("enq", chunk, range);
+        Scheduler.submit(chunk, range);
     }
 
     /**
@@ -222,25 +222,21 @@ public final class GenQueue {
      *
      * <p>准入的判据在 {@link Scheduler#tick()}，本方法不再过滤：调用方已判过 A、B、C。
      */
-    static void enqueueTask(LevelChunk chunk, int[] preloadSections, long dispatchSeq) {
+    static void enqueueTask(LevelChunk chunk, int[] preloadSections) {
         if (!(chunk.getLevel() instanceof ServerLevel level)) {
             return;
         }
         long owner = OwnershipTable.tryClaimChunk(level, OwnershipTable.TERRAIN, chunk.getPos());
         if (owner == 0L) {
-            // 同 chunk 已有在途任务，去重。候选已在派发里被移除，这里是它离表的真正原因，记一笔台账。
-            Scheduler.recordExit(level, chunk.getPos().pack(), Scheduler.EXIT_GEN_SKIP);
-            return;
+            return; // 同 chunk 已有在途任务，去重
         }
         ACTIVE.incrementAndGet();
         try {
-            GenTask task = new GenTask(chunk, preloadSections, owner, dispatchSeq);
-            SchedulerMetrics.jobStarted();
+            GenTask task = new GenTask(chunk, preloadSections, owner);
             POOL.submit(task::execute);
         } catch (RejectedExecutionException e) {
             ACTIVE.decrementAndGet();
             OwnershipTable.releaseChunk(level, OwnershipTable.TERRAIN, chunk.getPos(), owner);
-            Scheduler.recordExit(level, chunk.getPos().pack(), Scheduler.EXIT_GEN_SKIP);
         }
     }
 
@@ -249,25 +245,6 @@ public final class GenQueue {
 
     /** 光照在途计数：LIGHTED 认领在回调里释放，判空要用它，所有权表不能枚举。 */
     private static final AtomicInteger ACTIVE_LIGHT = new AtomicInteger();
-
-    /** 诊断：光照衔接的六个累计计数。五个数的差各答一件事，见 {@link #lightSummary()}。 */
-    private static final java.util.concurrent.atomic.AtomicLong LIGHT_CALL =
-            new java.util.concurrent.atomic.AtomicLong();
-
-    private static final java.util.concurrent.atomic.AtomicLong LIGHT_CLAIM_OK =
-            new java.util.concurrent.atomic.AtomicLong();
-
-    private static final java.util.concurrent.atomic.AtomicLong LIGHT_CLAIM_BUSY =
-            new java.util.concurrent.atomic.AtomicLong();
-
-    private static final java.util.concurrent.atomic.AtomicLong LIGHT_TRIGGER =
-            new java.util.concurrent.atomic.AtomicLong();
-
-    private static final java.util.concurrent.atomic.AtomicLong LIGHT_DONE_OK =
-            new java.util.concurrent.atomic.AtomicLong();
-
-    private static final java.util.concurrent.atomic.AtomicLong LIGHT_DONE_ERR =
-            new java.util.concurrent.atomic.AtomicLong();
 
     /**
      * 该 chunk 是否在驱动面内：任一玩家面内的切比雪夫距离不超过视距加一，或落在任一任务面的方阵内。
@@ -307,10 +284,9 @@ public final class GenQueue {
         LevelChunk chunk = task.chunk();
         if (chunk.getLevel() instanceof ServerLevel level) {
             OwnershipTable.releaseChunk(level, OwnershipTable.TERRAIN, chunk.getPos(), task.genOwner());
-            SchedulerMetrics.jobEnded(task.lastSegments(), task.lastCarved());
         }
         ACTIVE.decrementAndGet();
-        Scheduler.submit("task", chunk);
+        Scheduler.submit(chunk);
     }
 
     // 光照衔接：chunk 级去重
@@ -368,42 +344,14 @@ public final class GenQueue {
 
     /** 报告某 section 已生成，触发光照，该 chunk 无在途光照时一次。认领兼作去重。 */
     public static void notifyGenerated(LevelChunk chunk) {
-        LIGHT_CALL.incrementAndGet();
         if (!(chunk.getLevel() instanceof ServerLevel level)) {
             return;
         }
         long owner = OwnershipTable.tryClaimChunk(level, OwnershipTable.LIGHTED, chunk.getPos());
         if (owner != 0L) {
-            LIGHT_CLAIM_OK.incrementAndGet();
             ACTIVE_LIGHT.incrementAndGet();
             triggerLight(chunk, owner);
-        } else {
-            LIGHT_CLAIM_BUSY.incrementAndGet();
         }
-    }
-
-    /**
-     * 诊断：光照衔接的六个累计计数，加升格段数。
-     *
-     * <p>五个数的差各答一件事：进入数与认领成功数之差是「认领被占」；认领成功数与触发数之差是「有认领
-     * 没触发」；触发数与完成数之差是「提交了没回来」；完成数与升格段数之差是「回来了没升格」。三个计数都
-     * 在池线程上自增，所以用原子。
-     *
-     * <p>累计不清零：这一族只在冻结期的 `FLWAIT` 上打，速率由相邻两行相减得到。
-     */
-    public static String lightSummary() {
-        return "call=" + LIGHT_CALL.get()
-                + " claimOk=" + LIGHT_CLAIM_OK.get()
-                + " claimBusy=" + LIGHT_CLAIM_BUSY.get()
-                + " trig=" + LIGHT_TRIGGER.get()
-                + " doneOk=" + LIGHT_DONE_OK.get()
-                + " doneErr=" + LIGHT_DONE_ERR.get()
-                + " lit=" + StageMetrics.lightedSectionsTotal();
-    }
-
-    /** 诊断：在飞的光照任务数。持续大于零而光照池空闲，就是有任务没有出口。 */
-    public static int lightActive() {
-        return ACTIVE_LIGHT.get();
     }
 
     /** 该 chunk 是否有光照任务在途，发包前检查，在途则留队列，等播种完成带正确光照。 */
@@ -413,7 +361,6 @@ public final class GenQueue {
 
     /** 一次 fillFrom 与 lightChunk，完成回调里升段、释放认领、再检查。 */
     private static void triggerLight(LevelChunk chunk, long lightOwner) {
-        LIGHT_TRIGGER.incrementAndGet();
         ServerLevel serverLevel = (ServerLevel) chunk.getLevel();
         if (serverLevel.getChunkSource().getLightEngine() instanceof FarLandsLightEngine lightEngine) {
             chunk.initializeLightSources();
@@ -424,7 +371,6 @@ public final class GenQueue {
             lightEngine.lightChunk(chunk, false).whenComplete((c, t) -> {
                 StageMetrics.stageWork(StageMetrics.STAGE_LIGHTED, System.nanoTime() - lightStart);
                 if (t == null) {
-                    LIGHT_DONE_OK.incrementAndGet();
                     // 升格搬在主线程那一笔里，与落盘入队、广播、标记、drive 同批，理由两条：池线程只投
                     // 事件、不碰派生结构；升格又必须在 persistChunkDirty 之前，因为编码侧只放行不低于
                     // LIGHTED 的段，先入队后升格会让那一批在编码时被拒。
@@ -449,15 +395,14 @@ public final class GenQueue {
                                 ChunkDataSender.markChunkChanged(chunk);
                                 // 光照在途已落，且 DECORATED 段刚升到 LIGHTED：扇出已在升格里发过一次提交。
                                 // 光照期间新到 DECORATED 的段交准入再发一批。
-                                Scheduler.submit("light", chunk);
+                                Scheduler.submit(chunk);
                             }, serverLevel);
                     return;
                 }
-                LIGHT_DONE_ERR.incrementAndGet();
                 InfsFarlands.LOGGER.error("farlands: light failed chunk={}", chunk.getPos(), t);
                 OwnershipTable.releaseChunk(serverLevel, OwnershipTable.LIGHTED, chunk.getPos(), lightOwner);
                 ACTIVE_LIGHT.decrementAndGet();
-                Scheduler.submit("light", chunk);
+                Scheduler.submit(chunk);
             });
         } else {
             // 防御：非本 port 光引擎，释放认领防卡死，理论上不走。

@@ -57,10 +57,6 @@ public final class ChunkCounters {
     private ChunkCounters() {
     }
 
-    /** 记账快照，供自检比对。 */
-    public record Snapshot(int pendingSurface, int pendingDecorated, int terrainCursor) {
-    }
-
     private static long identityOf(LevelChunk chunk) {
         return chunk instanceof CounterIdentity identity ? identity.counterId() : 0L;
     }
@@ -88,8 +84,6 @@ public final class ChunkCounters {
 
     /** 段被物化时计入。已计入则空转，所以重复物化与读回重放都安全；身份已死也空转。 */
     public static void onMaterialize(LevelChunk chunk, int sectionY) {
-        // 诊断：物化按 chunk 计数，与同一格的移除数并排，看「移除后重建」这条环。
-        com.inf.farlands.debug.CarveLoopProbe.materialize(chunk, sectionY);
         long identity = liveIdentityOf(chunk);
         if (identity != 0L) {
             ChunkCounters counters = ofLive(identity);
@@ -158,21 +152,6 @@ public final class ChunkCounters {
         COUNTERS.clear();
     }
 
-    /** 读该 chunk 的记账快照；身份为 0 或从未记账过则全零。 */
-    public static Snapshot snapshot(LevelChunk chunk) {
-        long identity = identityOf(chunk);
-        if (identity == 0L) {
-            return new Snapshot(0, 0, NO_CURSOR);
-        }
-        ChunkCounters c = COUNTERS.get(identity);
-        if (c == null) {
-            return new Snapshot(0, 0, NO_CURSOR);
-        }
-        synchronized (c) {
-            return new Snapshot(c.pendingSurface, c.pendingDecorated, c.terrainCursor);
-        }
-    }
-
     /** 置窗口读回闩。窗口内段读过一次盘即为真，一次性；卸载随实例消亡。 */
     public static void markWindowReadDone(LevelChunk chunk) {
         long identity = identityOf(chunk);
@@ -199,21 +178,6 @@ public final class ChunkCounters {
         }
         synchronized (c) {
             return c.windowReadDone;
-        }
-    }
-
-    /** FULL 补发令牌是否已被领走。只读，供诊断行用。 */
-    public static boolean isFullDone(LevelChunk chunk) {
-        long identity = identityOf(chunk);
-        if (identity == 0L) {
-            return false;
-        }
-        ChunkCounters c = COUNTERS.get(identity);
-        if (c == null) {
-            return false;
-        }
-        synchronized (c) {
-            return c.fullDone;
         }
     }
 

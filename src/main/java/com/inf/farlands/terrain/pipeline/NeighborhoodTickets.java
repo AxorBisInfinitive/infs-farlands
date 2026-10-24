@@ -7,7 +7,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
 
 import com.inf.farlands.terrain.structure.StructureDriver;
 
@@ -47,21 +46,6 @@ public final class NeighborhoodTickets {
     }
 
     private static final Map<UUID, State> STATES = new ConcurrentHashMap<>();
-
-    /** 诊断：加票与撤票的累计次数。冻结期的心跳读它们的差，判断票有没有在铺。 */
-    private static final AtomicLong ADDS = new AtomicLong();
-
-    private static final AtomicLong REMOVES = new AtomicLong();
-
-    /** 累计加票次数。诊断用。 */
-    public static long adds() {
-        return ADDS.get();
-    }
-
-    /** 累计撤票次数。诊断用。 */
-    public static long removes() {
-        return REMOVES.get();
-    }
 
     /**
      * 任务期持有：维度到 chunk 到票半径。与玩家那条路径各用一张表，互不干扰。
@@ -105,7 +89,6 @@ public final class NeighborhoodTickets {
             return;
         }
         level.getChunkSource().addTicketWithRadius(GenQueue.STRUCTURE_PIN_TICKET, pos, radius);
-        ADDS.incrementAndGet();
         if (state != null) {
             release(server, state);
         }
@@ -118,7 +101,6 @@ public final class NeighborhoodTickets {
         if (level != null) {
             level.getChunkSource().removeTicketWithRadius(GenQueue.STRUCTURE_PIN_TICKET,
                     ChunkPos.unpack(state.chunkKey()), state.radius());
-            REMOVES.incrementAndGet();
         }
     }
 
@@ -144,7 +126,6 @@ public final class NeighborhoodTickets {
                 k -> new ConcurrentHashMap<>());
         if (holds.putIfAbsent(center.pack(), radius) == null) {
             level.getChunkSource().addTicketWithRadius(GenQueue.STRUCTURE_PIN_TICKET, center, radius);
-            ADDS.incrementAndGet();
             return true;
         }
         return false;
@@ -159,7 +140,6 @@ public final class NeighborhoodTickets {
         Integer radius = holds.remove(center.pack());
         if (radius != null) {
             level.getChunkSource().removeTicketWithRadius(GenQueue.STRUCTURE_PIN_TICKET, center, radius);
-            REMOVES.incrementAndGet();
         }
     }
 

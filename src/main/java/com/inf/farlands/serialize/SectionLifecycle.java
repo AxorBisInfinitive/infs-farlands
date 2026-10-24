@@ -18,28 +18,21 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import com.inf.farlands.InfsFarlands;
 import com.inf.farlands.FarlandsConfig;
-import com.inf.farlands.debug.CarveLoopProbe;
-import com.inf.farlands.debug.StageSlotProbe;
 import com.inf.farlands.light.FarLandsLightEngine;
-import com.inf.farlands.terrain.carverFiller.CarverFiller;
 import com.inf.farlands.terrain.debug.StageMetrics;
 import com.inf.farlands.terrain.decorationFiller.DecorationFiller;
-import com.inf.farlands.terrain.pipeline.DependencyTable;
 import com.inf.farlands.terrain.pipeline.Scheduler;
 import com.inf.farlands.terrain.structure.StructureDriver;
-import com.inf.farlands.terrain.surfaceFiller.SurfaceFiller;
 import com.inf.farlands.util.network.ChunkDataSender;
 import com.inf.farlands.util.window.EntitySectionWindow;
 import com.inf.farlands.util.window.WindowedChunk;
 import com.inf.farlands.util.world.WorldBounds;
 
-import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap;
 
 import net.minecraft.core.SectionPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ChunkHolder;
-import net.minecraft.server.level.ChunkLevel;
 import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -196,7 +189,6 @@ public final class SectionLifecycle {
      * 记账的已计入集合里没有它，{@code onRemove} 的第一步就会返回。
      */
     public static void reclaimOrphanStages(MinecraftServer server) {
-        int reclaimed = 0;
         for (ServerLevel level : server.getAllLevels()) {
             for (ChunkHolder holder : getChunks(level)) {
                 ChunkAccess ca = holder.getLatestChunk();
@@ -208,11 +200,9 @@ public final class SectionLifecycle {
                         continue;
                     }
                     SectionStage.removeStage(lc, sy);
-                    reclaimed++;
                 }
             }
         }
-        StageSlotProbe.reclaimed(reclaimed);
     }
 
     /** 卸载编码在途任务数，关服等待用，任务出口递减。 */
@@ -725,7 +715,7 @@ public final class SectionLifecycle {
                             ChunkCounters.markWindowReadDone(lc);
                             promotePendingSections(lc, windowSy);
                             skySourcesReady(lc);
-                            Scheduler.submit("read", lc);
+                            Scheduler.submit(lc);
                             onDone.run();
                         }
                     });
@@ -779,7 +769,7 @@ public final class SectionLifecycle {
         if (!exist) {
             SectionIO.unmarkReading(lc, sectionY);
             // 读回在途这一条落了，且没有数据要恢复：该 chunk 可能就此就绪，交准入。
-            Scheduler.submit("read", lc);
+            Scheduler.submit(lc);
             onDone.run();
             return;
         }
@@ -789,7 +779,7 @@ public final class SectionLifecycle {
         if (ref == null) {
             SectionIO.unmarkReading(lc, sectionY);
             // 同上：无槽位即无数据，读回在途这一条落，交准入。
-            Scheduler.submit("read", lc);
+            Scheduler.submit(lc);
             onDone.run();
             return;
         }
@@ -801,7 +791,7 @@ public final class SectionLifecycle {
             }
             promotePendingSections(lc, List.of(sectionY));
             skySourcesReady(lc);
-            Scheduler.submit("read", lc);
+            Scheduler.submit(lc);
             onDone.run();
         });
     }
@@ -856,7 +846,6 @@ public final class SectionLifecycle {
                 le.queueSectionData(LightLayer.SKY, pos, decoded.skyLight());
             }
         }
-        CarveLoopProbe.restore(lc, sy, decoded.stage());
         // 读回按盘上档恢复，可能低于内存里的当前档，所以走无条件的恢复入口而不是单调闸那一支。
         Scheduler.restore(lc, new int[] { sy }, decoded.stage());
         if (decoded.stage() >= SectionStage.LIGHTED) {
@@ -877,231 +866,6 @@ public final class SectionLifecycle {
     }
 
     // ---- 工具 ----
-
-    /** 自检一行最多列几个失配 chunk。 */
-    private static final int VERIFY_LOG_LIMIT = 8;
-
-    /**
-     * 派生记账的自检：逐 chunk 重数一遍段状态与段容器，与 {@link ChunkCounters} 的记录比对。只报
-     * 失配，不给解读。
-     *
-     * <p>重数的口径是「段容器与段状态表的并集」，因为非噪声生成器的维度里档位会领先于段。比对的五
-     * 个量与记账的五个量一一对应：低于 SURFACE 的段数、低于 DECORATED 的段数、低于 TERRAIN 的
-     * 最高段号、等于 DECORATED 的段数、低于 LIGHTED 的段数。
-     *
-     * <p>主线程调用，重数期间写点仍可能在池上推进，所以单次失配不等于错，按整窗的出现频率判断。
-     */
-    public static void verifyCounters(MinecraftServer server) {
-        int checked = 0;
-        int skipped = 0;
-        int mismatched = 0;
-        int carversTotal = 0;
-        int decoratedTotal = 0;
-        for (ServerLevel level : server.getAllLevels()) {
-            for (ChunkHolder holder : getChunks(level)) {
-                ChunkAccess ca = holder.getLatestChunk();
-                if (!(ca instanceof LevelChunk lc)) {
-                    continue;
-                }
-                // 已交给卸载流程的 chunk：身份已注销、记账按设计清掉，而它的段容器还在。重数只会拿
-                // 「容器视为全 UNPROCESSED」去对「全零」，报出来的失配没有意义。判据用我们自己的存活位，
-                // 因为 26.1.2 没有 isLoaded() 读取口。
-                if (!CounterIdentities.owned(lc)) {
-                    skipped++;
-                    continue;
-                }
-                checked++;
-                IntOpenHashSet universe = new IntOpenHashSet();
-                universe.addAll(((WindowedChunk) lc).windowedAllSections().keySet());
-                SectionStage.forEachStage(lc, (sy, stage) -> universe.add(sy.intValue()));
-                int pendingSurface = 0;
-                int pendingDecorated = 0;
-                int cursor = ChunkCounters.NO_CURSOR;
-                int carversHere = 0;
-                int decoratedHere = 0;
-                for (int sy : universe) {
-                    int stage = SectionStage.getStage(lc, sy);
-                    if (stage < SectionStage.SURFACE) {
-                        pendingSurface++;
-                    }
-                    if (stage < SectionStage.DECORATED) {
-                        pendingDecorated++;
-                    }
-                    if (stage == SectionStage.CARVERS) {
-                        carversHere++;
-                    }
-                    if (stage == SectionStage.DECORATED) {
-                        decoratedHere++;
-                    }
-                    if (stage < SectionStage.TERRAIN && sy > cursor) {
-                        cursor = sy;
-                    }
-                }
-                carversTotal += carversHere;
-                decoratedTotal += decoratedHere;
-                ChunkCounters.Snapshot stored = ChunkCounters.snapshot(lc);
-                if (stored.pendingSurface() != pendingSurface || stored.pendingDecorated() != pendingDecorated
-                        || stored.terrainCursor() != cursor) {
-                    mismatched++;
-                    if (mismatched <= VERIFY_LOG_LIMIT) {
-                        InfsFarlands.LOGGER.info(
-                                "FLCOUNT mismatch chunk={},{} stored(sur={},dec={},cur={}) counted(sur={},dec={},cur={})",
-                                lc.getPos().x(), lc.getPos().z(),
-                                stored.pendingSurface(), stored.pendingDecorated(), stored.terrainCursor(),
-                                pendingSurface, pendingDecorated, cursor);
-                    }
-                }
-            }
-        }
-        InfsFarlands.LOGGER.info("FLCOUNT checked={} skipped={} mismatched={} carvers={} decorated={}",
-                checked, skipped, mismatched, carversTotal, decoratedTotal);
-    }
-
-    /** 依赖表自检每轮最多查几个 chunk。 */
-    private static final int DEP_VERIFY_SAMPLE = 64;
-
-    /** 依赖表自检的轮转起点。 */
-    private static int depVerifyStart;
-
-    /**
-     * 依赖表与票位的自检，只读。
-     *
-     * <p>可比的两行直接调今天的公开判据比对：SURFACE 与 CARVERS。TERRAIN、LIGHTED 与 FULL 三行没有
-     * 独立写法的旧判据可比，只报表的读数，不计失配。装饰两行的旧判据已随待办表删除，不再比对。
-     *
-     * <p>票位读数按到最近玩家的距离分四桶，每桶报 chunk 数、票位级的区间与其中允许 FULL 的个数。
-     * 分桶而不是按允许状态分带，是因为要核的是「距离决定票位」这条链：{@code visibleChunkMap} 的
-     * 迭代序与加载顺序相关，按允许状态分带会让同一带的样本挤在一起，边界那几圈永远采不到。
-     *
-     * <p>主线程调用，每轮每维度按步长取最多 64 个样本，步长是 {@code size / 64}，起点逐轮推进。取步长
-     * 而不是取连续一段：连续一段落在同一圈 chunk 上，读数的波动会全部来自区域差异，看不出边界。
-     */
-    public static void verifyDependencies(MinecraftServer server) {
-        int checked = 0;
-        int mismatched = 0;
-        int logged = 0;
-        int[] bucket = new int[4];
-        int[] bucketLevelMin = { Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MAX_VALUE };
-        int[] bucketLevelMax = { Integer.MIN_VALUE, Integer.MIN_VALUE, Integer.MIN_VALUE, Integer.MIN_VALUE };
-        int[] bucketFull = new int[4];
-        int terrainPending = 0;
-        int lightedPending = 0;
-        int fullPending = 0;
-        boolean sampled = false;
-        for (ServerLevel level : server.getAllLevels()) {
-            List<ChunkHolder> holders = new ArrayList<>();
-            for (ChunkHolder holder : getChunks(level)) {
-                holders.add(holder);
-            }
-            if (holders.isEmpty()) {
-                continue;
-            }
-            int view = DependencyTable.viewDistance(level);
-            ChunkCursor cursor = cursor(level);
-            int step = Math.max(1, holders.size() / DEP_VERIFY_SAMPLE);
-            depVerifyStart++;
-            for (int index = Math.floorMod(depVerifyStart, step); index < holders.size(); index += step) {
-                ChunkAccess ca = holders.get(index).getLatestChunk();
-                if (!(ca instanceof LevelChunk lc)) {
-                    continue;
-                }
-                // 同 verifyCounters：已交给卸载流程的 chunk 不参与比对。
-                if (!CounterIdentities.owned(lc)) {
-                    continue;
-                }
-                checked++;
-
-                int surfaceTable = DependencyTable.pendingCount(lc, DependencyTable.SURFACE);
-                boolean surfaceLegacy = SurfaceFiller.hasSurfacePending(lc);
-                if ((surfaceTable > 0) != surfaceLegacy) {
-                    mismatched++;
-                    if (logged++ < VERIFY_LOG_LIMIT) {
-                        InfsFarlands.LOGGER.info(
-                                "FLDEP mismatch dimension={} chunk={},{} row=SURFACE legacy={} table={} tableCount={}",
-                                level.dimension().identifier(), lc.getPos().x(), lc.getPos().z(), surfaceLegacy,
-                                surfaceTable > 0, surfaceTable);
-                    }
-                }
-                int carversTable = DependencyTable.pendingCount(lc, DependencyTable.CARVERS);
-                boolean carversLegacy = CarverFiller.hasCarversPending(lc);
-                if ((carversTable > 0) != carversLegacy) {
-                    mismatched++;
-                    if (logged++ < VERIFY_LOG_LIMIT) {
-                        InfsFarlands.LOGGER.info(
-                                "FLDEP mismatch dimension={} chunk={},{} row=CARVERS legacy={} table={} tableCount={}",
-                                level.dimension().identifier(), lc.getPos().x(), lc.getPos().z(), carversLegacy,
-                                carversTable > 0, carversTable);
-                    }
-                }
-                if (DependencyTable.pendingCount(lc, DependencyTable.TERRAIN) > 0) {
-                    terrainPending++;
-                }
-                if (DependencyTable.pendingCount(lc, DependencyTable.LIGHTED) > 0) {
-                    lightedPending++;
-                }
-                if (DependencyTable.pendingCount(lc, DependencyTable.FULL) > 0) {
-                    fullPending++;
-                }
-
-                int ticketLevel = cursor.ticketLevelAt(lc.getPos().x(), lc.getPos().z());
-                int distance = DependencyTable.nearestPlayerDistance(level, lc.getPos().x(), lc.getPos().z());
-                int which = distanceBucket(distance, view);
-                bucket[which]++;
-                if (ticketLevel < bucketLevelMin[which]) {
-                    bucketLevelMin[which] = ticketLevel;
-                }
-                if (ticketLevel > bucketLevelMax[which]) {
-                    bucketLevelMax[which] = ticketLevel;
-                }
-                if (DependencyTable.fullAllowed(ticketLevel)) {
-                    bucketFull[which]++;
-                }
-                if (!sampled) {
-                    sampled = true;
-                    InfsFarlands.LOGGER.info(
-                            "FLTICKET sample dimension={} chunk={},{} level={} status={} allowedStage={} full={} dist={} band={} view={}",
-                            level.dimension().identifier(), lc.getPos().x(), lc.getPos().z(), ticketLevel,
-                            ChunkLevel.generationStatus(ticketLevel), DependencyTable.allowedStage(ticketLevel),
-                            DependencyTable.fullAllowed(ticketLevel), distance, DependencyTable.bandOf(ticketLevel),
-                            view);
-                }
-            }
-        }
-        InfsFarlands.LOGGER.info(
-                "FLDEP checked={} mismatched={} terrainPending={} lightedPending={} fullPending={}",
-                checked, mismatched, terrainPending, lightedPending, fullPending);
-        InfsFarlands.LOGGER.info(
-                "FLTICKET chunks={} b0<=view: n={} level=[{},{}] full={} b1<=view+2: n={} level=[{},{}] full={} "
-                        + "b2<=view+10: n={} level=[{},{}] full={} b3>view+10: n={} level=[{},{}] full={}",
-                checked,
-                bucket[0], levelMin(bucketLevelMin[0]), levelMax(bucketLevelMax[0]), bucketFull[0],
-                bucket[1], levelMin(bucketLevelMin[1]), levelMax(bucketLevelMax[1]), bucketFull[1],
-                bucket[2], levelMin(bucketLevelMin[2]), levelMax(bucketLevelMax[2]), bucketFull[2],
-                bucket[3], levelMin(bucketLevelMin[3]), levelMax(bucketLevelMax[3]), bucketFull[3]);
-    }
-
-    /**
-     * 距离分桶，取自票圈的形状：0 是视距内，1 是视距加 2 以内，2 是视距加 10 以内，3 是更远。
-     * 视距加 10 是本 port 那颗保加载大票的半径。
-     */
-    private static int distanceBucket(int distance, int view) {
-        if (distance <= view) {
-            return 0;
-        }
-        if (distance <= view + 2) {
-            return 1;
-        }
-        return distance <= view + 10 ? 2 : 3;
-    }
-
-    /** 空桶的票位级区间端点。 */
-    private static int levelMin(int value) {
-        return value == Integer.MAX_VALUE ? -1 : value;
-    }
-
-    private static int levelMax(int value) {
-        return value == Integer.MIN_VALUE ? -1 : value;
-    }
 
     @SuppressWarnings("unchecked")
     private static Iterable<ChunkHolder> getChunks(ServerLevel level) {

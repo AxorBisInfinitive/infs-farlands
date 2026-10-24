@@ -348,7 +348,7 @@ public final class SectionIO {
     }
 
     public static void markReading(LevelChunk chunk, int sectionY) {
-        SectionState state = SectionStage.stateOf(chunk, sectionY, "stateOf:reading");
+        SectionState state = SectionStage.stateOf(chunk, sectionY);
         if (state != null) {
             state.markReading();
         }

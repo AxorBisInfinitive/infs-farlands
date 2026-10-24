@@ -3,14 +3,10 @@ package com.inf.farlands.mixin.fix.thread;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
-import com.inf.farlands.FarlandsConfig;
 import com.inf.farlands.FarlandsTick;
 import com.inf.farlands.InfsFarlands;
 import com.inf.farlands.serialize.ChunkReadiness;
 import com.inf.farlands.terrain.pipeline.Scheduler;
-import com.inf.farlands.terrain.pipeline.SchedulerMetrics;
-import com.inf.farlands.util.window.EntitySectionWindow;
-import com.inf.farlands.util.window.PlayerSnapshot;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.util.thread.BlockableEventLoop;
@@ -65,31 +61,6 @@ public abstract class EventLoopSchedulerPumpMixin {
     @Unique
     private static final AtomicBoolean farlands$pumpFailed = new AtomicBoolean();
 
-    /** 心跳的最小间隔，单位毫秒。 */
-    @Unique
-    private static final long farlands$HEARTBEAT_MILLIS = 1000L;
-
-    /** 上一次心跳的时刻。 */
-    @Unique
-    private static final AtomicLong farlands$lastBeatAt = new AtomicLong();
-
-    /** 越过全部守卫、真的执行了的推进次数。 */
-    @Unique
-    private static final AtomicLong farlands$PUMPS = new AtomicLong();
-
-    /** 四个早退分支各自的次数。与上一栏并排，就能分出「没被调」与「被闸挡住」。 */
-    @Unique
-    private static final AtomicLong farlands$SKIP_INSTANCE = new AtomicLong();
-
-    @Unique
-    private static final AtomicLong farlands$SKIP_THREAD = new AtomicLong();
-
-    @Unique
-    private static final AtomicLong farlands$SKIP_SHUTDOWN = new AtomicLong();
-
-    @Unique
-    private static final AtomicLong farlands$SKIP_THROTTLE = new AtomicLong();
-
     @Redirect(method = "managedBlock", at = @At(value = "INVOKE", target = "Lnet/minecraft/util/thread/BlockableEventLoop;waitForTasks()V"))
     private void farlands$pumpSchedulerWhileWaiting(BlockableEventLoop<?> self) {
         this.farlands$pumpScheduler();
@@ -99,71 +70,29 @@ public abstract class EventLoopSchedulerPumpMixin {
     @Unique
     private void farlands$pumpScheduler() {
         if (!((Object) this instanceof MinecraftServer server)) {
-            farlands$SKIP_INSTANCE.incrementAndGet();
             return;
         }
         if (Thread.currentThread() != server.getRunningThread()) {
-            farlands$SKIP_THREAD.incrementAndGet();
             return;
         }
         if (ChunkReadiness.isShuttingDown()) {
-            farlands$SKIP_SHUTDOWN.incrementAndGet();
             return;
         }
         long now = System.currentTimeMillis();
         long last = farlands$lastPumpAt.get();
         if (now - last < farlands$PUMP_INTERVAL_MILLIS) {
-            farlands$SKIP_THROTTLE.incrementAndGet();
             return;
         }
         if (!farlands$lastPumpAt.compareAndSet(last, now)) {
-            farlands$SKIP_THROTTLE.incrementAndGet();
             return;
         }
-        farlands$PUMPS.incrementAndGet();
         try {
-            SchedulerMetrics.pumped(FarlandsTick.refreshTickState(server));
-            Scheduler.tick("pump");
+            FarlandsTick.refreshTickState(server);
+            Scheduler.tick();
         } catch (Throwable t) {
             if (farlands$pumpFailed.compareAndSet(false, true)) {
                 InfsFarlands.LOGGER.error("farlands: scheduler pump failed during a blocked wait", t);
             }
         }
-        farlands$beat();
-    }
-
-    /**
-     * 心跳：阻塞期每秒一行，报这次推进看到了什么。
-     *
-     * <p>这一行必须从泵内部打，不能借 {@code FLSCHED}：那一行挂在 200 tick 块里，而 200 tick 块挂在
-     * {@code tickServer} 的 RETURN，正是冻结时跑不到的那一侧。泵的证据要由冻结期仍然执行的路径给出。
-     *
-     * <p>四栏合看：{@code pumps} 与四个 {@code skip} 分出「没被调」与「被闸挡住」；{@code players} 与
-     * {@code dims} 报这次刷新看到谁；{@code bands} 是窗口表的实际内容；{@code subs} 与 {@code exits}
-     * 的差值说明冻结期还有没有人往候选表里提交。
-     *
-     * <p>域锁那一族不在这里，在 {@code FLWAIT}。这一行只在被阻塞的循环是服务端自己的时候才打，而换维度
-     * 之后那次阻塞取数落在 {@code ServerChunkCache$MainThreadExecutor} 上，本类的
-     * {@code instanceof MinecraftServer} 守卫会把那一整段挡掉，实测 {@code skip(inst)} 一路涨而
-     * {@code pumps} 停住。
-     */
-    @Unique
-    private void farlands$beat() {
-        if (!FarlandsConfig.logScheduler) {
-            return;
-        }
-        long now = System.currentTimeMillis();
-        long last = farlands$lastBeatAt.get();
-        if (now - last < farlands$HEARTBEAT_MILLIS || !farlands$lastBeatAt.compareAndSet(last, now)) {
-            return;
-        }
-        InfsFarlands.LOGGER.info(
-                "FLPUMP pumps={} skip(inst/thread/shut/throttle)={}/{}/{}/{} players={} dims={} bands={} "
-                        + "subs={} exits={} cands={}",
-                farlands$PUMPS.get(), farlands$SKIP_INSTANCE.get(), farlands$SKIP_THREAD.get(),
-                farlands$SKIP_SHUTDOWN.get(), farlands$SKIP_THROTTLE.get(),
-                PlayerSnapshot.entries().size(), PlayerSnapshot.dimensions(),
-                EntitySectionWindow.snapshot(), Scheduler.submittedTotal(), Scheduler.exitedTotal(),
-                Scheduler.candidateCount());
     }
 }

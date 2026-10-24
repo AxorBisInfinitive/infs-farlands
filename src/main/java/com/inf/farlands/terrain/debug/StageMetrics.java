@@ -64,9 +64,6 @@ public final class StageMetrics {
     private static final AtomicLong SECTIONS_LIGHTED = new AtomicLong();
     private static final AtomicLong CHUNKS_LIGHTED = new AtomicLong();
 
-    /** 累计升格段数，不随窗口清零。见 {@link #lightedSectionsTotal()}。 */
-    private static final AtomicLong SECTIONS_LIGHTED_TOTAL = new AtomicLong();
-
     /**
      * 本窗走过存在流程的 chunk 数，即新建了多少个「壳」。
      *
@@ -106,18 +103,7 @@ public final class StageMetrics {
     public static void lightedSections(int upgraded) {
         if (upgraded > 0) {
             SECTIONS_LIGHTED.addAndGet(upgraded);
-            SECTIONS_LIGHTED_TOTAL.addAndGet(upgraded);
         }
-    }
-
-    /**
-     * 累计升格段数，不随窗口清零。
-     *
-     * <p>与 {@link #SECTIONS_LIGHTED} 分开：那一个是按窗速率的分母，每窗清零；冻结期的读数要拿它与光照
-     * 完成次数相减，差出「回调回来了而升格没落」，所以必须是累计。
-     */
-    public static long lightedSectionsTotal() {
-        return SECTIONS_LIGHTED_TOTAL.get();
     }
 
     /** 进入 BIOMES 的段数，即进入管线的段数。 */
@@ -149,11 +135,6 @@ public final class StageMetrics {
     /** 一个 chunk 的存在流程收尾。 */
     public static void chunkLoadDone() {
         CHUNK_LOAD_DONE.incrementAndGet();
-    }
-
-    /** 累计走过存在流程的 chunk 数。诊断用，供冻结期的心跳读差值。 */
-    public static long loadsTotal() {
-        return CHUNK_LOADS.get();
     }
 
     /** 前五阶段的「段数/毫秒/每段微秒」，光照是「完成 chunk 数/每 chunk 延迟毫秒」。 */

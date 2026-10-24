@@ -6,14 +6,9 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import com.inf.farlands.FarlandsConfig;
-import com.inf.farlands.InfsFarlands;
-import com.inf.farlands.debug.CandidateProbe;
-import com.inf.farlands.debug.DispatchProbe;
-import com.inf.farlands.debug.StageWriteProbe;
 import com.inf.farlands.serialize.ChunkCounters;
 import com.inf.farlands.serialize.ChunkReadiness;
 import com.inf.farlands.serialize.SectionIO;
@@ -86,25 +81,10 @@ public final class Scheduler {
         }
     }
 
-    /** 当前面数，供 `FLSCHED` 读数。 */
-    public static int faces() {
-        int n = 0;
-        for (List<Face> list : FACES.values()) {
-            n += list.size();
-        }
-        return n;
-    }
-
     /** 停服清空。 */
     public static void clearWorldState() {
         FACES.clear();
         CANDIDATES.clear();
-        REJECT_LOGGED.clear();
-        FULL_LOGGED.clear();
-        SUBMITS.clear();
-        EXITS.clear();
-        SUBMIT_TOTAL.set(0L);
-        EXIT_TOTAL.set(0L);
         SEQ.set(0);
     }
 
@@ -130,12 +110,6 @@ public final class Scheduler {
 
     private static final Map<Long, Candidate> CANDIDATES = new ConcurrentHashMap<>();
 
-    /** 诊断行的限流：同一维度、同一 chunk、同一原因只打一次。 */
-    private static final Set<String> REJECT_LOGGED = ConcurrentHashMap.newKeySet();
-
-    /** 第七行求值行的限流：同一 chunk 只打一次。 */
-    private static final Set<Long> FULL_LOGGED = ConcurrentHashMap.newKeySet();
-
     private static final java.util.concurrent.atomic.AtomicLong SEQ =
             new java.util.concurrent.atomic.AtomicLong();
 
@@ -157,17 +131,7 @@ public final class Scheduler {
         submit(chunk, null);
     }
 
-    /**
-     * 候选表里是否还有待派发的 chunk。
-     *
-     * <p>只给预 tick 期的泵用：那一段没有 tick 循环，泵要判断「管道是否已经清空」才能退出。
-     * 有候选不代表有进展，退避中的候选也在这里；调用方要另配时间上限。
-     */
-    public static boolean hasPendingCandidates() {
-        return !CANDIDATES.isEmpty();
-    }
-
-    /** 该 chunk 是否还在候选表里。诊断用，主线程。 */
+    /** 该 chunk 是否还在候选表里。供兜底重扫判重用，主线程。 */
     public static boolean hasCandidate(LevelChunk chunk) {
         long key = identityOf(chunk);
         return key != 0L && CANDIDATES.containsKey(key);
@@ -175,138 +139,6 @@ public final class Scheduler {
 
     /** 派发重入闸：落档体的扇出会在派发内 submit，不能再递归进来。 */
     private static final ThreadLocal<Boolean> TICKING = ThreadLocal.withInitial(() -> Boolean.FALSE);
-
-    /**
-     * 诊断：提交台账。键是维度加坐标，值是 {次数, 最后一次的 tick}。
-     *
-     * <p>键里必须有维度：只按坐标记时，同一格在两个维度各有一次提交会互相覆盖，读出来的「最后一次
-     * 提交」属于哪个维度分不出来。
-     *
-     * <p>用途是把「某个 chunk 到底有没有被提交过、最后一次是什么时候」压成两个整数，读数在需要的地方
-     * 才取，避免逐次打印把日志再灌一遍。只在 {@code logScheduler} 打开时记账。
-     */
-    private static final Map<String, long[]> SUBMITS = new ConcurrentHashMap<>();
-
-    /** 台账键：维度 id 加坐标。 */
-    private static String traceKey(String dimension, long chunkKey) {
-        return dimension + '|' + chunkKey;
-    }
-
-    /** 诊断：一次都没提交过时的读数。 */
-    public static String submitTrace(String dimension, long chunkKey) {
-        long[] entry = SUBMITS.get(traceKey(dimension, chunkKey));
-        if (entry == null) {
-            return "0@never";
-        }
-        return entry[0] + "@" + entry[1];
-    }
-
-    /** 诊断：提交与离表的累计次数，供阻塞期的心跳读差值。只在诊断开关打开时增长。 */
-    private static final java.util.concurrent.atomic.AtomicLong SUBMIT_TOTAL =
-            new java.util.concurrent.atomic.AtomicLong();
-
-    private static final java.util.concurrent.atomic.AtomicLong EXIT_TOTAL =
-            new java.util.concurrent.atomic.AtomicLong();
-
-    /** 累计提交次数。诊断用，主线程。 */
-    public static long submittedTotal() {
-        return SUBMIT_TOTAL.get();
-    }
-
-    /** 累计离表次数。诊断用，主线程。 */
-    public static long exitedTotal() {
-        return EXIT_TOTAL.get();
-    }
-
-    /** 候选表当前的条目数。诊断用，主线程。 */
-    public static int candidateCount() {
-        return CANDIDATES.size();
-    }
-
-    /** 该 chunk 当前候选已重投的次数；不在表里时返回 0。诊断用，主线程。 */
-    public static int candidateAttempts(LevelChunk chunk) {
-        long key = identityOf(chunk);
-        if (key == 0L) {
-            return 0;
-        }
-        Candidate candidate = CANDIDATES.get(key);
-        return candidate == null ? 0 : candidate.attempts;
-    }
-
-    private static void recordSubmit(Level level, long chunkKey) {
-        if (!FarlandsConfig.logScheduler) {
-            return;
-        }
-        SUBMIT_TOTAL.incrementAndGet();
-        SUBMITS.compute(traceKey(dimensionOf(level), chunkKey), (key, entry) -> {
-            long[] target = entry == null ? new long[2] : entry;
-            target[0]++;
-            target[1] = com.inf.farlands.FarlandsTick.getNow();
-            return target;
-        });
-    }
-
-    /** 台账里的维度名。取不到 level 时记一个占位，不猜。 */
-    private static String dimensionOf(Level level) {
-        return level == null ? "?" : String.valueOf(level.dimension().identifier());
-    }
-
-    // ---- 诊断：离表台账 ----
-    //
-    // 每条候选离表都记一条「原因 + tick」，只留最后一次。停摆的 chunk 一旦离表就不再进表，所以台账里
-    // 留下的正是它最后一次离表的原因；这条原因不需要事先知道是哪个 chunk，也不需要逐次打印。
-
-    /** 派发开头身份失配，条件删除旧条目。 */
-    static final int EXIT_STALE = 0;
-
-    /** 取不到 ServerLevel，理论不可达。 */
-    static final int EXIT_NONLEVEL = 1;
-
-    /** 可玩界外。 */
-    static final int EXIT_FACE = 2;
-
-    /** 距玩家太远。 */
-    static final int EXIT_WINDOW = 3;
-
-    /** 第七行成立，已补发 FULL。 */
-    static final int EXIT_FULL = 4;
-
-    /** 交给生成任务。 */
-    static final int EXIT_GEN = 5;
-
-    /** 交给生成任务时认领 CAS 失败，候选直接丢。 */
-    static final int EXIT_GEN_SKIP = 6;
-
-    private static final String[] EXIT_NAMES = {
-            "STALE", "NONLEVEL", "FACE", "WINDOW", "FULL", "GEN", "GEN_SKIP" };
-
-    /** 诊断：离表台账，键是维度加坐标，值是 {原因序号, tick}。 */
-    private static final Map<String, long[]> EXITS = new ConcurrentHashMap<>();
-
-    /** 诊断：最后一次离表的原因与 tick，形如 {@code GEN@82}；从未离表时是 {@code none}。 */
-    public static String exitTrace(String dimension, long chunkKey) {
-        long[] entry = EXITS.get(traceKey(dimension, chunkKey));
-        if (entry == null) {
-            return "none";
-        }
-        int tag = (int) entry[0];
-        String name = tag >= 0 && tag < EXIT_NAMES.length ? EXIT_NAMES[tag] : String.valueOf(tag);
-        return name + "@" + entry[1];
-    }
-
-    static void recordExit(Level level, long chunkKey, int tag) {
-        if (!FarlandsConfig.logScheduler) {
-            return;
-        }
-        EXIT_TOTAL.incrementAndGet();
-        long tick = com.inf.farlands.FarlandsTick.getNow();
-        EXITS.compute(traceKey(dimensionOf(level), chunkKey), (key, entry) -> {
-            long[] target = entry == null ? new long[2] : entry;
-            target[0] = tag;
-            target[1] = tick;
-            return target;
-        });
-    }
 
     /**
      * 该维度有玩家而两张表里没有它时，就地补一次刷新。
@@ -338,93 +170,12 @@ public final class Scheduler {
         }
     }
 
-    /** 诊断：提交次数按调用点分栏，累计值，不清零。 */
-    private static final java.util.concurrent.atomic.AtomicLong SUB_ENQ =
-            new java.util.concurrent.atomic.AtomicLong();
-
-    private static final java.util.concurrent.atomic.AtomicLong SUB_TASK =
-            new java.util.concurrent.atomic.AtomicLong();
-
-    private static final java.util.concurrent.atomic.AtomicLong SUB_LIGHT =
-            new java.util.concurrent.atomic.AtomicLong();
-
-    private static final java.util.concurrent.atomic.AtomicLong SUB_DECO =
-            new java.util.concurrent.atomic.AtomicLong();
-
-    private static final java.util.concurrent.atomic.AtomicLong SUB_READ =
-            new java.util.concurrent.atomic.AtomicLong();
-
-    private static final java.util.concurrent.atomic.AtomicLong SUB_EXIST =
-            new java.util.concurrent.atomic.AtomicLong();
-
-    private static final java.util.concurrent.atomic.AtomicLong SUB_HOOK =
-            new java.util.concurrent.atomic.AtomicLong();
-
-    private static final java.util.concurrent.atomic.AtomicLong SUB_STAGE =
-            new java.util.concurrent.atomic.AtomicLong();
-
-    private static final java.util.concurrent.atomic.AtomicLong SUB_READY =
-            new java.util.concurrent.atomic.AtomicLong();
-
-    /** 未带标签的提交次数。出现非零即说明有一处调用点没传标签。 */
-    private static final java.util.concurrent.atomic.AtomicLong SUB_OTHER =
-            new java.util.concurrent.atomic.AtomicLong();
-
-    /**
-     * 诊断：提交次数按调用点分栏，累计值，不清零。
-     *
-     * <p>分栏的理由：提交本身会同步触发一次派发，而派发会放出作业，作业收尾又提交，于是「每秒多少次
-     * 提交」这一个数里可能藏着放大环。九栏之和必须等于 {@link #submittedTotal()} 的增量；对不上就是有
-     * 一处调用点没传标签，落到 {@code other}。
-     */
-    public static String submitSummary() {
-        return "enq=" + SUB_ENQ.get()
-                + " task=" + SUB_TASK.get()
-                + " light=" + SUB_LIGHT.get()
-                + " deco=" + SUB_DECO.get()
-                + " read=" + SUB_READ.get()
-                + " exist=" + SUB_EXIST.get()
-                + " hook=" + SUB_HOOK.get()
-                + " stage=" + SUB_STAGE.get()
-                + " ready=" + SUB_READY.get()
-                + " other=" + SUB_OTHER.get();
-    }
-
-    private static void countSubmit(String src) {
-        switch (src) {
-            case "enq" -> SUB_ENQ.incrementAndGet();
-            case "task" -> SUB_TASK.incrementAndGet();
-            case "light" -> SUB_LIGHT.incrementAndGet();
-            case "deco" -> SUB_DECO.incrementAndGet();
-            case "read" -> SUB_READ.incrementAndGet();
-            case "exist" -> SUB_EXIST.incrementAndGet();
-            case "hook" -> SUB_HOOK.incrementAndGet();
-            case "stage" -> SUB_STAGE.incrementAndGet();
-            case "ready" -> SUB_READY.incrementAndGet();
-            default -> SUB_OTHER.incrementAndGet();
-        }
-    }
-
     /** 登记一个待办 chunk，显式范围只作为 {@link #sectionsFor} 的一支。入队即派发。 */
     public static void submit(LevelChunk chunk, int[] preloadSections) {
-        submit("other", chunk, preloadSections);
-    }
-
-    /**
-     * 同上，{@code src} 只用于诊断分栏。
-     *
-     * <p>九个调用点：{@code enq} 是 {@code GenQueue} 的三个入队入口，{@code task} 是作业与任务收尾，
-     * {@code light} 是光照收尾，{@code deco} 是装饰的两处，{@code read} 是读回回调，{@code exist} 是
-     * 存在流程与预加载，{@code hook} 是 {@code TerrainHooks.enqueueGen}，{@code stage} 是落档扇出与读回
-     * 恢复，{@code ready} 是准入里现场建 Beardifier 之后的重投。
-     */
-    public static void submit(String src, LevelChunk chunk, int[] preloadSections) {
-        countSubmit(src);
         long key = identityOf(chunk);
         if (key == 0L) {
             return;
         }
-        recordSubmit(chunk.getLevel(), chunk.getPos().pack());
         CANDIDATES.put(key, new Candidate(chunk, preloadSections, SEQ.incrementAndGet()));
         // 入队即派发：createLevels 里 setInitialSpawn 的阻塞取数发生在 tick 之前，只登记会死锁。
         if (!(chunk.getLevel() instanceof ServerLevel level)) {
@@ -433,19 +184,14 @@ public final class Scheduler {
         if (SectionIO.isMainThread(level)) {
             if (!TICKING.get()) {
                 refreshIfMissing(level);
-                tick("submit");
+                tick();
             }
         } else {
             SectionIO.runOnMainThread(() -> {
                 refreshIfMissing(level);
-                tick("submit");
+                tick();
             }, level);
         }
-    }
-
-    /** 登记一个待办 chunk，{@code src} 只用于诊断分栏。 */
-    public static void submit(String src, LevelChunk chunk) {
-        submit(src, chunk, null);
     }
 
     /**
@@ -460,7 +206,6 @@ public final class Scheduler {
         if (key == 0L) {
             return;
         }
-        recordSubmit(chunk.getLevel(), chunk.getPos().pack());
         CANDIDATES.put(key, new Candidate(chunk, null, SEQ.incrementAndGet()));
     }
 
@@ -487,70 +232,9 @@ public final class Scheduler {
         CANDIDATES.put(key, candidate);
     }
 
-    /** 累计的派发进入次数，按调用点分栏。诊断用，不清零，速率由相邻两行相减得到。 */
-    private static final java.util.concurrent.atomic.AtomicLong TICK_END =
-            new java.util.concurrent.atomic.AtomicLong();
-
-    private static final java.util.concurrent.atomic.AtomicLong TICK_PUMP =
-            new java.util.concurrent.atomic.AtomicLong();
-
-    private static final java.util.concurrent.atomic.AtomicLong TICK_CREATE =
-            new java.util.concurrent.atomic.AtomicLong();
-
-    private static final java.util.concurrent.atomic.AtomicLong TICK_PRELOAD =
-            new java.util.concurrent.atomic.AtomicLong();
-
-    private static final java.util.concurrent.atomic.AtomicLong TICK_SUBMIT =
-            new java.util.concurrent.atomic.AtomicLong();
-
-    private static final java.util.concurrent.atomic.AtomicLong TICK_POLL =
-            new java.util.concurrent.atomic.AtomicLong();
-
-    /** 未带标签的进入次数。出现非零即说明有一处调用点没传标签。 */
-    private static final java.util.concurrent.atomic.AtomicLong TICK_OTHER =
-            new java.util.concurrent.atomic.AtomicLong();
-
-    /** 被重入闸挡回的次数。与各栏之和的差就是「要求跑」与「真跑了」的差。 */
-    private static final java.util.concurrent.atomic.AtomicLong TICK_REENTRANT =
-            new java.util.concurrent.atomic.AtomicLong();
-
-    /** 诊断：派发进入次数按调用点分栏，累计值，不清零。 */
-    public static String tickSummary() {
-        return "end=" + TICK_END.get()
-                + " pump=" + TICK_PUMP.get()
-                + " create=" + TICK_CREATE.get()
-                + " preload=" + TICK_PRELOAD.get()
-                + " submit=" + TICK_SUBMIT.get()
-                + " poll=" + TICK_POLL.get()
-                + " other=" + TICK_OTHER.get()
-                + " reent=" + TICK_REENTRANT.get();
-    }
-
     /** 每 tick 一次：按距离排序逐个准入，过了就交出去。 */
     public static void tick() {
-        tick("other");
-    }
-
-    /**
-     * 同上，{@code src} 只用于诊断分栏。
-     *
-     * <p>分栏的理由：冻结期「tick 没跑」与「tick 在跑但准入不放行」的其余读数完全一样，候选数与段位都
-     * 不动。五个调用点是 {@code end}、{@code pump}、{@code poll}、{@code create}、{@code preload}，加
-     * {@code submit}，各自代表一条驱动路径。其中 {@code poll} 是 chunk 执行器等本期的那一条，见
-     * {@code ChunkCachePumpMixin}。
-     */
-    public static void tick(String src) {
-        switch (src) {
-            case "end" -> TICK_END.incrementAndGet();
-            case "pump" -> TICK_PUMP.incrementAndGet();
-            case "create" -> TICK_CREATE.incrementAndGet();
-            case "preload" -> TICK_PRELOAD.incrementAndGet();
-            case "submit" -> TICK_SUBMIT.incrementAndGet();
-            case "poll" -> TICK_POLL.incrementAndGet();
-            default -> TICK_OTHER.incrementAndGet();
-        }
         if (TICKING.get()) {
-            TICK_REENTRANT.incrementAndGet();
             return;
         }
         TICKING.set(Boolean.TRUE);
@@ -579,8 +263,6 @@ public final class Scheduler {
             // 同坐标的前一代已交卸载：身份与键不再相符，条目是死引用，清掉。
             if (identityOf(chunk) != key) {
                 CANDIDATES.remove(key, candidate);
-                CandidateProbe.left(chunk, "STALE", 1, true);
-                recordExit(chunk.getLevel(), chunk.getPos().pack(), EXIT_STALE);
                 continue;
             }
             long now = System.currentTimeMillis();
@@ -592,45 +274,30 @@ public final class Scheduler {
                 continue;
             }
             if (!(chunk.getLevel() instanceof ServerLevel level)) {
-                CandidateProbe.left(chunk, "NONLEVEL", 1, true);
-                recordExit(chunk.getLevel(), chunk.getPos().pack(), EXIT_NONLEVEL);
                 continue;
             }
             ChunkPos pos = chunk.getPos();
             if (!WorldBounds.inChunkRange(pos.x(), pos.z())) {
-                SchedulerMetrics.rejectFace();
-                logReject(level, chunk, "FACE", "");
-                CandidateProbe.left(chunk, "FACE", 1, true);
-                recordExit(level, pos.pack(), EXIT_FACE);
                 continue;
             }
             SectionLifecycle.ChunkCursor cursor = cursors.computeIfAbsent(level, SectionLifecycle::cursor);
             int ticketLevel = cursor.ticketLevelAt(pos.x(), pos.z());
             int allowed = DependencyTable.allowedStage(ticketLevel);
             if (allowed < SectionStage.TERRAIN) {
-                SchedulerMetrics.rejectTicket();
-                logReject(level, chunk, "TICKET", "ticket=" + ticketLevel + " allowed=" + allowed);
-                requeue(key, candidate, "TICKET");
+                requeue(key, candidate);
                 continue;
             }
             if (!GenQueue.isNearPlayer(chunk)) {
-                SchedulerMetrics.rejectWindow();
                 // 该维度有玩家、窗口表里却没有它的带，说明刷新还没发生：此刻是「还不知道」，不是
                 // 「确实太远」。丢掉等于把活永久丢掉，因为重投与重扫都不在这条路径上。判据取窗口表，
                 // 因为准入的竖直面用它。两条出口都自解：刷新之后按正常路径准入，玩家离开之后判据转假，
                 // 候选按原语义被丢弃。
                 if (!level.players().isEmpty()
                         && EntitySectionWindow.ranges(level.dimension()).length == 0) {
-                    logReject(level, chunk, "WINDOW-UNKNOWN", FarlandsConfig.logScheduler
-                            ? "snap=" + PlayerSnapshot.dimensions() : "");
                     requeuePersistent(key, candidate);
                     continue;
                 }
-                // 确实太远：一次性移除，与上面「还不知道」那一支分开记原因。
-                logReject(level, chunk, "WINDOW", FarlandsConfig.logScheduler
-                        ? "snap=" + PlayerSnapshot.dimensions() : "");
-                CandidateProbe.left(chunk, "WINDOW", 1, true);
-                recordExit(level, pos.pack(), EXIT_WINDOW);
+                // 确实太远：一次性移除。
                 continue;
             }
             int[] sections = sectionsFor(level, chunk, candidate.preloadSections);
@@ -639,10 +306,7 @@ public final class Scheduler {
             // 段」，不是「做完了」。FULL 只对「有人等」的 chunk 承诺，所以这一行排在面与窗口之后。
             if (wrDone && sections.length > 0
                     && DependencyTable.pendingBelowIn(chunk, sections, SectionStage.LIGHTED) == 0) {
-                logFull(level, chunk);
                 ChunkReadiness.completeFull(chunk);
-                CandidateProbe.left(chunk, "FULL", 1, false);
-                recordExit(level, pos.pack(), EXIT_FULL);
                 continue;
             }
             // 生成支：范围内还有低于 CARVERS 的段。装饰支：本 chunk 已有段停在 CARVERS。两支分开判，
@@ -656,17 +320,13 @@ public final class Scheduler {
                 // 所以它必须在这里被当成活：重触发，并按固定节奏留在候选表里，不消耗重投次数。
                 if (anyStage(chunk, SectionStage.DECORATED)) {
                     GenQueue.notifyGenerated(chunk);
-                    logReject(level, chunk, "LIGHT", "");
                     requeuePersistent(key, candidate);
                     continue;
                 }
-                SchedulerMetrics.blocked();
-                logReject(level, chunk, "WORK", "");
-                requeue(key, candidate, "WORK");
+                requeue(key, candidate);
                 continue;
             }
             if (deco && DecorationFiller.trySubmitDecoration(chunk)) {
-                SchedulerMetrics.emitted();
                 budget--;
                 continue;
             }
@@ -674,8 +334,6 @@ public final class Scheduler {
                 // 装饰这一支同样不封顶：提交失败只有两条原因，九格门与光照域锁，两者都是瞬时争用，
                 // 而退避到顶只要约十三秒。争用一旦超过这个窗口，候选会离表，此后没有周期性重扫把它
                 // 放回来，段就永久停在 CARVERS。固定节奏重投把它变成有界等待。
-                SchedulerMetrics.blocked();
-                logReject(level, chunk, "DECO", "");
                 requeuePersistent(key, candidate);
                 continue;
             }
@@ -688,22 +346,14 @@ public final class Scheduler {
                     StructureDriver.buildReferences(level, chunk);
                     ((ChunkBeardifier) chunk).setBeardifier(
                             Beardifier.forStructuresInChunk(level.structureManager(), chunk.getPos()));
-                    submit("ready", chunk);
+                    submit(chunk);
                 } else {
-                    SchedulerMetrics.rejectReady();
-                    logReject(level, chunk, "READY", "structures=" + enabled + " inRange=" + inRange);
-                    requeue(key, candidate, "READY");
+                    requeue(key, candidate);
                 }
                 continue;
             }
-            SchedulerMetrics.emitted();
             budget--;
-            CandidateProbe.left(chunk, "GEN", 1, false);
-            recordExit(level, pos.pack(), EXIT_GEN);
-            // 派发序号：作业入口那一行会带上同一个值，两边按序号对齐就能量出这一格被重派的节奏。
-            long dispatchSeq = DispatchProbe.next(pos,
-                    DependencyTable.pendingBelowIn(chunk, sections, SectionStage.CARVERS), sections.length);
-            GenQueue.enqueueTask(chunk, sections, dispatchSeq);
+            GenQueue.enqueueTask(chunk, sections);
         }
     }
 
@@ -786,19 +436,16 @@ public final class Scheduler {
     /**
      * 暂时性拒绝的重投：带退避，次数到顶即放弃，等下一次显式提交。
      *
-     * <p>到顶那一次是静默丢活：候选离开表，除非法提交再没人管它。{@code exit} 只作读数，标出是被哪道
-     * 门耗尽的。
+     * <p>到顶那一次是静默丢活：候选离开表，除非法提交再没人管它。
      */
-    private static void requeue(long key, Candidate candidate, String exit) {
+    private static void requeue(long key, Candidate candidate) {
         if (candidate.attempts >= RETRY_MAX_ATTEMPTS) {
-            CandidateProbe.exhausted(candidate.chunk, exit, candidate.attempts);
             return;
         }
         candidate.attempts++;
         long backoff = RETRY_BACKOFF_MILLIS[Math.min(candidate.attempts - 1, RETRY_BACKOFF_MILLIS.length - 1)];
         candidate.dueAtMillis = System.currentTimeMillis() + backoff;
         CANDIDATES.put(key, candidate);
-        SchedulerMetrics.repost();
     }
 
     /**
@@ -812,7 +459,6 @@ public final class Scheduler {
         candidate.dueAtMillis = System.currentTimeMillis()
                 + RETRY_BACKOFF_MILLIS[RETRY_BACKOFF_MILLIS.length - 1];
         CANDIDATES.put(key, candidate);
-        SchedulerMetrics.repost();
     }
 
     /** 距离用快照，避免逐候选遍历玩家。 */
@@ -822,58 +468,6 @@ public final class Scheduler {
             return PlayerSnapshot.nearestDistance(level.dimension(), chunk.getPos().x(), chunk.getPos().z());
         }
         return Long.MAX_VALUE;
-    }
-
-    /** 第七行求值行的读数，同一 chunk 只打一次。 */
-    private static void logFull(ServerLevel level, LevelChunk chunk) {
-        long key = chunk.getPos().pack();
-        if (!FarlandsConfig.logScheduler || !FULL_LOGGED.add(key)) {
-            return;
-        }
-        InfsFarlands.LOGGER.info(
-                "FLFULL evald dim={} chunk={},{} wrDone={} claimed={} holder={}",
-                level.dimension().identifier(), chunk.getPos().x(), chunk.getPos().z(),
-                ChunkCounters.isWindowReadDone(chunk), ChunkCounters.isFullDone(chunk),
-                SectionLifecycle.latestHolder(level, chunk.getPos().x(), chunk.getPos().z()) != null);
-    }
-
-    /**
-     * 诊断行：准入被拒的原因与四个前件。同一维度、同一 chunk、同一原因只打一次。
-     *
-     * <p>键里必须有维度：只按坐标记时，同一格在主世界打过一次，换维度之后同一格的另一条原因会被
-     * 同一个键吞掉，而跨维度恰是调度的常态。
-     */
-    private static void logReject(ServerLevel level, LevelChunk chunk, String reason, String extra) {
-        if (!FarlandsConfig.logScheduler) {
-            return;
-        }
-        String key = String.valueOf(level.dimension().identifier()) + '|' + chunk.getPos().pack() + '|' + reason;
-        if (!REJECT_LOGGED.add(key)) {
-            return;
-        }
-        InfsFarlands.LOGGER.info(
-                "FLBLOCK reject reason={} dim={} chunk={},{} {} below={} wrDone={} beard={} stages={}",
-                reason, level.dimension().identifier(), chunk.getPos().x(), chunk.getPos().z(), extra,
-                SectionStage.hasBelowLighted(chunk), ChunkCounters.isWindowReadDone(chunk),
-                ((ChunkBeardifier) chunk).hasBeardifier(), stageHistogram(chunk));
-    }
-
-    /** 该 chunk 的段位直方图，按档位计数。 */
-    private static String stageHistogram(LevelChunk chunk) {
-        int[] counts = new int[SectionStage.LIGHTED + 1];
-        SectionStage.forEachStage(chunk, (sy, stage) -> {
-            if (stage >= 0 && stage < counts.length) {
-                counts[stage]++;
-            }
-        });
-        StringBuilder sb = new StringBuilder("[");
-        for (int i = 0; i < counts.length; i++) {
-            if (i > 0) {
-                sb.append(',');
-            }
-            sb.append(counts[i]);
-        }
-        return sb.append(']').toString();
     }
 
     /** 该 chunk 落在哪个面的方阵内，返回该面的段带 `{min, max}`；不在任何面内返回 null。 */
@@ -932,9 +526,6 @@ public final class Scheduler {
         if (sections.length == 0) {
             return;
         }
-        // 诊断：请求侧的段数，与真正走到 setStage 的次数相除，就能看出写有没有落地。
-        StageWriteProbe.requested(sections.length);
-        StageWriteProbe.direct();
         applyStage(chunk, sections, targetStage);
     }
 
@@ -943,12 +534,10 @@ public final class Scheduler {
         if (sections.length == 0) {
             return;
         }
-        StageWriteProbe.requested(sections.length);
-        StageWriteProbe.direct();
         for (int sy : sections) {
             SectionStage.restoreStage(chunk, sy, targetStage);
         }
-        submit("stage", chunk);
+        submit(chunk);
     }
 
     private static void applyStage(LevelChunk chunk, int[] sections, int targetStage) {
@@ -956,7 +545,7 @@ public final class Scheduler {
             SectionStage.setStage(chunk, sy, targetStage);
         }
         // 扇出：档位变了，下一相可能就绪，重新登记候选。候选被准入或拒绝后移除，不会自增长。
-        submit("stage", chunk);
+        submit(chunk);
     }
 
     /** 标脏，语义同 {@link #stage(LevelChunk, int[], int)}。 */

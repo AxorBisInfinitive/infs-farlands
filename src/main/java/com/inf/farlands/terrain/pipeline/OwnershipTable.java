@@ -1,15 +1,8 @@
 package com.inf.farlands.terrain.pipeline;
 
 import java.util.Arrays;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
-import com.inf.farlands.FarlandsConfig;
-import com.inf.farlands.FarlandsTick;
-import com.inf.farlands.InfsFarlands;
-import com.inf.farlands.debug.TicketFlowProbe;
 import com.inf.farlands.util.map.Long2ObjectStripedMap;
 
 import net.minecraft.server.level.ServerLevel;
@@ -58,58 +51,6 @@ public final class OwnershipTable {
 
     /** 光照任务与装饰域的二十五格锁，键是 chunkKey。 */
     private static final Long2ObjectStripedMap<AtomicLong> LIGHT_TASK = new Long2ObjectStripedMap<>(1 << 8);
-
-    /**
-     * 诊断：取域成功的 owner 到 {@code 站点@tick@中心} 的归属表。
-     *
-     * <p>放域时删条目，所以表里留下的是当下仍被持有的域。条目数本身就是泄漏的读数：正常轮转时它等于同时
-     * 在途的取域数，只有个位数；泄漏时它会随会话增长。
-     *
-     * <p>不按时间淘汰，因为要看的就是这些条目；只在到顶后停记并计一次截断，让「这一格没有标签」与「截断
-     * 之后没记上」分开。
-     */
-    private static final Map<Long, String> TAGS = new ConcurrentHashMap<>();
-
-    /** 归属表的条目上限。 */
-    private static final int TAG_LIMIT = 512;
-
-    /** 到顶之后被压掉的归属记录数。 */
-    private static final AtomicLong TAG_TRUNCATED = new AtomicLong();
-
-    /** 诊断：放域调用次数，与其中真正清掉的格数并排，分开「放了但一格没清」与「压根没放」。 */
-    private static final AtomicLong UNLOCK_ATTEMPTS = new AtomicLong();
-
-    private static final AtomicLong UNLOCK_CLEARED = new AtomicLong();
-
-    /** 诊断：一格都没清到的放域次数。中心或 owner 与取锁时那一对不匹配时就是这一支。 */
-    private static final AtomicLong UNLOCK_ZERO = new AtomicLong();
-
-    /** 已逐条打过的零命中 owner。owner 是唯一编号，天然不重复去重。 */
-    private static final Set<Long> ZERO_LOGGED = ConcurrentHashMap.newKeySet();
-
-    /** 零命中逐条输出的上限。留下的是先出现的那批，总量的口径是 {@link #UNLOCK_ZERO}。 */
-    private static final int ZERO_LOG_LIMIT = 256;
-
-    /** 诊断：取域成功后记一条归属。{@code site} 是调用方，tick 与中心供与别的读数对齐。 */
-    private static void tag(long owner, String site, int centerX, int centerZ) {
-        if (!FarlandsConfig.logScheduler) {
-            return;
-        }
-        if (TAGS.size() >= TAG_LIMIT) {
-            TAG_TRUNCATED.incrementAndGet();
-            return;
-        }
-        TAGS.put(owner, site + '@' + FarlandsTick.getNow() + '@' + centerX + ',' + centerZ);
-    }
-
-    /** 诊断：归属表与放域计数压成一行，取走本窗的两个累计计数。 */
-    public static String lockSummary() {
-        return "unlockAtt=" + UNLOCK_ATTEMPTS.getAndSet(0L)
-                + " unlockCleared=" + UNLOCK_CLEARED.getAndSet(0L)
-                + " clearZero=" + UNLOCK_ZERO.getAndSet(0L)
-                + " tags=" + TAGS.size()
-                + " tagTrunc=" + TAG_TRUNCATED.get();
-    }
 
     static {
         for (int phase = 1; phase < PHASES; phase++) {
@@ -171,9 +112,7 @@ public final class OwnershipTable {
     public static long tryClaimChunk(ServerLevel level, int phase, ChunkPos pos) {
         AtomicLong cell = CHUNK_CLAIMS[phase].computeIfAbsent(pos.pack(), k -> new AtomicLong());
         long owner = OWNER_SEQ.incrementAndGet();
-        boolean ok = cell.compareAndSet(0L, owner);
-        TicketFlowProbe.claim(phase, pos.pack(), owner, ok);
-        if (!ok) {
+        if (!cell.compareAndSet(0L, owner)) {
             return 0L;
         }
         GenQueue.addGenTicket(level, pos);
@@ -186,9 +125,7 @@ public final class OwnershipTable {
             return;
         }
         AtomicLong cell = CHUNK_CLAIMS[phase].get(pos.pack());
-        boolean ok = cell != null && cell.compareAndSet(owner, 0L);
-        TicketFlowProbe.release(phase, pos.pack(), owner, ok);
-        if (ok) {
+        if (cell != null && cell.compareAndSet(owner, 0L)) {
             GenQueue.removeGenTicket(level, pos);
         }
     }
@@ -249,7 +186,6 @@ public final class OwnershipTable {
                 return 0L;
             }
         }
-        tag(owner, centerChunkKey == null ? "light" : "deco", centerX, centerZ);
         return owner;
     }
 
@@ -278,24 +214,11 @@ public final class OwnershipTable {
         if (owner == 0L) {
             return;
         }
-        int cleared = 0;
         for (int dz = -2; dz <= 2; dz++) {
             for (int dx = -2; dx <= 2; dx++) {
                 AtomicLong cell = LIGHT_TASK.get(ChunkPos.pack(centerX + dx, centerZ + dz));
-                if (cell != null && cell.compareAndSet(owner, 0L)) {
-                    cleared++;
-                }
-            }
-        }
-        String tag = TAGS.remove(owner);
-        if (FarlandsConfig.logScheduler) {
-            UNLOCK_ATTEMPTS.incrementAndGet();
-            UNLOCK_CLEARED.addAndGet(cleared);
-            if (cleared == 0) {
-                UNLOCK_ZERO.incrementAndGet();
-                if (ZERO_LOGGED.size() < ZERO_LOG_LIMIT && ZERO_LOGGED.add(owner)) {
-                    InfsFarlands.LOGGER.info("FLCLEARZERO owner={} center={},{} tag={}",
-                            owner, centerX, centerZ, tag == null ? "none" : tag);
+                if (cell != null) {
+                    cell.compareAndSet(owner, 0L);
                 }
             }
         }
@@ -320,17 +243,6 @@ public final class OwnershipTable {
         return isChunkClaimed(DECORATED, chunkKey);
     }
 
-    /**
-     * 诊断：该 chunk 的 LIGHTED 相认领编号，0 表示空闲或从未被认领。
-     *
-     * <p>{@link #isLightedClaimed} 看的是二十五格的域锁，与这一栏不是同一张表：域锁挡的是同片区的写入，
-     * 这一栏挡的是「同一 chunk 的光照任务只跑一次」。两者都有可能卡住升格，所以分开读。
-     */
-    public static long lightChunkClaimOwner(int chunkX, int chunkZ) {
-        AtomicLong cell = CHUNK_CLAIMS[LIGHTED].get(ChunkPos.pack(chunkX, chunkZ));
-        return cell == null ? 0L : cell.get();
-    }
-
     /** 该 chunk 是否落在某次光照任务的二十五格域内。 */
     public static boolean isLightedClaimed(int chunkX, int chunkZ) {
         for (int dz = -2; dz <= 2; dz++) {
@@ -344,38 +256,6 @@ public final class OwnershipTable {
         return false;
     }
 
-    /**
-     * 二十五格里被占的偏移与持有者编号，形如 {@code -1,0=12(deco@984@0,-1) 2,-2=37}；全空时返回
-     * {@code none}。
-     *
-     * <p>只给锁失败的诊断用。{@link #isLightedClaimed} 只回答有没有，分不开「同片区的光照任务持有」
-     * 与「另一次装饰持有」，而这两支的处置不同：前者是毫秒级等待，后者要查认领泄漏。
-     *
-     * <p>持有者后面跟的是 {@link #TAGS} 里的归属，写明它是哪个站点取的、哪一拍、中心在哪；没有括号的
-     * 说明该 owner 没有记上归属，两种成因由 {@code tagTrunc} 分开。
-     */
-    public static String lightDomainOwners(int centerX, int centerZ) {
-        StringBuilder sb = new StringBuilder();
-        for (int dz = -2; dz <= 2; dz++) {
-            for (int dx = -2; dx <= 2; dx++) {
-                AtomicLong cell = LIGHT_TASK.get(ChunkPos.pack(centerX + dx, centerZ + dz));
-                long value = cell == null ? 0L : cell.get();
-                if (value == 0L) {
-                    continue;
-                }
-                if (sb.length() > 0) {
-                    sb.append(' ');
-                }
-                sb.append(dx).append(',').append(dz).append('=').append(value);
-                String tag = TAGS.get(value);
-                if (tag != null) {
-                    sb.append('(').append(tag).append(')');
-                }
-            }
-        }
-        return sb.length() == 0 ? "none" : sb.toString();
-    }
-
     /** 停服清空。票随 level 消亡，不逐个撤。 */
     public static void clearWorldState() {
         for (int phase = 1; phase < PHASES; phase++) {
@@ -384,6 +264,5 @@ public final class OwnershipTable {
             CHUNK_CLAIMS[phase].clear();
         }
         LIGHT_TASK.clear();
-        TAGS.clear();
     }
 }

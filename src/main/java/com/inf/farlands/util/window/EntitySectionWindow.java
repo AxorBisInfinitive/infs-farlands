@@ -95,25 +95,6 @@ public final class EntitySectionWindow {
         return !WINDOWS.isEmpty();
     }
 
-    /** 当前有窗口的维度数。给阻塞期的泵读数用，与 `FLSCHED` 的 `pumpedDims` 对照。 */
-    public static int dimensions() {
-        return WINDOWS.size();
-    }
-
-    /**
-     * 表内容的只读快照：维度 id 到该维度区间串，区间串形如 {@code [-9, 25]}。
-     *
-     * <p>只给冻结期的读数用。{@link #dimensions()} 只说有几个维度，分不出「这个维度在表里但带是空的」，
-     * 而这两种形态的处置完全不同。
-     */
-    public static Map<String, String> snapshot() {
-        Map<String, String> out = new java.util.LinkedHashMap<>();
-        for (Map.Entry<ResourceKey<Level>, int[]> e : WINDOWS.entrySet()) {
-            out.put(String.valueOf(e.getKey().identifier()), Arrays.toString(e.getValue()));
-        }
-        return out;
-    }
-
     /** 该维度的该段是否落在窗口内。 */
     public static boolean inAnyWindow(ResourceKey<Level> dimension, int sectionY) {
         int[] r = ranges(dimension);

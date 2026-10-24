@@ -2,9 +2,6 @@ package com.inf.farlands.serialize;
 
 import java.lang.reflect.Method;
 
-import com.inf.farlands.FarlandsConfig;
-import com.inf.farlands.InfsFarlands;
-
 import net.minecraft.server.level.ChunkHolder;
 import net.minecraft.server.level.GenerationChunkHolder;
 import net.minecraft.server.level.ServerLevel;
@@ -88,35 +85,11 @@ public final class ChunkReadiness {
         if (!ChunkCounters.claimFull(chunk)) {
             return;
         }
-        logNeighborhood(level, chunk);
         try {
             M_COMPLETE_FUTURE.invoke(holder, ChunkStatus.FULL, chunk);
         } catch (Exception e) {
             throw new RuntimeException("farlands: failed to complete FULL for " + chunk.getPos(), e);
         }
-    }
-
-    /**
-     * 诊断：补 FULL 那一刻本格三乘三里有几个 holder 在场。
-     *
-     * <p>晋升的 future 是 {@code ChunkMap.prepareAccessibleChunk}，即 {@code getChunkRangeFuture} 的
-     * 三乘三，任一格不在 {@code updatingChunkMap} 里就整条 future 直接判成未加载，而票位不跨档就不会
-     * 重排晋升。这一栏用来分开「九格不在场」与「九格在场但 future 链另有问题」。
-     */
-    private static void logNeighborhood(ServerLevel level, LevelChunk chunk) {
-        if (!FarlandsConfig.logScheduler) {
-            return;
-        }
-        int n9 = 0;
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dz = -1; dz <= 1; dz++) {
-                if (SectionLifecycle.latestHolder(level, chunk.getPos().x() + dx, chunk.getPos().z() + dz) != null) {
-                    n9++;
-                }
-            }
-        }
-        InfsFarlands.LOGGER.info("FLNINE full chunk={},{} n9={}",
-                chunk.getPos().x(), chunk.getPos().z(), n9);
     }
 
     /** 关服入口置位，由 MinecraftServerMixin 在 stopServer 的 HEAD 调。 */
