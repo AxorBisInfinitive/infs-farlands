@@ -1,7 +1,6 @@
 package com.inf.farlands.mixin.expand.y;
 
 import com.inf.farlands.light.FarLandsLightEngine;
-import com.inf.farlands.serialize.ChunkCounters;
 import com.inf.farlands.serialize.CounterIdentities;
 import com.inf.farlands.serialize.CounterIdentity;
 import com.inf.farlands.serialize.PendingBlockEntities;
@@ -58,7 +57,6 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-import net.minecraft.world.level.chunk.ImposterProtoChunk;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.ProtoChunk;
 
@@ -224,11 +222,6 @@ public abstract class ChunkAccessMixin
             }
         }
         buildDefaultWindow();
-        // 构造期建的段不逐条记，改成这里统一扫一遍容器：它同时覆盖构造器数组里的段与窗口默认段，
-        // 且不依赖那时读不到的 this.level。
-        if (this.farlands$counterId != 0L) {
-            ChunkCounters.sweep((LevelChunk) (Object) this);
-        }
     }
 
     @Override
@@ -438,21 +431,6 @@ public abstract class ChunkAccessMixin
         return beardifier;
     }
 
-    /**
-     * 物化记账。身份是 0 的 chunk 由 {@link ChunkCounters} 自己空转，所以这里不判端也不判身份。
-     *
-     * <p>ImposterProtoChunk 要解包成它包着的 LevelChunk：账记在真正的容器持有者身上，否则会记到
-     * 另一个身份上。
-     */
-    @Unique
-    private void farlands$countMaterialized(int sectionY) {
-        if ((Object) this instanceof LevelChunk lc) {
-            ChunkCounters.onMaterialize(lc, sectionY);
-        } else if ((Object) this instanceof ImposterProtoChunk imposter) {
-            ChunkCounters.onMaterialize(imposter.getWrapped(), sectionY);
-        }
-    }
-
     @Overwrite
     public LevelChunkSection[] getSections() {
         return this.windowSections;
@@ -466,7 +444,6 @@ public abstract class ChunkAccessMixin
             s = new LevelChunkSection(this.containerFactory);
             this.allSections.put(sy, s);
             addActiveSection(sy);
-            farlands$countMaterialized(sy);
         }
         try {
             LevelChunkSection[] arr = this.sections;

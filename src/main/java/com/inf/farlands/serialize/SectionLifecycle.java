@@ -831,9 +831,6 @@ public final class SectionLifecycle {
         WindowedChunk wc = (WindowedChunk) lc;
         wc.windowedAllSections().put(sy, decoded.section());
         wc.addActiveSection(sy);
-        // 读回是第三条物化路径，绕开 ChunkAccess.getSection，所以记账要在这里补一次。随后的
-        // setStage 会把该段从 UNPROCESSED 推到盘上档位，两侧合计只记一次。
-        ChunkCounters.onMaterialize(lc, sy);
         lc.getSection(lc.getSectionIndexFromSectionY(sy)); // 数组同步，get 内部会执行 arr[idx]=s
         if (lc.getLevel() instanceof ServerLevel sl) {
             LevelLightEngine le = sl.getChunkSource().getLightEngine();

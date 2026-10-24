@@ -16,89 +16,24 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 
 /**
- * 依赖表的静态声明，加票位到允许档的换算。
+ * 三处依赖判据：票位到允许档的换算、段集合的欠账计数、装饰写域的九格门。
  *
  * <p>
  * 版本绑定：vanilla 的 {@code ChunkStatus} 常量名与 {@code ChunkLevel} 的算式取自
  * 26.1.2，升级要重核。
  *
  * <p>
- * 每一行声明四样东西：推到哪一档、依赖哪些档与三轴半径、写域半径、以及欠账判据。欠账判据由
- * 三部分组成，缺一不可：
- *
- * <ul>
- * <li>{@link Row#universe()}，枚举来源。四条判据的来源并不统一，本表逐行复刻各自的来源。</li>
- * <li>{@link Row#pendingMask()}，哪些档算欠账，按位。它按行义写，即「该行推进到的档之下的全部档」，
- * SURFACE 行是 TERRAIN 一位，LIGHTED 行是 UNPROCESSED 到 CARVERS，FULL 行是 UNPROCESSED 到
- * DECORATED。</li>
- * <li>{@link Row#excludeReading()}，是否把正在读回的 section 排除。</li>
- * </ul>
+ * 档位之间确实有依赖，但那份依赖现在只活在三处判据里，各自按自己问的问题取形：准入问「这个候选的
+ * 段集合里还欠几段」，装饰问「九格都过雕刻了吗」，票位问「这一格最多许到哪一档」。本类不再另存一份
+ * 按行划分的依赖声明。那份声明描述的是按 chunk 整块推进的旧模型，与现行的段集合准入不同量纲，
+ * 留着只会与实现对不上。
  *
  * <p>
- * 运行时读者只有两处：{@link #allowedStage(int)} 与 {@link #pendingBelowIn}；行声明本身是模型口径的
- * 声明面，调度器接管依赖判据时按它取值。
+ * 欠账的档位关系，按实际行为写在这里：{@code BIOMES} 无前置；{@code TERRAIN} 要 biome；{@code SURFACE}
+ * 要 terrain；{@code CARVERS} 要 surface；{@code DECORATED} 要中心与八个邻居都过 carvers；{@code LIGHTED}
+ * 要 decorated；补 FULL 只要不欠点亮，不要求 decorate 之外还有别的。
  */
 public final class DependencyTable {
-
-    /** 欠账判据的枚举来源。 */
-    public enum Universe {
-        /** 无。BIOMES 行没有前置。 */
-        NONE,
-        /** section 容器的键集，对应 SurfaceFiller 与 CarverFiller 的判据。 */
-        CONTAINER,
-        /** section 状态表的键集，对应 GenTask 的待点亮判据与装饰的门。 */
-        STAGE_MAP,
-        /** 窗口并集区间，对应调度器准入里那段竖直判据。 */
-        WINDOW_UNION
-    }
-
-    /**
-     * 一行依赖声明。
-     *
-     * @param targetStage    本行推进到的档
-     * @param requires       依赖的档与三轴半径，每条是 {档, dx, dy, dz}；调度器接管那一步才读
-     * @param writeRadius    写域半径，单位是 section，顺序是 x、y、z；调度器接管那一步才读
-     * @param universe       欠账判据的枚举来源
-     * @param pendingMask    哪些档算欠账，按位，第 i 位是档位 i
-     * @param excludeReading 是否把正在读回的 section 排除
-     */
-    public record Row(int targetStage, int[][] requires, int[] writeRadius, Universe universe,
-            int pendingMask, boolean excludeReading) {
-    }
-
-    private static int mask(int... stages) {
-        int m = 0;
-        for (int stage : stages) {
-            m |= 1 << stage;
-        }
-        return m;
-    }
-
-    public static final Row BIOMES = new Row(SectionStage.BIOMES, new int[0][], new int[] { 0, 0, 0 },
-            Universe.NONE, 0, false);
-    public static final Row TERRAIN = new Row(SectionStage.TERRAIN,
-            new int[][] { { SectionStage.BIOMES, 0, 0, 0 } }, new int[] { 0, 0, 0 },
-            Universe.WINDOW_UNION, mask(SectionStage.UNPROCESSED, SectionStage.BIOMES), false);
-    public static final Row SURFACE = new Row(SectionStage.SURFACE,
-            new int[][] { { SectionStage.TERRAIN, 0, 0, 0 } }, new int[] { 0, 0, 0 },
-            Universe.CONTAINER, mask(SectionStage.TERRAIN), true);
-    public static final Row CARVERS = new Row(SectionStage.CARVERS,
-            new int[][] { { SectionStage.SURFACE, 0, 0, 0 } }, new int[] { 0, 0, 0 },
-            Universe.CONTAINER, mask(SectionStage.SURFACE), true);
-    public static final Row DECORATED = new Row(SectionStage.DECORATED,
-            new int[][] { { SectionStage.CARVERS, 1, 0, 1 } }, new int[] { 1, 0, 1 },
-            Universe.STAGE_MAP, mask(SectionStage.CARVERS), false);
-    public static final Row LIGHTED = new Row(SectionStage.LIGHTED,
-            new int[][] { { SectionStage.DECORATED, 0, 0, 0 } }, new int[] { 0, 0, 0 },
-            Universe.STAGE_MAP,
-            mask(SectionStage.UNPROCESSED, SectionStage.BIOMES, SectionStage.TERRAIN, SectionStage.SURFACE,
-                    SectionStage.CARVERS),
-            false);
-    public static final Row FULL = new Row(SectionStage.LIGHTED + 1,
-            new int[][] { { SectionStage.LIGHTED, 0, 0, 0 } }, new int[] { 0, 0, 0 },
-            Universe.STAGE_MAP, mask(SectionStage.UNPROCESSED, SectionStage.BIOMES, SectionStage.TERRAIN,
-                    SectionStage.SURFACE, SectionStage.CARVERS, SectionStage.DECORATED),
-            false);
 
     /** 我们的档到 vanilla 状态的映射，顺序即档位顺序。 */
     private static final ChunkStatus[] STATUS_OF_STAGE = {
@@ -143,6 +78,10 @@ public final class DependencyTable {
      *
      * <p>集合由 {@code Scheduler.sectionsFor} 产出，已按可玩界与在读过滤并升序去重。准入的欠账判据与
      * 第七行的完成判据都走这里，两个判据因此与 {@code GenTask} 的收集读同一份段集合。
+     *
+     * <p>三处调用各自换 {@code limit}：生成支用 {@code CARVERS}，第七行补 FULL 用 {@code LIGHTED}，
+     * 视距内兜底重扫用 {@code CARVERS}。补 FULL 不要求「不欠 decorated」，它只要求整窗段都已点亮，
+     * 不欠点亮就是可以放出。
      */
     public static int pendingBelowIn(LevelChunk chunk, int[] sections, int limit) {
         int count = 0;
@@ -169,6 +108,9 @@ public final class DependencyTable {
      *
      * <p>交集与写门同宽：{@code DecorationRegion.setBlock} 对未物化的段直接返回假。这条是一条耦合，
      * 若将来写门改成会物化的取法，例如 {@code getSection}，判据面要重新算。
+     *
+     * <p>九格等于写域 ±1，与 {@code DecorationFiller} 的认领半径、{@code DecorationRegion} 的写域半径
+     * 是同一个数，三处各写一遍。
      */
     public static boolean neighborGate(LevelChunk center) {
         if (!(center.getLevel() instanceof ServerLevel level)) {

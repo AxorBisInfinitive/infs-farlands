@@ -36,9 +36,6 @@ import net.minecraft.world.level.chunk.LevelChunk;
  * 会与在途任务的写口竞争，键是坐标时清完之后任务还能把旧代的档位写进新一代，键是身份时那道写口
  * 因为身份已注销而直接空转。身份由 {@link CounterIdentities} 分配与注销，只给服务端的 LevelChunk。
  *
- * <p>派生记账：档位变化与物化都同步 {@link ChunkCounters}，后者供调度器的依赖判据 O(1) 取值。
- * 记账一律在段状态表的锁放开之后进行，两个写方法都不在 ConcurrentHashMap 的回调里调它。
- *
  * 推进点。BIOMES 在 BiomeFiller，TERRAIN 在 GenTask 的 fill 之后，SURFACE 在 SurfaceFiller，
  * CARVERS 在 CarverFiller，DECORATED 在 DecorationFiller 的收尾，LIGHTED 在
  * GenQueue.triggerLight 的主线程那一笔里由 promoteAllGenToLighted 升段。六处都经调度器的落档体写，
@@ -111,13 +108,10 @@ public final class SectionStage {
     }
 
     /**
-     * 写档位并同步派生记账。档位单调不减，降档请求被丢弃；读回走 {@link #restoreStage}。
+     * 写档位。档位单调不减，降档请求被丢弃；读回走 {@link #restoreStage}。
      *
-     * <p>读旧值、写新值、记账三步在同一段的监视器内成对完成。少了这道同步，两个线程并发升同一段
-     * 时会各自读到同一个旧档位，跨越同一道阈值的减计数各做一次，计数被多减。
-     *
-     * <p>锁序：本方法持段监视器，随后进记账的实例锁；记账侧只读 {@link #getStage} 与段容器，
-     * 不反向取段监视器，因此不成环。
+     * <p>读旧值与写新值在同一段的监视器内成对完成。少了这道同步，两个线程并发升同一段时会各自
+     * 读到同一个旧档位，单调闸因此失效。
      */
     public static void setStage(LevelChunk chunk, int sectionY, int stage) {
         write(chunk, sectionY, stage, true);
@@ -161,7 +155,6 @@ public final class SectionStage {
                 }
                 state.setStage(stage);
             }
-            ChunkCounters.onStageChange(chunk, sectionY, old, stage);
             return;
         }
     }
@@ -230,7 +223,7 @@ public final class SectionStage {
         return getStage(chunk, sectionY) >= stage;
     }
 
-    /** 删除某 section 的状态。fsa 清理时状态已随 section 落盘，载体同步删除，记账反向减。 */
+    /** 删除某 section 的状态。fsa 清理时状态已随 section 落盘，载体同步删除。 */
     public static void removeStage(LevelChunk chunk, int sectionY) {
         long identity = liveIdentity(chunk);
         if (identity == 0L) {
@@ -240,18 +233,13 @@ public final class SectionStage {
         if (m == null) {
             return;
         }
-        SectionState removed = m.remove(sectionY);
-        if (removed != null) {
-            synchronized (removed) {
-                ChunkCounters.onRemove(chunk, sectionY, removed.stage());
-            }
-        }
+        m.remove(sectionY);
     }
 
     /**
-     * chunk 卸载时清掉它的整条状态：先注销身份，再删状态表与记账。
+     * chunk 卸载时清掉它的整条状态：先注销身份，再删状态表与两个一次性标志。
      *
-     * <p>顺序是契约。先注销，在途任务随后的 {@link #setStage} 与记账就都会空转，不会为同坐标的新
+     * <p>顺序是契约。先注销，在途任务随后的 {@link #setStage} 与写标志就都会空转，不会为同坐标的新
      * 一代把旧状态建回来；先删表的话，中间那一段窗口里任务还能建回来，而那时身份已死、再没人清它。
      */
     public static void clear(LevelChunk chunk) {
@@ -391,12 +379,11 @@ public final class SectionStage {
     /**
      * 读回收尾：把「标记建出来、但既没落档也没物化」的空条目摘掉。
      *
-     * <p>读回标记会给整个窗口逐段建条目，盘上没有数据的那些建完就再没人碰。判据三条，缺一不可：
-     * 档位仍是 {@code UNPROCESSED}，有档位就是有工作，空段也算；容器里没有这个段，缺段即空气，
-     * 但物化过的空段仍然是段；此刻不在读，unmark 之后窗口可能又滑回来重新标记。
+     * <p>判据三条缺一不可的原因：档位仍是 {@code UNPROCESSED}，有档位就是有工作，空段也算；
+     * 容器里没有这个段，缺段即空气，但物化过的空段仍然是段；此刻不在读，unmark 之后窗口可能又滑回来
+     * 重新标记。
      *
-     * <p>删除对记账是中性的：标记条目从未经过 {@code onMaterialize} 或 {@code onStageChange}，
-     * 记账的已计入集合里没有它。这正是它能在这里被摘掉、而读回恢复过的段不能的原因。
+     * <p>摘掉不丢任何记账：本类只存档位与两个标志，档位表里没有条目等价于 {@code UNPROCESSED}。
      *
      * <p>与落档体的竞态：{@link #write} 在监视器内复核条目仍是自己那张，所以在这里的监视器内摘下
      * 不会让一笔正在落的档写到已经脱离表的对象上。
@@ -414,7 +401,6 @@ public final class SectionStage {
         if (state == null) {
             return;
         }
-        boolean removed;
         synchronized (state) {
             if (state.isReading() || state.stage() != UNPROCESSED) {
                 return;
@@ -422,10 +408,7 @@ public final class SectionStage {
             if (((WindowedChunk) chunk).windowedAllSections().containsKey(sectionY)) {
                 return;
             }
-            removed = m.remove(sectionY, state);
-        }
-        if (removed) {
-            ChunkCounters.onRemove(chunk, sectionY, UNPROCESSED);
+            m.remove(sectionY, state);
         }
     }
 }
