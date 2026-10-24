@@ -228,7 +228,9 @@ public final class GenQueue {
         }
         long owner = OwnershipTable.tryClaimChunk(level, OwnershipTable.TERRAIN, chunk.getPos());
         if (owner == 0L) {
-            return; // 同 chunk 已有在途任务，去重
+            // 同 chunk 已有在途任务，去重。候选已在派发里被移除，这里是它离表的真正原因，记一笔台账。
+            Scheduler.recordExit(chunk.getPos().pack(), Scheduler.EXIT_GEN_SKIP);
+            return;
         }
         ACTIVE.incrementAndGet();
         try {
@@ -238,6 +240,7 @@ public final class GenQueue {
         } catch (RejectedExecutionException e) {
             ACTIVE.decrementAndGet();
             OwnershipTable.releaseChunk(level, OwnershipTable.TERRAIN, chunk.getPos(), owner);
+            Scheduler.recordExit(chunk.getPos().pack(), Scheduler.EXIT_GEN_SKIP);
         }
     }
 

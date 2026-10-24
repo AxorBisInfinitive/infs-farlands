@@ -101,6 +101,8 @@ public final class Scheduler {
         CANDIDATES.clear();
         REJECT_LOGGED.clear();
         FULL_LOGGED.clear();
+        SUBMITS.clear();
+        EXITS.clear();
         SEQ.set(0);
     }
 
@@ -172,12 +174,98 @@ public final class Scheduler {
     /** 派发重入闸：落档体的扇出会在派发内 submit，不能再递归进来。 */
     private static final ThreadLocal<Boolean> TICKING = ThreadLocal.withInitial(() -> Boolean.FALSE);
 
+    /**
+     * 诊断：提交台账。键是 chunk 坐标，值是 {次数, 最后一次的 tick}。
+     *
+     * <p>用途是把「某个 chunk 到底有没有被提交过、最后一次是什么时候」压成两个整数，读数在需要的地方
+     * 才取，避免逐次打印把日志再灌一遍。只在 {@code logScheduler} 打开时记账。
+     */
+    private static final Map<Long, long[]> SUBMITS = new ConcurrentHashMap<>();
+
+    /** 诊断：一次都没提交过时的读数。 */
+    public static String submitTrace(long chunkKey) {
+        long[] entry = SUBMITS.get(chunkKey);
+        if (entry == null) {
+            return "0@never";
+        }
+        return entry[0] + "@" + entry[1];
+    }
+
+    private static void recordSubmit(long chunkKey) {
+        if (!FarlandsConfig.logScheduler) {
+            return;
+        }
+        SUBMITS.compute(chunkKey, (key, entry) -> {
+            long[] target = entry == null ? new long[2] : entry;
+            target[0]++;
+            target[1] = com.inf.farlands.FarlandsTick.getNow();
+            return target;
+        });
+    }
+
+    // ---- 诊断：离表台账 ----
+    //
+    // 每条候选离表都记一条「原因 + tick」，只留最后一次。停摆的 chunk 一旦离表就不再进表，所以台账里
+    // 留下的正是它最后一次离表的原因；这条原因不需要事先知道是哪个 chunk，也不需要逐次打印。
+
+    /** 派发开头身份失配，条件删除旧条目。 */
+    static final int EXIT_STALE = 0;
+
+    /** 取不到 ServerLevel，理论不可达。 */
+    static final int EXIT_NONLEVEL = 1;
+
+    /** 可玩界外。 */
+    static final int EXIT_FACE = 2;
+
+    /** 距玩家太远。 */
+    static final int EXIT_WINDOW = 3;
+
+    /** 第七行成立，已补发 FULL。 */
+    static final int EXIT_FULL = 4;
+
+    /** 交给生成任务。 */
+    static final int EXIT_GEN = 5;
+
+    /** 交给生成任务时认领 CAS 失败，候选直接丢。 */
+    static final int EXIT_GEN_SKIP = 6;
+
+    private static final String[] EXIT_NAMES = {
+            "STALE", "NONLEVEL", "FACE", "WINDOW", "FULL", "GEN", "GEN_SKIP" };
+
+    /** 诊断：离表台账，键是 chunk 坐标，值是 {原因序号, tick}。 */
+    private static final Map<Long, long[]> EXITS = new ConcurrentHashMap<>();
+
+    /** 诊断：最后一次离表的原因与 tick，形如 {@code GEN@82}；从未离表时是 {@code none}。 */
+    public static String exitTrace(long chunkKey) {
+        long[] entry = EXITS.get(chunkKey);
+        if (entry == null) {
+            return "none";
+        }
+        int tag = (int) entry[0];
+        String name = tag >= 0 && tag < EXIT_NAMES.length ? EXIT_NAMES[tag] : String.valueOf(tag);
+        return name + "@" + entry[1];
+    }
+
+    static void recordExit(long chunkKey, int tag) {
+        if (!FarlandsConfig.logScheduler) {
+            return;
+        }
+        long tick = com.inf.farlands.FarlandsTick.getNow();
+        EXITS.compute(chunkKey, (key, entry) -> {
+            long[] target = entry == null ? new long[2] : entry;
+            target[0] = tag;
+            target[1] = tick;
+            return target;
+        });
+    }
+
     /** 登记一个待办 chunk，显式范围只作为 {@link #sectionsFor} 的一支。入队即派发。 */
     public static void submit(LevelChunk chunk, int[] preloadSections) {
         long key = identityOf(chunk);
         if (key == 0L) {
             return;
         }
+        recordSubmit(chunk.getPos().pack());
         CANDIDATES.put(key, new Candidate(chunk, preloadSections, SEQ.incrementAndGet()));
         // 入队即派发：createLevels 里 setInitialSpawn 的阻塞取数发生在 tick 之前，只登记会死锁。
         if (!(chunk.getLevel() instanceof ServerLevel level)) {
@@ -190,6 +278,22 @@ public final class Scheduler {
         } else {
             SectionIO.runOnMainThread(Scheduler::tick, level);
         }
+    }
+
+    /**
+     * 只登记、不派发。供批量补提交用。
+     *
+     * <p>逐条走 {@link #submit} 会在主线程上每条触发一次全表快照与排序，补提交的规模到几百时那是平方
+     * 成本。本入口与 {@code submit} 共用身份键、序号与提交台账，只省掉派发；调用方扫完之后由既有的一拍
+     * {@link #tick()} 统一派发。
+     */
+    static void submitQuiet(LevelChunk chunk) {
+        long key = identityOf(chunk);
+        if (key == 0L) {
+            return;
+        }
+        recordSubmit(chunk.getPos().pack());
+        CANDIDATES.put(key, new Candidate(chunk, null, SEQ.incrementAndGet()));
     }
 
     /**
@@ -247,6 +351,7 @@ public final class Scheduler {
             if (identityOf(chunk) != key) {
                 CANDIDATES.remove(key, candidate);
                 CandidateProbe.left(chunk, "STALE", 1, true);
+                recordExit(chunk.getPos().pack(), EXIT_STALE);
                 continue;
             }
             long now = System.currentTimeMillis();
@@ -259,6 +364,7 @@ public final class Scheduler {
             }
             if (!(chunk.getLevel() instanceof ServerLevel level)) {
                 CandidateProbe.left(chunk, "NONLEVEL", 1, true);
+                recordExit(chunk.getPos().pack(), EXIT_NONLEVEL);
                 continue;
             }
             ChunkPos pos = chunk.getPos();
@@ -266,6 +372,7 @@ public final class Scheduler {
                 SchedulerMetrics.rejectFace();
                 logReject(level, chunk, "FACE", "");
                 CandidateProbe.left(chunk, "FACE", 1, true);
+                recordExit(pos.pack(), EXIT_FACE);
                 continue;
             }
             SectionLifecycle.ChunkCursor cursor = cursors.computeIfAbsent(level, SectionLifecycle::cursor);
@@ -281,6 +388,7 @@ public final class Scheduler {
                 SchedulerMetrics.rejectWindow();
                 logReject(level, chunk, "WINDOW", "");
                 CandidateProbe.left(chunk, "WINDOW", 1, true);
+                recordExit(pos.pack(), EXIT_WINDOW);
                 continue;
             }
             int[] sections = sectionsFor(level, chunk, candidate.preloadSections);
@@ -292,6 +400,7 @@ public final class Scheduler {
                 logFull(level, chunk);
                 ChunkReadiness.completeFull(chunk);
                 CandidateProbe.left(chunk, "FULL", 1, false);
+                recordExit(pos.pack(), EXIT_FULL);
                 continue;
             }
             // 生成支：范围内还有低于 CARVERS 的段。装饰支：本 chunk 已有段停在 CARVERS。两支分开判，
@@ -348,6 +457,7 @@ public final class Scheduler {
             SchedulerMetrics.emitted();
             budget--;
             CandidateProbe.left(chunk, "GEN", 1, false);
+            recordExit(pos.pack(), EXIT_GEN);
             // 派发序号：作业入口那一行会带上同一个值，两边按序号对齐就能量出这一格被重派的节奏。
             long dispatchSeq = DispatchProbe.next(pos,
                     DependencyTable.pendingBelowIn(chunk, sections, SectionStage.CARVERS), sections.length);

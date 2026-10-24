@@ -198,6 +198,10 @@ public class FarlandsTick {
             SectionLifecycle.reclaimOrphanStages(server);
             // 档位条目建立读数：带外与无容器两类条目各是谁建的，以及本窗回收了多少。
             com.inf.farlands.debug.StageSlotProbe.flush();
+            // 视距内兜底重扫：把有活却不在候选表里的 chunk 补交一次，本拍末尾的 tick 统一派发。
+            com.inf.farlands.terrain.pipeline.InViewSweep.run(server);
+            // 空闲面读数：读上一句那一窗的计数，不再自己扫一遍。
+            com.inf.farlands.debug.StallWatch.flush(server);
             // 派生记账的自检：与重数一遍逐 chunk 比对。只报失配。
             if (FarlandsConfig.logStageCounters) {
                 SectionLifecycle.verifyCounters(server);

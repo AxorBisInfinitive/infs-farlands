@@ -77,6 +77,8 @@
     "terrain.pipeline.RangeFutureMixin",
     "terrain.pipeline.ReadyEntityChunksMixin",
     "terrain.pipeline.TicketProbeMixin",
+    "terrain.pipeline.ServerChunkCacheGetChunkMixin",
+    "terrain.pipeline.ChunkSourcePollTaskMixin",
     "terrain.surface.SurfaceSystemMixin",
     "terrain.surface.SurfaceRules$ContextInvoker",
     "terrain.surface.SurfaceRules$SurfaceRuleInvoker",
