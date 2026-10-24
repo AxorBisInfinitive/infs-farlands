@@ -102,14 +102,8 @@ public final class DecorationFiller {
      * @return 是否真的提交了
      */
     public static boolean trySubmitDecoration(LevelChunk center) {
-        // 待装饰的判据与门都在依赖表那一侧求值，是唯一表达式。
-        boolean[] anyCarvers = { false };
-        SectionStage.forEachStage(center, (sy, stage) -> {
-            if (stage == SectionStage.CARVERS) {
-                anyCarvers[0] = true;
-            }
-        });
-        if (!anyCarvers[0]) {
+        // 待装饰的判据只有一处定义：SectionStage.anyAt 认「恰好停在 CARVERS」的那一档。
+        if (!SectionStage.anyAt(center, SectionStage.CARVERS)) {
             return false;
         }
         if (!DependencyTable.neighborGate(center)) {
@@ -197,7 +191,7 @@ public final class DecorationFiller {
     private static void completeAsVoid(LevelChunk chunk) {
         List<Integer> carvers = new ArrayList<>();
         SectionStage.forEachStage(chunk, (sy, stage) -> {
-            if (stage == SectionStage.CARVERS) {
+            if (SectionStage.isAwaitingDecoration(stage)) {
                 carvers.add(sy);
             }
         });
@@ -480,7 +474,7 @@ public final class DecorationFiller {
             }
             List<Integer> carvers = new ArrayList<>();
             SectionStage.forEachStage(current, (sy, stage) -> {
-                if (stage == SectionStage.CARVERS) {
+                if (SectionStage.isAwaitingDecoration(stage)) {
                     carvers.add(sy);
                 }
             });

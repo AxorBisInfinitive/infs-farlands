@@ -16,6 +16,7 @@ import com.inf.farlands.network.expand.y.ChunkDataPacket;
 import com.inf.farlands.network.expand.y.LightUpdatePacket;
 import com.inf.farlands.serialize.SectionLifecycle;
 import com.inf.farlands.serialize.SectionSerializer;
+import com.inf.farlands.serialize.SectionStage;
 import com.inf.farlands.serialize.TerrainHooks;
 import com.inf.farlands.terrain.pipeline.GenQueue;
 import com.inf.farlands.util.window.WindowedChunk;
@@ -357,10 +358,9 @@ public final class ChunkDataSender {
                     it.remove(); // 段不存在：剪掉
                     continue;
                 }
-                // 与落盘同门：未点亮的段是中间态，不发，留队列；它升到 LIGHTED 时由 GenQueue.triggerLight
+                // 与落盘同门：未点亮的段是中间态，不发，留队列；它升到终态时由 GenQueue.triggerLight
                 // 的完成回调补一次内容变化标记，那时这一笔才出队。
-                if (!com.inf.farlands.serialize.SectionStage.isOrAfter(lc, sy,
-                        com.inf.farlands.serialize.SectionStage.LIGHTED)) {
+                if (!SectionStage.isTerminal(SectionStage.getStage(lc, sy))) {
                     continue;
                 }
                 // 纯空气段照发：群系存在段里，不发客户端就没有那份群系，读到的是工厂默认群系

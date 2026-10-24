@@ -371,12 +371,12 @@ public final class Scheduler {
             // 因为段全到 CARVERS 之后生成侧无活可做，而装饰恰恰从那一刻开始。
             boolean gen = sections.length > 0
                     && DependencyTable.pendingBelowIn(chunk, sections, SectionStage.CARVERS) > 0;
-            boolean deco = anyStage(chunk, SectionStage.CARVERS);
+            boolean deco = SectionStage.anyAt(chunk, SectionStage.CARVERS);
             if (!gen && !deco) {
                 // 光照支：整窗段都停在 DECORATED 时，缺口在「装饰已完成、光照没触发」这一档。这一档没有
                 // 别的出口，LIGHTED 只能由 notifyGenerated 的认领触发一次，那一次没成就永远没人再来。
                 // 所以它必须在这里被当成活：重触发，并按固定节奏留在候选表里，不消耗重投次数。
-                if (anyStage(chunk, SectionStage.DECORATED)) {
+                if (SectionStage.anyAt(chunk, SectionStage.DECORATED)) {
                     GenQueue.notifyGenerated(chunk);
                     requeuePersistent(key, candidate);
                     continue;
@@ -488,17 +488,6 @@ public final class Scheduler {
             sorted[n++] = sy;
         }
         return n == sorted.length ? sorted : Arrays.copyOf(sorted, n);
-    }
-
-    /** 该 chunk 是否有恰好停在 stage 的段。装饰的判据，与依赖表的 CARVERS 行同源。 */
-    private static boolean anyStage(LevelChunk chunk, int stage) {
-        boolean[] found = { false };
-        SectionStage.forEachStage(chunk, (sy, s) -> {
-            if (s == stage) {
-                found[0] = true;
-            }
-        });
-        return found[0];
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.inf.farlands.util.window;
 
 import com.inf.farlands.FarlandsConfig;
+import com.inf.farlands.serialize.SectionStage;
 import com.inf.farlands.terrain.pipeline.GenQueue;
 
 import java.util.ArrayList;
@@ -70,8 +71,7 @@ public final class WindowSendState {
             int sy = e.getKey();
             LevelChunkSection s = e.getValue();
             if (sy >= minY && sy <= maxY && s != null
-                    && com.inf.farlands.serialize.SectionStage.isOrAfter(chunk, sy,
-                            com.inf.farlands.serialize.SectionStage.LIGHTED)) {
+                    && SectionStage.isTerminal(SectionStage.getStage(chunk, sy))) {
                 out.add(e);
             }
         }

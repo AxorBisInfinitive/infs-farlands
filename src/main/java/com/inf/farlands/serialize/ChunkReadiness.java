@@ -56,7 +56,7 @@ public final class ChunkReadiness {
      * 装饰中心，认领若参与本判据，玩家要在整片视距内等它排完队。
      */
     private static boolean isWritableAt(LevelChunk chunk, int sectionY) {
-        if (SectionStage.getStage(chunk, sectionY) < SectionStage.LIGHTED) {
+        if (!SectionStage.isTerminal(SectionStage.getStage(chunk, sectionY))) {
             return false;
         }
         return !SectionIO.isReading(chunk, sectionY);

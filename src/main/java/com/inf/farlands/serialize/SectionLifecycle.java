@@ -156,7 +156,7 @@ public final class SectionLifecycle {
                 // 增量扫描，只遍历窗口之外的 section，成本是 O(log n + 窗口外数)
                 wc.forEachOutsideWindows(0, sy -> {
                     int stage = SectionStage.getStage(lc, sy);
-                    if (stage >= SectionStage.LIGHTED) {
+                    if (SectionStage.isTerminal(stage)) {
                         // 已点亮：数据在盘上，删内存即可；脏的入队落盘。与余量无关。
                         if (!wc.isSectionDirty(sy)) {
                             removeFromMemory(lc, sy);
@@ -360,8 +360,8 @@ public final class SectionLifecycle {
                 }
                 WindowedChunk wc = (WindowedChunk) lc;
                 for (Integer sy : wc.windowedAllSections().keySet()) {
-                    // 同 cleanup：低于 LIGHTED 的段此刻不写盘，等光照补触发后的 persistChunkDirty。
-                    if (wc.isSectionDirty(sy) && SectionStage.getStage(lc, sy) >= SectionStage.LIGHTED) {
+                    // 同 cleanup：低于终态的段此刻不写盘，等光照补触发后的 persistChunkDirty。
+                    if (wc.isSectionDirty(sy) && SectionStage.isTerminal(SectionStage.getStage(lc, sy))) {
                         pendingEncode.add(new EncodeUnit(lc, sy, false));
                     }
                 }
@@ -598,10 +598,10 @@ public final class SectionLifecycle {
             DataLayer bl = le.getLayerListener(LightLayer.BLOCK).getDataLayerData(SectionPos.of(lc.getPos(), sy));
             DataLayer sl = le.getLayerListener(LightLayer.SKY).getDataLayerData(SectionPos.of(lc.getPos(), sy));
             int stage = SectionStage.getStage(lc, sy);
-            // 兜底不变量：fsa 里只允许写入 LIGHTED。低于它的段这时仍在内存里且仍脏，
+            // 兜底不变量：fsa 里只允许写入终态。低于它的段这时仍在内存里且仍脏，
             // 光照补触发完成后 persistChunkDirty 会重新入队；写下去等于把没点亮的状态固化到盘上，
-            // 重进时恢复出低于 LIGHTED 的段，又得补一次光照。
-            if (stage < SectionStage.LIGHTED) {
+            // 重进时恢复出低于终态的段，又得补一次光照。
+            if (!SectionStage.isTerminal(stage)) {
                 return null;
             }
             return SectionSerializer.encode(section, bl, sl, stage, factory, sy, lc.getPos().pack());

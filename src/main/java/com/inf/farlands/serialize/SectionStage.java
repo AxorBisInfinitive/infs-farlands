@@ -266,6 +266,38 @@ public final class SectionStage {
     }
 
     /**
+     * 装饰会升的唯一一档：CARVERS。停在 CARVERS 的段等着装饰，装饰收尾把它们升到 DECORATED。
+     * 与 {@link #isAwaitingLight(int)} 对称，两处都只认一档。
+     */
+    public static boolean isAwaitingDecoration(int stage) {
+        return stage == CARVERS;
+    }
+
+    /** 该 chunk 是否有恰好停在 {@code stage} 的段。档位表口径，不看容器。 */
+    public static boolean anyAt(LevelChunk chunk, int stage) {
+        boolean[] found = { false };
+        forEachStage(chunk, (sy, s) -> {
+            if (s == stage) {
+                found[0] = true;
+            }
+        });
+        return found[0];
+    }
+
+    /**
+     * 该段是否已到终态，即 {@code stage >= LIGHTED}。
+     *
+     * <p>fsa 与下发共用这一条：只有终态的段可以编码落盘，也只有终态的段可以下发；低于它的都是中间态。
+     * 写门在 {@code ChunkReadiness} 里也读它，因为「数据已定」与「可以落盘」在这个模型里是同一个时刻。
+     *
+     * <p>不要与 {@link #isBelowLighted(int)} 互相当取反用：那个只覆盖 TERRAIN 到 LIGHTED 的中间态，
+     * {@code UNPROCESSED} 与 {@code BIOMES} 既不是终态也不是中间态。
+     */
+    public static boolean isTerminal(int stage) {
+        return stage >= LIGHTED;
+    }
+
+    /**
      * 光照完成回调：该 chunk 全部在 {@link #isAwaitingLight(int)} 里的段，即停在 DECORATED 的段，
      * 升到 LIGHTED。逐段判前置就是判「这一段已装饰」，两侧同源，所以不会漏判也不会多升。
      *
