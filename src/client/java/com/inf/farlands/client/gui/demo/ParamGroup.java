@@ -102,6 +102,9 @@ public final class ParamGroup extends AbstractContainerWidget {
         Font font = Minecraft.getInstance().font;
         this.labelWidth = this.labelWidth(font, params);
         this.rows = params.entries().size();
+        // 组宽必须等于标签加框的跨度。父容器按本控件自己的矩形判命中，矩形窄于跨度时框整段收不到点击，
+        // 而框的位置由 layoutRows 按 labelWidth 给出，键名一长就越出矩形。
+        this.setWidth(this.labelWidth + this.boxWidth());
         for (SystemParamSpec spec : params.entries()) {
             StringWidget label = new StringWidget(Component.literal(spec.key()), font);
             EditBox box = new EditBox(font, this.boxWidth(), BOX_HEIGHT, Component.literal(spec.key()));
