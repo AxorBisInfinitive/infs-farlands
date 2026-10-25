@@ -62,7 +62,9 @@
     "compat.sodium.DeferredTaskListMixin",
     "compat.sodium.LevelColorCacheMixin",
     "compat.sodium.LevelBiomeSliceMixin",
-    "compat.sodium.ArrayLightDataCacheMixin"
+    "compat.sodium.ArrayLightDataCacheMixin",
+    "compat.sodium.OcclusionCullerDirectionSetsMixin",
+    "compat.sodium.RayOcclusionSectionTreeMixin"
   ],
   "injectors": {
     "defaultRequire": 1
