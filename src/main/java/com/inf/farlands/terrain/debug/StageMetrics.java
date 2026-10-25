@@ -79,6 +79,18 @@ public final class StageMetrics {
     private static final AtomicLong CHUNK_LOAD_DONE = new AtomicLong();
 
     /**
+     * 身份已注销的提交被丢弃的次数。
+     *
+     * <p>
+     * 候选表只装活身份：死身份的段在阶段表里读恒 {@code UNPROCESSED}、写整条空转，一旦进表就会被判成
+     * 整窗待生成，每一轮交出一个 fill 而档位永不前进。这个计数非零即说明有对象在卸载之后仍被提交。
+     */
+    private static final AtomicLong DEAD_SUBMIT_DROPPED = new AtomicLong();
+
+    /** 派发时因身份与键不符或身份已注销而摘掉的候选次数，即入表判据失效之后的第二条防线。 */
+    private static final AtomicLong DEAD_CANDIDATE_DROPPED = new AtomicLong();
+
+    /**
      * 上次打印时 {@link #CHUNK_LOADS} 的读数。窗口速率取两次之差，而不是把总数清零：在途量要靠两个
      * 总数相减，清掉任何一个都会让它变成负数。
      */
@@ -92,6 +104,16 @@ public final class StageMetrics {
     private static double cumSeconds;
 
     private StageMetrics() {
+    }
+
+    /** 一次死身份的提交被丢弃。 */
+    public static void deadSubmitDropped() {
+        DEAD_SUBMIT_DROPPED.incrementAndGet();
+    }
+
+    /** 一个死身份的候选在派发时被摘掉。 */
+    public static void deadCandidateDropped() {
+        DEAD_CANDIDATE_DROPPED.incrementAndGet();
     }
 
     /** 一个 chunk 完成点亮。 */
@@ -172,17 +194,20 @@ public final class StageMetrics {
         long sectionsIn = SECTIONS_IN.get();
         long sectionsLighted = SECTIONS_LIGHTED.get();
         long chunksLighted = CHUNKS_LIGHTED.get();
+        long deadSub = DEAD_SUBMIT_DROPPED.get();
+        long deadCand = DEAD_CANDIDATE_DROPPED.get();
 
         if (FarlandsConfig.logStageMetrics) {
             InfsFarlands.LOGGER.info(
-                    "FLSTAGE window={}t elapsed={}s cps={} sps={} cum_cps={} cum_sps={} sectIn={} loads={} loadPending={}",
+                    "FLSTAGE window={}t elapsed={}s cps={} sps={} cum_cps={} cum_sps={} sectIn={} loads={} loadPending={} deadSub={} deadCand={}",
                     WINDOW_TICKS, fmt(windowSeconds),
                     fmt(chunksLighted / windowSeconds), fmt(sectionsLighted / windowSeconds),
                     fmt((anchorChunksLighted + chunksLighted) / cumSeconds),
                     fmt((anchorSectionsLighted + sectionsLighted) / cumSeconds),
                     sectionsIn,
                     fmt((CHUNK_LOADS.get() - lastLoadTotal) / windowSeconds),
-                    CHUNK_LOADS.get() - CHUNK_LOAD_DONE.get());
+                    CHUNK_LOADS.get() - CHUNK_LOAD_DONE.get(),
+                    deadSub, deadCand);
             InfsFarlands.LOGGER.info("FLSTAGE stage {}", stageLine());
         }
 
@@ -193,6 +218,8 @@ public final class StageMetrics {
         lastLoadTotal = CHUNK_LOADS.get();
         SECTIONS_LIGHTED.set(0L);
         CHUNKS_LIGHTED.set(0L);
+        DEAD_SUBMIT_DROPPED.set(0L);
+        DEAD_CANDIDATE_DROPPED.set(0L);
         for (int i = 0; i < STAGE_COUNT; i++) {
             STAGE_NANOS[i].set(0L);
             STAGE_SECTIONS[i].set(0L);
@@ -204,6 +231,8 @@ public final class StageMetrics {
         SECTIONS_IN.set(0L);
         SECTIONS_LIGHTED.set(0L);
         CHUNKS_LIGHTED.set(0L);
+        DEAD_SUBMIT_DROPPED.set(0L);
+        DEAD_CANDIDATE_DROPPED.set(0L);
         for (int i = 0; i < STAGE_COUNT; i++) {
             STAGE_NANOS[i].set(0L);
             STAGE_SECTIONS[i].set(0L);

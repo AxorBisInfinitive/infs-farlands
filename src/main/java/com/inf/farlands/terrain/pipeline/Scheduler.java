@@ -11,10 +11,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import com.inf.farlands.FarlandsConfig;
 import com.inf.farlands.serialize.ChunkCounters;
 import com.inf.farlands.serialize.ChunkReadiness;
+import com.inf.farlands.serialize.CounterIdentities;
 import com.inf.farlands.serialize.SectionIO;
 import com.inf.farlands.serialize.SectionLifecycle;
 import com.inf.farlands.serialize.SectionStage;
 import com.inf.farlands.terrain.ChunkBeardifier;
+import com.inf.farlands.terrain.debug.StageMetrics;
 import com.inf.farlands.terrain.decorationFiller.DecorationFiller;
 import com.inf.farlands.terrain.structure.StructureDriver;
 import com.inf.farlands.util.window.EntitySectionWindow;
@@ -405,6 +407,12 @@ public final class Scheduler {
         if (key == 0L) {
             return;
         }
+        // 候选表只装活身份：死身份的段在阶段表里读取恒为未处理、写入整条空转，进了表就会被判成整窗待
+        // 生成，每一轮交出一个 fill 而档位永不前进。
+        if (!CounterIdentities.isLive(key)) {
+            StageMetrics.deadSubmitDropped();
+            return;
+        }
         CANDIDATES.put(key, new Candidate(chunk, preloadSections));
         // 入队即派发：createLevels 里 setInitialSpawn 的阻塞取数发生在 tick 之前，只登记会死锁。
         if (!(chunk.getLevel() instanceof ServerLevel level)) {
@@ -436,6 +444,10 @@ public final class Scheduler {
         if (key == 0L) {
             return;
         }
+        if (!CounterIdentities.isLive(key)) {
+            StageMetrics.deadSubmitDropped();
+            return;
+        }
         CANDIDATES.put(key, new Candidate(chunk, null));
     }
 
@@ -457,6 +469,10 @@ public final class Scheduler {
         }
         long key = identityOf(chunk);
         if (key == 0L) {
+            return;
+        }
+        if (!CounterIdentities.isLive(key)) {
+            StageMetrics.deadSubmitDropped();
             return;
         }
         Candidate candidate = new Candidate(chunk, null);
@@ -516,9 +532,11 @@ public final class Scheduler {
             long key = entry.getKey();
             Candidate candidate = entry.getValue();
             LevelChunk chunk = candidate.chunk;
-            // 同坐标的前一代已交卸载：身份与键不再相符，条目是死引用，清掉。
-            if (identityOf(chunk) != key) {
+            // 同坐标的前一代已交卸载，或身份已注销：条目是死引用，清掉。死身份若不摘，它会被判成整窗
+            // 待生成而每轮交出一个 fill，档位却写不进去。
+            if (identityOf(chunk) != key || !CounterIdentities.isLive(key)) {
                 CANDIDATES.remove(key, candidate);
+                StageMetrics.deadCandidateDropped();
                 continue;
             }
             if (now < candidate.dueAtMillis) {
