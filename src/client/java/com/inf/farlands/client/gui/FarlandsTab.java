@@ -12,6 +12,8 @@ import java.util.function.Function;
 
 import com.inf.farlands.client.gui.demo.DropdownSelect;
 import com.inf.farlands.client.gui.demo.ParamGroup;
+import com.inf.farlands.client.gui.viewport.ScrollViewport;
+import com.inf.farlands.client.integrate.modernui.ModernUIEase;
 import com.inf.farlands.terrain.registry.FamilyKind;
 import com.inf.farlands.terrain.registry.SystemId;
 import com.inf.farlands.terrain.registry.SystemPageHooks;
@@ -23,15 +25,12 @@ import com.inf.farlands.terrain.registry.SystemsIO;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
-import net.minecraft.client.gui.components.AbstractScrollArea;
 import net.minecraft.client.gui.components.AbstractWidget;
-import net.minecraft.client.gui.components.ScrollableLayout;
 import net.minecraft.client.gui.components.StringWidget;
 import net.minecraft.client.gui.components.TabButton;
 import net.minecraft.client.gui.components.tabs.Tab;
 import net.minecraft.client.gui.components.tabs.TabManager;
 import net.minecraft.client.gui.layouts.AbstractLayout;
-import net.minecraft.client.gui.layouts.FrameLayout;
 import net.minecraft.client.gui.layouts.GridLayout;
 import net.minecraft.client.gui.layouts.Layout;
 import net.minecraft.client.gui.layouts.LayoutElement;
@@ -58,12 +57,12 @@ import net.minecraft.util.Mth;
  * 下移三像素、焦点下划线都与原版一致，只少了页签行左右两段分隔线。原版 TabButton 自己不响应点击，
  * 选中由 TabNavigationBar 设置焦点时驱动，所以这里补上点击即切换。
  *
- * <p>每页的内容各自装在一个 ScrollableLayout 里，各页再叠放进同一个 FrameLayout，随本页一次性挂上屏幕。
+ * <p>每页的内容各自装在一个 {@link ScrollViewport} 里，各页共占同一块页签区域，随本页一次性挂上屏幕。
  * 切页只改各页叶子的 visible，不动屏幕的控件列表。滚动量因此是每页一份：一页展开下拉引起的位移只影响
  * 该页，切到别的维度页不会带着偏移。
  *
- * <p>下拉的浮层也每页一个，画在该页 FrameLayout 的最后一位：那一层由 DropdownSelect.Layer 承担，因此
- * 它的绘制在各页内容之后，展开的列表盖在参数框之上。
+ * <p>下拉的浮层也每页一个，画在该页视口之后：那一层由 DropdownSelect.Layer 承担，因此它的绘制在各页
+ * 内容之后，展开的列表盖在参数框之上。
  *
  * <p>下拉宽度按选项文字自动算，四个框共用全部选项里最宽的那个加内边距。每页正文最后留出 POPUP_ROOM
  * 的空白，该页滚动容器的高度才装得下最后一条展开的列表；可视区不够时由 Revealer 滚当前页上来。
@@ -84,11 +83,6 @@ public class FarlandsTab implements Tab {
     /** 4 行各 12 加边框与余量：正文末尾要留出的浮层高度。 */
     private static final int POPUP_ROOM = 52;
     private static final int REVEAL_SLACK = 4;
-    /**
-     * ScrollableLayout 为滚动条预留的总宽度。它的 reserveStrategy 是 BOTH，两侧各留「间距 4 加滚动条
-     * 宽 6」，容器总宽等于内容宽与最小宽的较大者再加这两份预留，所以撑宽度时要扣掉这一项。
-     */
-    private static final int SCROLLBAR_RESERVE = 2 * (4 + 6);
 
     /** 每页各一份滚动容器，它的 AbstractScrollArea 用于把展开的列表滚进可视区。 */
     private final List<DemoPage> pages = new ArrayList<>();
@@ -129,14 +123,13 @@ public class FarlandsTab implements Tab {
 
         this.pages.clear();
         for (Identifier dimension : dimensions) {
-            // 每页各建一份 Layer 与滚动容器：Layer 随本页挂上屏幕，滚动量也只属于本页。
+            // 每页各建一份浮层与视口：浮层随本页挂上屏幕，滚动量也只属于本页。
             DropdownSelect.Layer layer = new DropdownSelect.Layer();
             int pageIndex = this.pages.size();
             LinearLayout body = this.familyBody(font, dimension, layer, bottom -> this.reveal(pageIndex, bottom));
             GridLayout content = new GridLayout();
             content.addChild(body, 0, 0);
-            this.pages.add(new DemoPage(dimension, pageTitle(dimension),
-                    new ScrollableLayout(minecraft, content, 0), layer));
+            this.pages.add(new DemoPage(dimension, pageTitle(dimension), new ScrollViewport(content), layer));
         }
 
         int[] tabWidths = new int[dimensions.size()];
@@ -145,12 +138,10 @@ public class FarlandsTab implements Tab {
         }
         this.strip = new TabStrip(tabWidths, TAB_HEIGHT);
 
-        FrameLayout bodies = new FrameLayout();
         for (int i = 0; i < this.pages.size(); i++) {
             DemoPage page = this.pages.get(i);
             page.hide();
             this.strip.addTab(new DemoTabButton(manager, page, tabWidths[i]));
-            bodies.addChild(page.scroll());
         }
         // 构造期那次 revalidate 因按钮尚不存在而跳过了页签刷新，这里补齐。
         this.refreshAllTabs();
@@ -416,7 +407,7 @@ public class FarlandsTab implements Tab {
         if (page < 0 || page >= this.pages.size()) {
             return;
         }
-        AbstractScrollArea area = this.pages.get(page).viewport();
+        ScrollViewport area = this.pages.get(page).viewport();
         if (area == null) {
             return;
         }
@@ -465,11 +456,9 @@ public class FarlandsTab implements Tab {
         int bodyHeight = Math.max(0, screenRectangle.height() - MARGIN * 2 - this.strip.getHeight() - MARGIN);
         // 各页摆在同一位置，只由本页的可见性决定谁被画出来。每页各扣一份滚动条预留。
         for (DemoPage page : this.pages) {
-            ScrollableLayout scroll = page.scroll();
-            scroll.setMinWidth(Math.max(0, available - SCROLLBAR_RESERVE));
-            scroll.arrangeElements();
-            scroll.setMaxHeight(bodyHeight);
-            scroll.setPosition(screenRectangle.left() + MARGIN, bodyTop);
+            ScrollViewport viewport = page.viewport();
+            viewport.relayout(available, bodyHeight);
+            viewport.setPosition(screenRectangle.left() + MARGIN, bodyTop);
         }
     }
 
@@ -477,8 +466,8 @@ public class FarlandsTab implements Tab {
      * 页签行：每格按自身内容定宽，多行换行。
      *
      * <p>不复用 {@code GridLayout.RowHelper}：它的行列在 {@code addChild} 时写死，而这里换行位置要按
-     * 可用宽度与每格实测宽现算；并且 ScrollableLayout 的容器在构造那一刻就把内容里的控件抄进了私有
-     * 列表，之后重建布局对象不会被采集。所以这里直接持按钮、在 {@code arrangeElements} 里逐格定位。
+     * 可用宽度与每格实测宽现算；并且视口在构造那一刻就把内容里的控件抄进了私有列表，之后重建布局对象
+     * 不会被采集。所以这里直接持按钮、在 {@code arrangeElements} 里逐格定位。
      *
      * <p>换行是贪心：从行首累加，放不下就换行。首格宽于整行时独占一行并按可用宽度封顶，否则贪心不前进。
      */
@@ -613,8 +602,8 @@ public class FarlandsTab implements Tab {
     }
 
     /**
-     * 一页：维度、标题、本页的滚动容器、本页的浮层。内容随本页一次性挂上屏幕，切页只改这一页全部
-     * 叶子的 visible。滚动量属于本页的 {@link ScrollableLayout}，与其余页无关。
+     * 一页：维度、标题、本页的滚动视口、本页的浮层。内容随本页一次性挂上屏幕，切页只改这一页全部
+     * 叶子的 visible。滚动量属于本页的 {@link ScrollViewport}，与其余页无关。
      *
      * <p>维度只用于进页钩子的载荷：点这一格换页时把维度 id 交给登记过的动作。
      */
@@ -624,32 +613,21 @@ public class FarlandsTab implements Tab {
         private final Component title;
         /** 页签标红用的同一份标题。颜色在建立时算好，按键路径不再分配。 */
         private final Component invalidTitle;
-        private final ScrollableLayout scroll;
+        private final ScrollViewport viewport;
         private final DropdownSelect.Layer layer;
         private final List<AbstractWidget> leaves = new ArrayList<>();
-        private final AbstractScrollArea viewport;
 
-        private DemoPage(Identifier dimension, Component title, ScrollableLayout scroll,
+        private DemoPage(Identifier dimension, Component title, ScrollViewport viewport,
                 DropdownSelect.Layer layer) {
             this.dimension = dimension;
             this.title = title;
             this.invalidTitle = title.copy().withStyle(ChatFormatting.RED);
-            this.scroll = scroll;
+            this.viewport = viewport;
             this.layer = layer;
-            scroll.visitWidgets(this.leaves::add);
+            this.leaves.add(viewport);
             this.leaves.add(layer);
-            this.viewport = findViewport(scroll);
-        }
-
-        /** 滚动容器是 ScrollableLayout 的私有内部类，只能从 visitChildren 里认出来。 */
-        private static AbstractScrollArea findViewport(ScrollableLayout scroll) {
-            AbstractScrollArea[] found = new AbstractScrollArea[1];
-            scroll.visitChildren(child -> {
-                if (child instanceof AbstractScrollArea area) {
-                    found[0] = area;
-                }
-            });
-            return found[0];
+            // 装了 ModernUI 且它自己的平滑开关开着时，给本页的视口挂上它的补间引擎；否则空转。
+            ModernUIEase.attach(viewport);
         }
 
         @Override
@@ -664,8 +642,8 @@ public class FarlandsTab implements Tab {
 
         @Override
         public void visitChildren(Consumer<AbstractWidget> childrenConsumer) {
-            // 滚动容器与浮层依次挂上屏幕，浮层在后，展开的列表才画在参数框之上。
-            this.scroll.visitWidgets(childrenConsumer);
+            // 视口与浮层依次挂上屏幕，浮层在后，展开的列表才画在参数框之上。
+            childrenConsumer.accept(this.viewport);
             childrenConsumer.accept(this.layer);
         }
 
@@ -673,11 +651,7 @@ public class FarlandsTab implements Tab {
         public void doLayout(ScreenRectangle screenRectangle) {
         }
 
-        private ScrollableLayout scroll() {
-            return this.scroll;
-        }
-
-        private AbstractScrollArea viewport() {
+        private ScrollViewport viewport() {
             return this.viewport;
         }
 
