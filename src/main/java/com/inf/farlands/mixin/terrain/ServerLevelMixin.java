@@ -6,6 +6,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+import com.inf.farlands.FarlandsTick;
 import com.inf.farlands.terrain.BiomeSystem;
 import com.inf.farlands.terrain.CarverSystem;
 import com.inf.farlands.terrain.DecorationSystem;
@@ -68,6 +69,9 @@ public abstract class ServerLevelMixin implements LevelSystems, SystemsHolder {
     private void farlands$createSystems(CallbackInfo ci) {
         ServerLevel level = (ServerLevel) (Object) this;
         MinecraftServer server = level.getServer();
+        // 登记给阻塞等待的泵：chunk 源的主线程执行器不是 MinecraftServer，那里的等待拿不到 server，
+        // 而同步取区块正是卡在它上面。level 构造在任何 chunk 取数之前，这个点覆盖 tick 开始前的等待。
+        FarlandsTick.setRunningServer(server);
         // 该 server 解析一次，其余维度命中缓存。判据是 server 实例，不依赖 level 构造顺序。
         SystemsData data = SystemsIO.systemsFor(server);
         this.farlandsSystems = data;

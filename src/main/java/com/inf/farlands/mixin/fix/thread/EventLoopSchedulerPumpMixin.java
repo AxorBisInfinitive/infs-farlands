@@ -6,7 +6,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import com.inf.farlands.FarlandsTick;
 import com.inf.farlands.InfsFarlands;
 import com.inf.farlands.serialize.ChunkReadiness;
-import com.inf.farlands.terrain.pipeline.Scheduler;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.util.thread.BlockableEventLoop;
@@ -33,13 +32,20 @@ import org.spongepowered.asm.mixin.injection.Redirect;
  * 同源：卡住之后等待循环会退化成零长度 park，不节流就是每秒上万次刷新快照与派发尝试。关服期不推，
  * 那时池已开始关闭，派发没有意义。
  *
- * <p>推的是「每 tick 的三步状态刷新加 {@code Scheduler.tick()}」，不是整个 tick：发包、窗口差量、周期持久化
- * 与清理仍只在真 tick 里跑。
+ * <p>推的是 {@code FarlandsTick.driveWindowAndTerrain} 那一段：窗口差量与限量发包、窗口外清理、两步刷新
+ * 与派发。周期持久化、成就、读数与兼容钩子仍只在真 tick 里跑。
  *
- * <p>那三步刷新必须进来。准入的两道门读的就是它们：{@code isNearPlayer} 读玩家快照，{@code sectionsFor}
- * 的竖直面读窗口并集，而两者只在 {@code FarlandsTick.atEnd} 里刷新。atEnd 挂在 tickServer 的 RETURN，
- * 阻塞取数却在 RETURN 之前：玩家刚换维度时该维度既没有快照条目也没有窗口条目，准入因此永远放行不了那一次
- * 取数，等待再也解不开。泵是这一段唯一的钟，刷新必须与它同处。
+ * <p>窗口差量必须一起进来。丢候选与置窗口读回闩都起于它，只刷快照与派发而不起读回，等于等一个不会推进
+ * 的状态：候选被丢掉的那一格永远补不上 FULL。
+ *
+ * <p>等待可能落在两个执行器上：服务端主执行器，与 chunk 源的主线程执行器。后者不是
+ * {@code MinecraftServer}，按执行器类型认会把同步取区块那一种整个漏掉，而服务端冻结正是卡在它上面。
+ * 所以 server 由 {@code FarlandsTick} 登记，泵按登记的 server 判线程。
+ *
+ * <p>那两步刷新必须进来。准入的两道门读的就是它们：{@code isNearPlayer} 读玩家快照，{@code sectionsFor}
+ * 的竖直面读窗口并集，而刷新只在这一段驱动里发生。tick 那一侧挂在 tickServer 的 RETURN，阻塞取数却在
+ * RETURN 之前：玩家刚换维度时该维度既没有快照条目也没有窗口条目，准入因此永远放行不了那一次取数，等待
+ * 再也解不开。泵是这一段唯一的钟，刷新必须与它同处。
  *
  * <p>异常一律吞掉并只记一次，否则它会把原版的任务等待循环打断。
  */
@@ -69,7 +75,11 @@ public abstract class EventLoopSchedulerPumpMixin {
 
     @Unique
     private void farlands$pumpScheduler() {
-        if (!((Object) this instanceof MinecraftServer server)) {
+        // 两个执行器都可能等：服务端主执行器是 MinecraftServer，chunk 源的主线程执行器不是。
+        // 后者才是同步取区块卡住的地方，所以取登记值，不按执行器类型认。
+        MinecraftServer server = (Object) this instanceof MinecraftServer self ? self
+                : FarlandsTick.runningServer();
+        if (server == null) {
             return;
         }
         if (Thread.currentThread() != server.getRunningThread()) {
@@ -87,8 +97,7 @@ public abstract class EventLoopSchedulerPumpMixin {
             return;
         }
         try {
-            FarlandsTick.refreshTickState(server);
-            Scheduler.tick();
+            FarlandsTick.driveWindowAndTerrain(server);
         } catch (Throwable t) {
             if (farlands$pumpFailed.compareAndSet(false, true)) {
                 InfsFarlands.LOGGER.error("farlands: scheduler pump failed during a blocked wait", t);

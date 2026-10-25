@@ -44,6 +44,26 @@ public class FarlandsTick {
     private static boolean cleanupOpen;
 
     /**
+     * 当前的 server 实例。写点在 level 构造末尾与每个 tick 末尾，读点在阻塞等待的泵里。
+     *
+     * <p>
+     * 泵挂的是 {@code BlockableEventLoop.managedBlock}，它同时被服务端主执行器与 chunk 源的主线程执行器
+     * 继承。后者的等待不是 {@code MinecraftServer}，而同步取区块正是卡在它上面，那里拿不到 server，
+     * 所以显式登记一份，泵按它判线程。关服时置空，不留旧世界的引用。
+     */
+    private static volatile MinecraftServer runningServer;
+
+    /** 登记当前的 server。写点：level 构造末尾与每个 tick 末尾。 */
+    public static void setRunningServer(MinecraftServer server) {
+        runningServer = server;
+    }
+
+    /** 当前登记的 server，没有则为 null。供阻塞等待的泵取用。 */
+    public static MinecraftServer runningServer() {
+        return runningServer;
+    }
+
+    /**
      * 单一时钟的写入点：服务端 tick 与分离 JVM 的客户端 tick 都从这里推进，侧信道打戳读的
      * 就是这个值。
      */
@@ -202,6 +222,7 @@ public class FarlandsTick {
 
     /** 服务端 tick 末尾统一入口。 */
     public static void atEnd(MinecraftServer server, int tickCount) {
+        setRunningServer(server);
         setNow(tickCount);
         awardNewVanillaNoiseSystem(server);
         awardSkyLimit(server);
@@ -214,10 +235,47 @@ public class FarlandsTick {
             // 视距内兜底重扫：把有活却不在候选表里的 chunk 补交一次，本拍末尾的 tick 统一派发。
             com.inf.farlands.terrain.pipeline.InViewSweep.run(server);
         }
-        // 窗口差量与限量发包；返回值同时驱动 fsa 的窗口清理判定。
-        boolean windowChanged = ChunkDataSender.tick(server);
         // 世界系统选择下发：玩家进服或换维度后补一次，客户端据此显示当前 level 用哪五族系统。
         SystemsSender.tick(server);
+        // 周期持久化：窗口内脏 section 写盘；偏移表与数据同节奏落盘，否则运行中磁盘偏移表
+        // 陈旧，重进时 getSlot 错位丢 section。崩溃与强退兜底。
+        //
+        // 排在窗口差量之前：清理会把窗口外已点亮的段以 CLEANUP 语义收走，持久化必须先入队。
+        if (tickCount % FarlandsConfig.fsaPersistInterval == 0) {
+            SectionLifecycle.flushAllDirty(server);
+            SectionIO.flushAllOffsetTables();
+        }
+        // 窗口差量、窗口外清理与派发，与阻塞等待期共用同一段，顺序与理由见 driveWindowAndTerrain。
+        driveWindowAndTerrain(server);
+        // 兼容层的每 tick 钩子，排在所有核心驱动之后：它只驱动本 port 之外的请求方，例如 Chunky 预生成。
+        for (Consumer<MinecraftServer> sink : TICK_SINKS) {
+            sink.accept(server);
+        }
+    }
+
+    /**
+     * 窗口差量、窗口外清理与派发这一段，每个 tick 末尾与阻塞等待期共用。
+     *
+     * <p>
+     * 共用的理由是一条时序。{@code FULL} 只由调度器补，而补它之前要先把这个 chunk 的窗口面读过一次盘、把
+     * 它的候选放回表，这两件事起于 {@link ChunkDataSender#tick} 的窗口差量。阻塞取数发生在 tick 之内，
+     * tick 末尾的 {@link #atEnd} 到不了，于是主线程在等一个只有 tick 末尾才会推进的状态。等待期的泵因此
+     * 必须调同一段，否则候选被丢掉的那一格永远补不上 FULL，等待也就永远解不开。
+     *
+     * <p>
+     * 顺序是契约。窗口差量置玩家移动标志并起窗口读回，随后按该标志重建各维光照队列；然后刷新两条门，
+     * 清理遍历的是窗口并集，所以排在刷新之后；派发最后，它读快照与窗口并集。周期持久化不在这一段里，
+     * 它要排在清理之前，由调用方排。
+     *
+     * <p>
+     * 等待在同一 tick 中途解开时，本方法会在该 tick 里被跑两次：窗口差量与清理的预算各翻一倍，状态不变。
+     *
+     * <p>
+     * 线程与节奏由调用方负责：只在服务端线程调，等待期的调用按墙钟节流。
+     */
+    public static void driveWindowAndTerrain(MinecraftServer server) {
+        // 窗口差量与限量发包；返回值同时驱动 fsa 的窗口清理判定。
+        boolean windowChanged = ChunkDataSender.tick(server);
         // 玩家跨 chunk 移动时，光照队列按当前距离重排。地形侧的候选表在准入时按快照排序，不需要重排。
         if (ChunkDataSender.consumePlayersMoved()) {
             for (ServerLevel level : server.getAllLevels()) {
@@ -226,28 +284,14 @@ public class FarlandsTick {
                 }
             }
         }
-        // 玩家快照、窗口并集与驱动面票圈，同一份玩家列表、同一时点落地。阻塞等待期的泵也走这一条。
+        // 玩家快照、窗口并集与驱动面票圈，同一份玩家列表、同一时点落地。
         refreshTickState(server);
-
-        // fsa 序列化
-
-        // 周期持久化：窗口内脏 section 写盘；偏移表与数据同节奏落盘，否则运行中磁盘偏移表
-        // 陈旧，重进时 getSlot 错位丢 section。崩溃与强退兜底。
-        if (tickCount % FarlandsConfig.fsaPersistInterval == 0) {
-            SectionLifecycle.flushAllDirty(server);
-            SectionIO.flushAllOffsetTables();
-        }
         // 窗口变化：窗口之外的 section 按档处置，上限 CLEANUP_BUDGET/tick。
         // 未清完则下 tick 续跑：窗口静止时它不再变化，只按 windowChanged 触发会让积压永远留着。
         if (windowChanged || cleanupOpen) {
             cleanupOpen = SectionLifecycle.cleanup(server);
         }
-
         // 地形管线：调度器是地形侧唯一的每 tick 入口，准入、派发、重扫都在里面。
         Scheduler.tick();
-        // 兼容层的每 tick 钩子，排在所有核心驱动之后：它只驱动本 port 之外的请求方，例如 Chunky 预生成。
-        for (Consumer<MinecraftServer> sink : TICK_SINKS) {
-            sink.accept(server);
-        }
     }
 }

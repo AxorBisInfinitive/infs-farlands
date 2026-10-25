@@ -1,5 +1,6 @@
 package com.inf.farlands.mixin.serialize;
 
+import com.inf.farlands.FarlandsTick;
 import com.inf.farlands.InfsFarlands;
 import com.inf.farlands.serialize.ChunkReadiness;
 import com.inf.farlands.serialize.SectionIO;
@@ -82,5 +83,7 @@ public abstract class MinecraftServerMixin {
         SectionStage.clearAll();
         EntitySectionWindow.clear();
         SectionIO.clearCache();
+        // 清掉泵的 server 引用，不留旧世界。
+        FarlandsTick.setRunningServer(null);
     }
 }

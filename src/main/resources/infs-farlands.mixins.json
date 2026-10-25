@@ -105,6 +105,7 @@
     "fix.xz.PlacedFeatureMixin",
     "fix.xz.WorldGenRegionMixin",
     "fix.xyz.NaturalSpawnerMixin",
+    "fix.xyz.SpawnPlacementsMixin",
     "fix.xyz.EntityFluidInteractionMixin",
     "fix.y.BlockBlobFeatureMixin",
     "fix.y.HeightmapMixin",
