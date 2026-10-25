@@ -42,6 +42,14 @@ public final class TerrainSystemContext {
         SYSTEM.remove();
     }
 
+    /**
+     * 当前上下文，未设置返回 null。给上下文可以缺席的调用点用，例如调试屏那次用系统 router 求值；
+     * 构造路径仍走 {@link #get()}，那条路要求漏设立刻炸出来。
+     */
+    public static TerrainSystem getOrNull() {
+        return SYSTEM.get();
+    }
+
     /** 当前正在构造 NoiseChunk 的系统。未设置即抛：只有构造路径会读它。 */
     public static TerrainSystem get() {
         TerrainSystem system = SYSTEM.get();

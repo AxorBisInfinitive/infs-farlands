@@ -3,6 +3,7 @@
   "package": "com.inf.farlands.client.mixin",
   "compatibilityLevel": "JAVA_25",
   "client": [
+    "debug.DebugEntryChunkGenerationMixin",
     "debug.DebugEntryPositionMixin",
     "debug.DebugScreenEntriesMixin",
     "debug.renderer.ChunkBorderRendererMixin",

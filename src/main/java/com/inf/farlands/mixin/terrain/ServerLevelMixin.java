@@ -38,8 +38,12 @@ public abstract class ServerLevelMixin implements LevelSystems, SystemsHolder {
 
     // ---- 每 level 一套地形相关系统 ----
 
+    /**
+     * 该系统在 level 构造末尾写一次，写者在服务端线程。读者不限于服务端：调试屏的 chunk generation
+     * 条目在渲染线程上取它，把上下文交给该条目那次求值。volatile 让那一路读到的一定是构造后的值。
+     */
     @Unique
-    private TerrainSystem farlandsTerrainSystem;
+    private volatile TerrainSystem farlandsTerrainSystem;
     @Unique
     private BiomeSystem farlandsBiomeSystem;
     @Unique

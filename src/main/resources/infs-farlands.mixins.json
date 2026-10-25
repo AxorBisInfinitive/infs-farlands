@@ -9,6 +9,7 @@
     "debug.tool.clamp.EntityCollisionMixin",
     "debug.tool.clamp.ServerPlayerMixin",
     "debug.log.BoundingBoxInvertedLogMixin",
+    "debug.NoiseBasedChunkGeneratorDebugMixin",
     "expand.xyz.misc.Aquifer$NoiseBasedAquiferMixin",
     "expand.xyz.pos.BlockPos$MutableBlockPosMixin",
     "expand.xyz.pos.BlockPosMixin",
