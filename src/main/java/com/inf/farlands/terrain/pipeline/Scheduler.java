@@ -550,7 +550,18 @@ public final class Scheduler {
                 continue;
             }
             ChunkPos pos = chunk.getPos();
+            // 界外 chunk 不生成，但必须补成空壳的 FULL。原版的 chunk 发送依赖中心加八邻共九格都到
+            // FULL，见 ChunkMap.prepareTickingChunk 的 getChunkRangeFuture(chunk, 1, FULL)，界外那一格
+            // 不补，界内最后一格就永远收不到 chunk 包，也不 startTickingChunk。发送与 FULL 绑定，所以
+            // 这些空壳会作为空 chunk 下发，这是既定口径。
             if (!WorldBounds.inChunkRange(pos.x(), pos.z())) {
+                // holder 取不到时不丢候选：completeFull 会在这一步静默返回，而候选此时已经离表，
+                // 再没有人会替它补一次。令牌在 holder 判定之后才领，所以重投不会吃掉这一次机会。
+                if (SectionLifecycle.latestHolder(level, pos.x(), pos.z()) == null) {
+                    requeuePersistent(key, candidate);
+                } else {
+                    ChunkReadiness.completeFull(chunk);
+                }
                 continue;
             }
             SectionLifecycle.ChunkCursor cursor = cursors.computeIfAbsent(level, SectionLifecycle::cursor);
