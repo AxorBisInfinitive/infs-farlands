@@ -48,7 +48,7 @@ def format_time(value: datetime | None) -> str:
         return "未知"
 
     return value.astimezone(timezone.utc).strftime(
-        "%Y-%m-%d %H:%M:%S UTC"
+        "%m-%d %H:%M"
     )
 
 
@@ -203,6 +203,130 @@ def escape_cell(value: str) -> str:
     )
 
 
+DIRECTORY_DISPLAY_LIMIT = 40
+DIRECTORY_HEAD_SEGMENTS = 2
+DIRECTORY_ELLIPSIS = "..."
+DIRECTORY_COLLISION_PASSES = 5
+
+
+def compose_directory(segments: list[str], head_count: int, tail_count: int) -> str:
+    head = "/".join(segments[:head_count])
+    tail = segments[len(segments) - tail_count:]
+
+    if head:
+        return "/".join([head, DIRECTORY_ELLIPSIS, *tail])
+
+    return "/".join([DIRECTORY_ELLIPSIS, *tail])
+
+
+def shorten_directory(path: str) -> str:
+    # 超限才缩短。头部去掉 src 后留两段，中间整块并成省略号，尾部按段从后往前装到装不下为止。
+    if len(path) <= DIRECTORY_DISPLAY_LIMIT:
+        return path
+
+    segments = path.split("/")
+
+    if segments and segments[0] == "src":
+        segments = segments[1:]
+
+    if len(segments) <= DIRECTORY_HEAD_SEGMENTS + 1:
+        return path
+
+    display = compose_directory(segments, DIRECTORY_HEAD_SEGMENTS, 1)
+
+    if len(display) > DIRECTORY_DISPLAY_LIMIT:
+        return path
+
+    tail_count = 2
+    max_tail = len(segments) - DIRECTORY_HEAD_SEGMENTS
+
+    while tail_count <= max_tail:
+        candidate = compose_directory(segments, DIRECTORY_HEAD_SEGMENTS, tail_count)
+
+        if len(candidate) > DIRECTORY_DISPLAY_LIMIT:
+            break
+
+        display = candidate
+        tail_count += 1
+
+    return display
+
+
+def needed_tail_segments(paths: list[str], indexes: list[int]) -> int:
+    # 从最后一段往前比，返回最后一个不同的段距末尾的段数。全同则返回最长路径的段数。
+    split = [paths[index].split("/") for index in indexes]
+    longest = max(len(segments) for segments in split)
+    depth = 0
+
+    while depth < longest:
+        values = {
+            segments[len(segments) - 1 - depth] if len(segments) > depth else None
+            for segments in split
+        }
+
+        if len(values) > 1:
+            return depth + 1
+
+        depth += 1
+
+    return longest
+
+
+def disambiguate_directory(path: str, tail_count: int) -> str | None:
+    # 装不下就压前面的分割：头部两段降到一段，再降到零段。都装不下返回 None，即放弃消除。
+    segments = path.split("/")
+
+    if segments and segments[0] == "src":
+        segments = segments[1:]
+
+    head_count = DIRECTORY_HEAD_SEGMENTS
+
+    while head_count >= 0:
+        if head_count + tail_count <= len(segments):
+            candidate = compose_directory(segments, head_count, tail_count)
+
+            if len(candidate) <= DIRECTORY_DISPLAY_LIMIT:
+                return candidate
+
+        head_count -= 1
+
+    return None
+
+
+def resolve_directory_duplicates(paths: list[str]) -> list[str]:
+    displays = [shorten_directory(path) for path in paths]
+
+    for _ in range(DIRECTORY_COLLISION_PASSES):
+        groups: dict[str, list[int]] = {}
+
+        for index, display in enumerate(displays):
+            groups.setdefault(display, []).append(index)
+
+        duplicates = [
+            indexes for indexes in groups.values() if len(indexes) > 1
+        ]
+
+        if not duplicates:
+            break
+
+        changed = False
+
+        for indexes in duplicates:
+            tail_count = needed_tail_segments(paths, indexes)
+
+            for index in indexes:
+                candidate = disambiguate_directory(paths[index], tail_count)
+
+                if candidate is not None and candidate != displays[index]:
+                    displays[index] = candidate
+                    changed = True
+
+        if not changed:
+            break
+
+    return displays
+
+
 def main():
     selected_file = Path(
         os.environ["SELECTED_DIRECTORIES_FILE"]
@@ -314,6 +438,11 @@ def main():
         row["files"] for row in package_rows
     )
 
+    # 先算十个显示串再消除同形，最后才拼表。
+    display_paths = resolve_directory_duplicates(
+        [row["path"] for row in package_rows]
+    )
+
     # 3. 生成中文 Job Summary。
     lines = [
         "# Java LoC Report",
@@ -357,9 +486,9 @@ def main():
         "|:--|--:|--:|:--|:--|:--|",
     ])
 
-    for row in package_rows:
+    for row, display in zip(package_rows, display_paths):
         directory_link = (
-            f"[{escape_cell(row['path'])}]"
+            f"[{escape_cell(display)}]"
             f"({row['directory_url']})"
         )
 
