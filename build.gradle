@@ -5,7 +5,7 @@ plugins {
 
 // 设置版本号为时间
 def buildTime = new Date().format("MM-dd.HH-mm")
-def baseVersion = project.properties.get("version", "0.0.5-alpha")
+def baseVersion = project.properties.get("version", "0.0.6-alpha")
 version = baseVersion + "." + buildTime
 
 repositories {
