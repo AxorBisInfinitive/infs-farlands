@@ -91,6 +91,20 @@ public abstract class WorldBorderRendererMixin {
     @Unique
     private float farlands$depthFar;
 
+    /**
+     * 上次重建顶点缓冲时用的竖向中心。
+     *
+     * <p>
+     * 纹理的竖向相位是烘在顶点里的，而墙的竖向位置跟着相机走，两者每帧错开中心的位移，图案就会被
+     * 相机拖着走。渲染时按这个差值把相位补回去。
+     *
+     * <p>
+     * 存 double 不存 float：中心可以到 ±2147483631，float 在那里的步长是 128 格，存 float 会把每
+     * 一格的位移整个抹平。
+     */
+    @Unique
+    private double farlands$textureBakedCenterY;
+
     /** 取本帧的相机高度、视距与远平面，供两个参数注入器用。outside=true 时整个边界不画。 */
     @Inject(method = "render", at = @At("HEAD"), cancellable = true)
     private void farlands$captureCamera(WorldBorderRenderState state, Vec3 cameraPos, double renderDistance,
@@ -149,10 +163,32 @@ public abstract class WorldBorderRendererMixin {
     /** uniform 的 y 分量，即 ModelOffset.y。 */
     @ModifyArg(method = "render", at = @At(value = "INVOKE", target = "Lorg/joml/Vector3f;<init>(FFF)V"), index = 1)
     private float farlands$clampModelOffsetY(float y) {
+        return (float) (this.farlands$centerY() - this.farlands$cameraY);
+    }
+
+    /**
+     * 纹理矩阵的 v 分量。除了时间项，还要补上墙相对上次重建移动了多少。
+     *
+     * <p>
+     * 纹理竖向每格 0.5，图案要与世界对齐就得让 {@code v + worldY / 2} 为常数。顶点的世界 Y 是
+     * {@code center ± depthFar}，而 {@code v} 是重建时按当时的相机 Y 烘进去的，两者之间每帧差一个
+     * 中心的位移，所以要减去位移的一半。
+     *
+     * <p>
+     * 位移取 {@link #farlands$centerY()} 的差，不取相机 Y 的差：夹取生效时中心不动，相机照走，用相机
+     * Y 会把图案继续拖着走。
+     */
+    @ModifyArg(method = "render", at = @At(value = "INVOKE", target = "Lorg/joml/Matrix4f;translation(FFF)Lorg/joml/Matrix4f;"), index = 1)
+    private float farlands$verticalPhase(float v) {
+        return v - 0.5F * (float) (this.farlands$centerY() - this.farlands$textureBakedCenterY);
+    }
+
+    /** 本帧墙的竖向中心，夹到边界范围内。相机位置的两种注入共用这一处算式。 */
+    @Unique
+    private double farlands$centerY() {
         double limit = FarlandsConfig.borderAbsoluteMax - 16.0;
         double d = this.farlands$depthFar;
-        double center = Mth.clamp(this.farlands$cameraY, -limit + d, limit - d);
-        return (float) (center - this.farlands$cameraY);
+        return Mth.clamp(this.farlands$cameraY, -limit + d, limit - d);
     }
 
     /**
@@ -191,6 +227,8 @@ public abstract class WorldBorderRendererMixin {
     @Overwrite
     private void rebuildWorldBorderBuffer(WorldBorderRenderState state, double renderDistance, double cameraZ,
             double cameraX, float halfHeightY, float v1, float v0) {
+        // 这一笔烘进去的竖向相位对应本帧的中心，记下来供渲染期补偿。v0 由本帧相机 Y 算出，同一帧。
+        this.farlands$textureBakedCenterY = this.farlands$centerY();
         try (ByteBufferBuilder byteBufferBuilder = ByteBufferBuilder
                 .exactlySized(DefaultVertexFormat.POSITION_TEX.getVertexSize() * 4 * 6)) {
             double borderMinX = state.minX;
