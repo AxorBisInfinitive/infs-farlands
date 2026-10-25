@@ -1,6 +1,7 @@
 package com.inf.farlands.client.mixin.render;
 
 import com.inf.farlands.FarlandsConfig;
+import com.inf.farlands.util.world.WorldBounds;
 
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.ViewArea;
@@ -89,9 +90,16 @@ public abstract class ViewAreaMixin {
         this.levelRenderer.getSectionOcclusionGraph().invalidate();
     }
 
-    /** 竖直窗口判定改成相机段加减半高，XZ 判定与原版一致。 */
+    /** 竖直窗口判定改成相机段加减半高，XZ 判定与原版一致；可表示段界之外一律不认。 */
     @Overwrite
     private boolean containsSection(int sectionX, int sectionY, int sectionZ) {
+        // 界外段拿不到盒内的叶，却会以回绕后的方块坐标占住盒内最外那一格的叶位，把真实段顶掉。它们的
+        // 方块坐标本身不可表示，客户端不认它们。判据取可表示段界而不是可玩段界：段 134217727 属于
+        // 要求里「尽量工作」的那一格，盒子为它让出了一整段。
+        if (!WorldBounds.inSectionAbsolute(sectionX) || !WorldBounds.inSectionAbsolute(sectionY)
+                || !WorldBounds.inSectionAbsolute(sectionZ)) {
+            return false;
+        }
         int half = this.sectionGridSizeY / 2;
         int camSectionY = this.cameraSectionPos.y();
         if (sectionY < camSectionY - half || sectionY > camSectionY + half) {

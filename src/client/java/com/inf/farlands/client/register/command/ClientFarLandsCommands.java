@@ -25,6 +25,7 @@ import net.minecraft.commands.Commands;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.lighting.LevelLightEngine;
@@ -51,6 +52,12 @@ public class ClientFarLandsCommands {
     /** 渲染侧内省的日志前缀，供 grep 定位。 */
     private static final String RENDER_DUMP = "FLRENDER";
 
+    /** 八叉树内省的日志前缀。 */
+    private static final String OCTREE_DUMP = "FLOCTREE";
+
+    /** 树遍历的深度上限。1024 格的盒只有 6 级，留余量防成环。 */
+    private static final int MAX_OCTREE_DEPTH = 16;
+
     public static void register(CommandRegistrationEvent event) {
         event.getDispatcher().register(
                 Commands.literal("farlands")
@@ -67,7 +74,11 @@ public class ClientFarLandsCommands {
                                                         .executes(ctx -> dumpBlocksClient(ctx.getSource()))))
                                         .then(Commands.literal("render")
                                                 .then(Commands.literal("dump")
-                                                        .executes(ctx -> dumpRenderClient(ctx.getSource()))))
+                                                        .executes(ctx -> dumpRenderClient(ctx.getSource())))
+                                                .then(Commands.literal("octree")
+                                                        .then(Commands.literal("dump")
+                                                                .executes(ctx -> dumpOctreeClient(
+                                                                        ctx.getSource())))))
                                         .then(Commands.literal("size")
                                                 .then(Commands.literal("dump")
                                                         .executes(ctx -> dumpSectionSizeClient(ctx.getSource())))))));
@@ -253,6 +264,8 @@ public class ClientFarLandsCommands {
             SectionOcclusionGraph.Node graphNode = graph == null ? null : graph.getNode(section);
             InfsFarlands.LOGGER.info("{}   octreeNode={}", RENDER_DUMP,
                     graphNode == null ? "absent" : "present");
+            InfsFarlands.LOGGER.info("{}   emptySection={}", RENDER_DUMP,
+                    mc.level.getChunkSource().getLoadedEmptySections().contains(section.getSectionNode()));
             if (graph != null) {
                 InfsFarlands.LOGGER.info("{}   sog needsFullUpdate={} fullUpdateTask={} needsFrustumUpdate={}",
                         RENDER_DUMP, minecraft$needsFullUpdate(graph), minecraft$fullUpdateTaskDone(graph),
@@ -264,6 +277,16 @@ public class ClientFarLandsCommands {
                             RENDER_DUMP, rootBb.minX, rootBb.minY, rootBb.minZ,
                             rootBb.maxX, rootBb.maxY, rootBb.maxZ);
                 }
+                // 等邻居表：键是段的 chunk 坐标，值是该格里等邻居的段。命中说明这个段从未入队。
+                java.util.Map<?, ?> waiting = minecraft$waitingSections(graph);
+                Object queued = waiting == null ? null : waiting.get(ChunkPos.pack(node.x(), node.z()));
+                int waitingSize = -1;
+                boolean waitingSelf = false;
+                if (queued instanceof List<?> list) {
+                    waitingSize = list.size();
+                    waitingSelf = list.contains(section);
+                }
+                InfsFarlands.LOGGER.info("{}   waiting size={} self={}", RENDER_DUMP, waitingSize, waitingSelf);
             }
             source.sendSuccess(
                     () -> Component.translatable("commands.infs-farlands.client.section.render.dump"), false);
@@ -271,6 +294,169 @@ public class ClientFarLandsCommands {
             InfsFarlands.LOGGER.error("{} err", RENDER_DUMP, e);
         }
         return 1;
+    }
+
+    /**
+     * 八叉树内省：从根按目标段的符号与排序换位走一遍，读它到底在不在树里、叶位上是谁。
+     *
+     * <p>
+     * 走法与 {@code Octree.Branch.add} 同源，所以走不到的地方就是 add 没走过的地方。整树统计额外给出该
+     * chunk 在这棵树里有多少叶，用来区分「整块缺席」与「放进了别的叶位」。
+     */
+    private static int dumpOctreeClient(CommandSourceStack source) {
+        try {
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.player == null || mc.levelRenderer == null) {
+                return 1;
+            }
+            BlockPos pos = mc.player.blockPosition();
+            SectionPos sec = SectionPos.of(pos);
+            InfsFarlands.LOGGER.info("{} client pos={},{},{} section={},{},{}",
+                    OCTREE_DUMP, pos.getX(), pos.getY(), pos.getZ(), sec.x(), sec.y(), sec.z());
+
+            SectionOcclusionGraph graph = mc.levelRenderer.getSectionOcclusionGraph();
+            Octree octree = graph == null ? null : graph.getOctree();
+            Object root = octree == null ? null : minecraft$octreeRoot(octree);
+            if (!(root instanceof Octree.Node rootNode)) {
+                InfsFarlands.LOGGER.info("{}   root=<absent>", OCTREE_DUMP);
+                return 1;
+            }
+            AABB rootBb = rootNode.getAABB();
+            InfsFarlands.LOGGER.info("{}   root={},{},{} .. {},{},{}", OCTREE_DUMP,
+                    rootBb.minX, rootBb.minY, rootBb.minZ, rootBb.maxX, rootBb.maxY, rootBb.maxZ);
+
+            int[] stats = new int[2];
+            List<SectionPos> chunkLeaves = new java.util.ArrayList<>();
+            minecraft$octreeStats(root, sec.x(), sec.z(), 0, stats, chunkLeaves);
+            StringBuilder list = new StringBuilder();
+            for (int i = 0; i < chunkLeaves.size() && i < 16; i++) {
+                SectionPos p = chunkLeaves.get(i);
+                list.append(' ').append(p.x()).append(',').append(p.y()).append(',').append(p.z());
+            }
+            InfsFarlands.LOGGER.info("{}   tree branches={} leaves={}", OCTREE_DUMP, stats[0], stats[1]);
+            InfsFarlands.LOGGER.info("{}   chunk target={},{} leaves={}{}", OCTREE_DUMP,
+                    sec.x(), sec.z(), chunkLeaves.size(), list);
+
+            minecraft$octreePath(sec, root);
+            source.sendSuccess(
+                    () -> Component.translatable("commands.infs-farlands.client.section.render.octree.dump"),
+                    false);
+        } catch (Exception e) {
+            InfsFarlands.LOGGER.error("{} err", OCTREE_DUMP, e);
+        }
+        return 1;
+    }
+
+    /** 整树统计：分支数、叶数，以及段坐标落在目标 chunk 的叶。 */
+    private static void minecraft$octreeStats(Object node, int cx, int cz, int depth, int[] stats,
+            List<SectionPos> chunkLeaves) {
+        if (!(node instanceof Octree.Node current) || depth > MAX_OCTREE_DEPTH) {
+            return;
+        }
+        if (current.getSection() != null) {
+            stats[1]++;
+            SectionPos leaf = SectionPos.of(current.getSection().getSectionNode());
+            if (leaf.x() == cx && leaf.z() == cz) {
+                chunkLeaves.add(leaf);
+            }
+            return;
+        }
+        stats[0]++;
+        for (Object child : minecraft$octreeChildren(node)) {
+            if (child != null) {
+                minecraft$octreeStats(child, cx, cz, depth + 1, stats, chunkLeaves);
+            }
+        }
+    }
+
+    /** 按 add 的判据从根走到目标段，逐级打印所选子节点。 */
+    private static void minecraft$octreePath(SectionPos sec, Object root) throws Exception {
+        int blockX = SectionPos.sectionToBlockCoord(sec.x());
+        int blockY = SectionPos.sectionToBlockCoord(sec.y());
+        int blockZ = SectionPos.sectionToBlockCoord(sec.z());
+        Object node = root;
+        int depth = 0;
+        while (node instanceof Octree.Node current) {
+            if (current.getSection() != null) {
+                SectionPos leaf = SectionPos.of(current.getSection().getSectionNode());
+                boolean self = leaf.x() == sec.x() && leaf.y() == sec.y() && leaf.z() == sec.z();
+                InfsFarlands.LOGGER.info("{}   path depth={} leaf section={},{},{} self={}", OCTREE_DUMP,
+                        depth, leaf.x(), leaf.y(), leaf.z(), self);
+                InfsFarlands.LOGGER.info("{}   result inTree={} depth={}", OCTREE_DUMP, self, depth);
+                return;
+            }
+            if (depth >= MAX_OCTREE_DEPTH) {
+                InfsFarlands.LOGGER.info("{}   result inTree=false abort=depth-cap", OCTREE_DUMP);
+                return;
+            }
+            int cbx = F_BRANCH_CENTER_X.getInt(node);
+            int cby = F_BRANCH_CENTER_Y.getInt(node);
+            int cbz = F_BRANCH_CENTER_Z.getInt(node);
+            int[] shift = minecraft$sortingShifts(F_BRANCH_SORTING.get(node));
+            // add 判的是「段与相机是否分居中心两侧」，不是段的原始符号，见 Octree.Branch.add。
+            boolean xOpp = (blockX - cbx < 0) != F_BRANCH_CAMERA_X_NEG.getBoolean(node);
+            boolean yOpp = (blockY - cby < 0) != F_BRANCH_CAMERA_Y_NEG.getBoolean(node);
+            boolean zOpp = (blockZ - cbz < 0) != F_BRANCH_CAMERA_Z_NEG.getBoolean(node);
+            int idx = (xOpp ? shift[0] : 0) + (yOpp ? shift[1] : 0) + (zOpp ? shift[2] : 0);
+            Object[] children = minecraft$octreeChildren(node);
+            Object child = idx < children.length ? children[idx] : null;
+            if (child == null) {
+                AABB box = current.getAABB();
+                InfsFarlands.LOGGER.info("{}   path depth={} idx={} absent parent={},{},{} .. {},{},{}",
+                        OCTREE_DUMP, depth + 1, idx, box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ);
+                InfsFarlands.LOGGER.info("{}   result inTree=false missingAtDepth={} idx={}", OCTREE_DUMP,
+                        depth + 1, idx);
+                return;
+            }
+            Octree.Node childNode = (Octree.Node) child;
+            // 叶位只有一个段，后放的会顶掉先放的。目标段自己占位时由下面的 leaf 行报，别处占位时报这里。
+            SectionRenderDispatcher.RenderSection holder = childNode.getSection();
+            if (holder != null) {
+                SectionPos hold = SectionPos.of(holder.getSectionNode());
+                if (hold.x() != sec.x() || hold.y() != sec.y() || hold.z() != sec.z()) {
+                    InfsFarlands.LOGGER.info("{}   path depth={} idx={} holder section={},{},{} self=false",
+                            OCTREE_DUMP, depth + 1, idx, hold.x(), hold.y(), hold.z());
+                }
+            }
+            AABB childBox = childNode.getAABB();
+            boolean inside = childBox.minX <= blockX && blockX < childBox.maxX
+                    && childBox.minY <= blockY && blockY < childBox.maxY
+                    && childBox.minZ <= blockZ && blockZ < childBox.maxZ;
+            InfsFarlands.LOGGER.info("{}   path depth={} idx={} box={},{},{} .. {},{},{} inside={}", OCTREE_DUMP,
+                    depth + 1, idx, childBox.minX, childBox.minY, childBox.minZ, childBox.maxX, childBox.maxY,
+                    childBox.maxZ, inside);
+            if (!inside) {
+                // 盒不含目标段：下标与盒的对应关系仍然不成立，再往下走没有意义。
+                InfsFarlands.LOGGER.info("{}   result inTree=false boxOutsideTarget depth={}", OCTREE_DUMP,
+                        depth + 1);
+                return;
+            }
+            node = child;
+            depth++;
+        }
+    }
+
+    /** 分支的子节点数组。非分支节点不该走到这里。 */
+    private static Object[] minecraft$octreeChildren(Object node) {
+        try {
+            return (Object[]) F_BRANCH_NODES.get(node);
+        } catch (Exception e) {
+            throw new RuntimeException("farlands: Octree$Branch.nodes", e);
+        }
+    }
+
+    /** 该级的三轴排序换位，按枚举名取，返回 x、y、z 三个权重。 */
+    private static int[] minecraft$sortingShifts(Object sorting) {
+        String name = sorting instanceof Enum<?> e ? e.name() : "";
+        return switch (name) {
+            case "XYZ" -> new int[] { 4, 2, 1 };
+            case "XZY" -> new int[] { 4, 1, 2 };
+            case "YXZ" -> new int[] { 2, 4, 1 };
+            case "YZX" -> new int[] { 1, 4, 2 };
+            case "ZXY" -> new int[] { 2, 1, 4 };
+            case "ZYX" -> new int[] { 1, 2, 4 };
+            default -> throw new IllegalStateException("farlands: unknown Octree.AxisSorting " + name);
+        };
     }
 
     /** mesh 具体类型。UNCOMPILED 与 EMPTY 都是 SectionMesh 的匿名实例，按常量身份区分。 */
@@ -348,6 +534,33 @@ public class ClientFarLandsCommands {
         }
     }
 
+    /**
+     * 遮挡图的等邻居表，键是 chunk 的 pack，值是那一格里等邻居的段。
+     *
+     * <p>
+     * 这张表与 {@code sectionToNodeMap} 是两回事：后者对已排队与等邻居两种节点都登记，所以
+     * 「节点在表里」证明不了段已入队。
+     */
+    private static java.util.Map<?, ?> minecraft$waitingSections(SectionOcclusionGraph graph) {
+        try {
+            Object ref = F_CURRENT_GRAPH.get(graph);
+            if (!(ref instanceof java.util.concurrent.atomic.AtomicReference<?> current)) {
+                return null;
+            }
+            Object state = current.get();
+            if (state == null) {
+                return null;
+            }
+            Object storage = F_GRAPH_STORAGE.get(state);
+            if (storage == null) {
+                return null;
+            }
+            return (java.util.Map<?, ?>) F_WAITING_SECTIONS.get(storage);
+        } catch (Exception e) {
+            throw new RuntimeException("farlands: SectionOcclusionGraph.chunksWaitingForNeighbors", e);
+        }
+    }
+
     // ---- 渲染侧与客户端 chunk 存储的私有成员访问 ----
     // viewArea、visibleSections、Octree.root、遮挡图的三个调度标志都是 private，
     // ViewArea.getRenderSectionAt 是 protected，ClientChunkCache.storage 与其 Storage.chunks
@@ -358,9 +571,20 @@ public class ClientFarLandsCommands {
     private static final Field F_VIEW_AREA;
     private static final Field F_VISIBLE_SECTIONS;
     private static final Field F_OCTREE_ROOT;
+    private static final Field F_BRANCH_NODES;
+    private static final Field F_BRANCH_CENTER_X;
+    private static final Field F_BRANCH_CENTER_Y;
+    private static final Field F_BRANCH_CENTER_Z;
+    private static final Field F_BRANCH_SORTING;
+    private static final Field F_BRANCH_CAMERA_X_NEG;
+    private static final Field F_BRANCH_CAMERA_Y_NEG;
+    private static final Field F_BRANCH_CAMERA_Z_NEG;
     private static final Field F_NEEDS_FULL_UPDATE;
     private static final Field F_FULL_UPDATE_TASK;
     private static final Field F_NEEDS_FRUSTUM_UPDATE;
+    private static final Field F_CURRENT_GRAPH;
+    private static final Field F_GRAPH_STORAGE;
+    private static final Field F_WAITING_SECTIONS;
     private static final Method M_RENDER_SECTION_AT;
 
     static {
@@ -371,12 +595,37 @@ public class ClientFarLandsCommands {
             F_VISIBLE_SECTIONS.setAccessible(true);
             F_OCTREE_ROOT = Octree.class.getDeclaredField("root");
             F_OCTREE_ROOT.setAccessible(true);
+            Class<?> branchType = F_OCTREE_ROOT.getType();
+            F_BRANCH_NODES = branchType.getDeclaredField("nodes");
+            F_BRANCH_NODES.setAccessible(true);
+            F_BRANCH_CENTER_X = branchType.getDeclaredField("bbCenterX");
+            F_BRANCH_CENTER_X.setAccessible(true);
+            F_BRANCH_CENTER_Y = branchType.getDeclaredField("bbCenterY");
+            F_BRANCH_CENTER_Y.setAccessible(true);
+            F_BRANCH_CENTER_Z = branchType.getDeclaredField("bbCenterZ");
+            F_BRANCH_CENTER_Z.setAccessible(true);
+            F_BRANCH_SORTING = branchType.getDeclaredField("sorting");
+            F_BRANCH_SORTING.setAccessible(true);
+            F_BRANCH_CAMERA_X_NEG = branchType.getDeclaredField("cameraXDiffNegative");
+            F_BRANCH_CAMERA_X_NEG.setAccessible(true);
+            F_BRANCH_CAMERA_Y_NEG = branchType.getDeclaredField("cameraYDiffNegative");
+            F_BRANCH_CAMERA_Y_NEG.setAccessible(true);
+            F_BRANCH_CAMERA_Z_NEG = branchType.getDeclaredField("cameraZDiffNegative");
+            F_BRANCH_CAMERA_Z_NEG.setAccessible(true);
             F_NEEDS_FULL_UPDATE = SectionOcclusionGraph.class.getDeclaredField("needsFullUpdate");
             F_NEEDS_FULL_UPDATE.setAccessible(true);
             F_FULL_UPDATE_TASK = SectionOcclusionGraph.class.getDeclaredField("fullUpdateTask");
             F_FULL_UPDATE_TASK.setAccessible(true);
             F_NEEDS_FRUSTUM_UPDATE = SectionOcclusionGraph.class.getDeclaredField("needsFrustumUpdate");
             F_NEEDS_FRUSTUM_UPDATE.setAccessible(true);
+            F_CURRENT_GRAPH = SectionOcclusionGraph.class.getDeclaredField("currentGraph");
+            F_CURRENT_GRAPH.setAccessible(true);
+            F_GRAPH_STORAGE = Class.forName("net.minecraft.client.renderer.SectionOcclusionGraph$GraphState")
+                    .getDeclaredField("storage");
+            F_GRAPH_STORAGE.setAccessible(true);
+            F_WAITING_SECTIONS = Class.forName("net.minecraft.client.renderer.SectionOcclusionGraph$GraphStorage")
+                    .getDeclaredField("chunksWaitingForNeighbors");
+            F_WAITING_SECTIONS.setAccessible(true);
             M_RENDER_SECTION_AT = ViewArea.class.getDeclaredMethod("getRenderSectionAt", BlockPos.class);
             M_RENDER_SECTION_AT.setAccessible(true);
             F_CLIENT_STORAGE = ClientChunkCache.class.getDeclaredField("storage");

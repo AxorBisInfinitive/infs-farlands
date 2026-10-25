@@ -20,6 +20,7 @@
   "commands.infs-farlands.client.section.block.dump": "Section 方块数据已写入客户端日志。",
   "commands.infs-farlands.client.section.biome.dump": "Section 生物群系数据已写入客户端日志。",
   "commands.infs-farlands.client.section.render.dump": "Section 渲染状态已写入客户端日志。",
+  "commands.infs-farlands.client.section.render.octree.dump": "Section 八叉树状态已写入客户端日志。",
   "commands.infs-farlands.section.size.dump": "服务端 Section 总数：%s 个 chunk，%s 个 section。",
   "commands.infs-farlands.client.section.size.dump": "客户端 Section 总数：%s 个 chunk，%s 个 section。",
   "commands.infs-farlands.system.args.dump": "当前维度的系统参数已写入服务端日志。",

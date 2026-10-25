@@ -94,10 +94,10 @@ public class OctreeMixin {
      * 内部。这里退回段原点：{@code halfSpanBlocks} 恒为 16 的倍数，所以端点、各级切分面与叶盒都落回段
      * 边界，每个叶盒恰好等于一段的体积。
      *
-     * <p>上界取 {@code INT_MAX - half}：{@code AABB.of} 在 int 里做 {@code maxX + 1}，允许 {@code maxX}
-     * 落到 {@code INT_MAX} 会溢出成 {@code INT_MIN}，AABB 从构造那刻起就是 {@code min > max} 的反序盒，
-     * 进 {@code Frustum.cubeInFrustum} 判不可见，{@code visitNodes} 一个 section 都收不进八叉树。留一位
-     * 之后 {@code maxX ≤ INT_MAX - 1}，加一后正好落在 int 内。
+     * <p>上界取 {@code INT_MAX - half + 1}，让盒的正侧面落到 {@code INT_MAX}，可表示段
+     * {@code 134217727} 因此落在盒内。端点加一的两处，即 {@code Frustum.cubeInFrustum} 与
+     * {@code Octree.Branch.getAABB}，都改在 long 里做，所以 {@code maxX == INT_MAX} 不再溢出成反序盒。
+     * 再往上一格是段 {@code 134217728}，它的方块坐标本身回绕，不在可表示界内，由网格那一侧的段界判据挡住。
      *
      * <p>先夹后取整，顺序不能反：下界 {@code INT_MIN + half} 本身是 16 的倍数，下取整不会越过它；反过来
      * 则可能把原点推到下界之下。
@@ -109,7 +109,7 @@ public class OctreeMixin {
         long half = farlands$halfSpanBlocks();
         long origin = (long) center - 8L;
         long lowest = Integer.MIN_VALUE + half;
-        long highest = (long) Integer.MAX_VALUE - half;
+        long highest = (long) Integer.MAX_VALUE - half + 1;
         return Mth.clamp(origin, lowest, highest) & ~15L;
     }
 

@@ -20,6 +20,7 @@
   "commands.infs-farlands.client.section.block.dump": "Section block data dump written to client log.",
   "commands.infs-farlands.client.section.biome.dump": "Section biome dump written to client log.",
   "commands.infs-farlands.client.section.render.dump": "Section render state written to client log.",
+  "commands.infs-farlands.client.section.render.octree.dump": "Section octree state written to client log.",
   "commands.infs-farlands.section.size.dump": "Server section totals: %s chunks, %s sections.",
   "commands.infs-farlands.client.section.size.dump": "Client section totals: %s chunks, %s sections.",
   "commands.infs-farlands.system.args.dump": "System args for the current dimension written to server log.",

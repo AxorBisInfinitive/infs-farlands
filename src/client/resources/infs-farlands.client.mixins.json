@@ -42,6 +42,8 @@
     "render.SectionRenderDispatcher$RenderSectionMixin",
     "render.SectionCopyMixin",
     "render.OctreeMixin",
+    "render.FrustumMixin",
+    "render.Octree$BranchMixin",
     "render.SectionOcclusionGraphMixin",
     "render.RenderRegionCacheMixin",
     "worldselection.CreateWorldScreenMixin",
