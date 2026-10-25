@@ -27,8 +27,8 @@ import net.minecraft.world.level.levelgen.synth.NormalNoise;
 public final class VanillaNoiseSystem implements NoiseSystem {
 
     /**
-     * 声明：seed 用五族共用的空框取值源，见 {@link VanillaFamilySeed}。本系统的 seed 只驱动密度
-     * 节点重建，aquifer 与矿脉的随机源仍取该 level 的 RandomState。
+     * 声明：seed 用五族共用的空框取值源，见 {@link VanillaFamilySeed}。本系统的 seed 驱动整条 router
+     * 的噪声重建，含水层位置与矿脉起点那两处 {@code PositionalRandomFactory} 仍取该 level 的 RandomState。
      */
     @SystemDefaultParams
     public static final SystemParams DEFAULT_PARAMS = SystemParams.of(VanillaFamilySeed.seedParam());
@@ -54,7 +54,28 @@ public final class VanillaNoiseSystem implements NoiseSystem {
 
     @Override
     public DensityFunction createFinalDensity(NoiseRouter router) {
-        return router.finalDensity().mapAll(new DensityFunction.Visitor() {
+        return router.finalDensity().mapAll(this.rebuildVisitor());
+    }
+
+    /**
+     * 整条 router 按本系统的 seed 重建，换掉的字段因此不再跟着宿主 seed 走。
+     *
+     * <p>
+     * 只重建 finalDensity 不够：含水层的液面封顶值取自 {@code preliminarySurfaceLevel}，而那个函数本身由
+     * offset 与 factor 两条噪声样条驱动。密度用族 seed、表面用宿主 seed 时，含水层会拿一个与地形无关的表面
+     * 去封液面，深海因此干涸，水也会出现在地形之上。矿脉门与深暗判定同属这一类，一并按族 seed 重建。
+     *
+     * <p>
+     * 地形形状不变：换的只是噪声实例，密度那棵树的结构逐字保留。
+     */
+    @Override
+    public NoiseRouter createRouter(NoiseRouter vanilla) {
+        return vanilla.mapAll(this.rebuildVisitor());
+    }
+
+    /** 按本系统的 seed 重建噪声的访问器，router 与 finalDensity 两处共用同一份，噪声实例按参数表缓存。 */
+    private DensityFunction.Visitor rebuildVisitor() {
+        return new DensityFunction.Visitor() {
 
             @Override
             public DensityFunction apply(DensityFunction function) {
@@ -69,7 +90,7 @@ public final class VanillaNoiseSystem implements NoiseSystem {
                                 key.value()));
                 return new DensityFunction.NoiseHolder(data, rebuilt);
             }
-        });
+        };
     }
 
     /** 复用原实例自己的缩放参数、只换随机源，参数因此不写死。 */

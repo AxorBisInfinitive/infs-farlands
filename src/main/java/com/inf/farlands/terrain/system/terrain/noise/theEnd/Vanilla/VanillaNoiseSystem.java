@@ -79,6 +79,30 @@ public final class VanillaNoiseSystem implements NoiseSystem {
     }
 
     /**
+     * 末地自己的 router：除密度与 erosion 外全是零值，与 {@code NoiseRouterData.end} 逐项对应。
+     *
+     * <p>
+     * 不能沿用宿主 router 的字段。末地的密度是自建的岛密度，宿主的 {@code preliminarySurfaceLevel} 与矿脉门
+     * 与它无关；宿主维度若开着 aquifer，含水层会拿宿主的表面去封一份末地密度的水，那正是这条缺陷的形状。
+     *
+     * <p>
+     * erosion 取 {@code endIslands(0L)}，与 vanilla 的末地 router 同值。本 port 的末地不走含水层，深暗判定读
+     * 不到这一项，照抄只为与 vanilla 同形。
+     */
+    @Override
+    public NoiseRouter createRouter(NoiseRouter vanilla) {
+        DensityFunction zero = DensityFunctions.zero();
+        return new NoiseRouter(
+                zero, zero, zero, zero,
+                zero, zero, zero,
+                DensityFunctions.endIslands(0L),
+                zero, zero,
+                zero,
+                this.finalDensity,
+                zero, zero, zero);
+    }
+
+    /**
      * 末地的 cell 网格：{@code size_horizontal 2} 即 8 格宽，{@code size_vertical 1} 即 4 格高，与
      * {@code NoiseSettings.END_NOISE_SETTINGS} 同值。
      *
