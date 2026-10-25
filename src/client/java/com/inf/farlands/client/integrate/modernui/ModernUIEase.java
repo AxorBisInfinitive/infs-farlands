@@ -14,8 +14,12 @@ import net.minecraft.client.gui.components.AbstractScrollArea;
  *
  * <p>
  * 门控三态：{@code loaded} 记「装了没有、且它自己的平滑开关开着」，{@code disabled} 记「已经失败过、
- * 以后不再试」，{@code warned} 保证只警告一次。任何一处抛 Throwable 都整体降级回 vanilla 步进，只
- * 影响我们页签的滚动，不影响其它功能。
+ * 以后不再用」，{@code warned} 保证只警告一次。
+ *
+ * <p>
+ * 停用是对已挂载引擎的调用一并跳过，不只是不再新建挂载：任何一处抛 Throwable 之后，{@link #tick}、
+ * {@link #wheel} 与 {@link #offset} 都返回中性值，滚轮落回 vanilla 的步进。只停新挂载是不够的，那样已
+ * 挂载的引擎仍会被每帧调用，而它的补间目标仍会吃掉滚轮却不再产生位移。
  *
  * <p>
  * 引擎的四个调用都从这里过一层 try，注入点因此不必各自兜异常。
@@ -25,7 +29,7 @@ public final class ModernUIEase {
     /** 门控结果，null 表示尚未查过。 */
     private static Boolean loaded;
 
-    /** 失败过就整体停用。 */
+    /** 失败过就整体停用：不再新建挂载，也不再调用已挂载的引擎。 */
     private static boolean disabled;
 
     private static boolean warned;
@@ -60,9 +64,9 @@ public final class ModernUIEase {
         }
     }
 
-    /** 推进补间。引擎为空即不做。 */
+    /** 推进补间。未启用或引擎为空都不做。 */
     public static void tick(SmoothScrollEngine engine) {
-        if (engine == null) {
+        if (disabled || engine == null) {
             return;
         }
         try {
@@ -72,9 +76,9 @@ public final class ModernUIEase {
         }
     }
 
-    /** 接一次滚轮，返回是否接管。引擎为空返回假，调用方交回 vanilla。 */
+    /** 接一次滚轮，返回是否接管。未启用或引擎为空都返回假，调用方交回 vanilla。 */
     public static boolean wheel(SmoothScrollEngine engine, double scrollY) {
-        if (engine == null) {
+        if (disabled || engine == null) {
             return false;
         }
         try {
@@ -85,9 +89,9 @@ public final class ModernUIEase {
         }
     }
 
-    /** 绘制期的额外平移量。引擎为空或出错都是零。 */
+    /** 绘制期的额外平移量。未启用、引擎为空或出错都是零。 */
     public static float offset(SmoothScrollEngine engine) {
-        if (engine == null) {
+        if (disabled || engine == null) {
             return 0.0F;
         }
         try {
