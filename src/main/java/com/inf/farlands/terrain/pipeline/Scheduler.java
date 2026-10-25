@@ -22,6 +22,8 @@ import com.inf.farlands.util.window.PlayerSnapshot;
 import com.inf.farlands.util.world.WorldBounds;
 
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
+import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
@@ -88,6 +90,10 @@ public final class Scheduler {
     public static void clearWorldState() {
         FACES.clear();
         CANDIDATES.clear();
+        // 等待记录连同它铺的票一起丢：票随 level 消亡，这里只清内存条目。
+        WAITED.clear();
+        pendingLevel = null;
+        inPump = false;
         // 窗口状态跟着清：换世界后第一次派发必须重新开窗，而不是继承上一个世界的余额与起点。
         budgetWindowStartMillis = 0L;
         budgetLeft = 0;
@@ -112,6 +118,185 @@ public final class Scheduler {
     }
 
     private static final Map<Long, Candidate> CANDIDATES = new ConcurrentHashMap<>();
+
+    // ---- 正被阻塞取数等着的那一格 ----
+
+    /**
+     * 一条等待记录。
+     *
+     * <p>{@code pinned} 记的是「结构票是不是本类铺的」：{@code NeighborhoodTickets.hold} 对同一个中心只让
+     * 第一个持有方拿到真，撤票也因此只能由铺票的那一方做，否则会把别人的票撤掉。
+     */
+    private static final class Waited {
+
+        private final ServerLevel level;
+
+        private final ChunkPos pos;
+
+        private long deadlineMillis;
+
+        private boolean pinned;
+
+        Waited(ServerLevel level, ChunkPos pos, long deadlineMillis) {
+            this.level = level;
+            this.pos = pos;
+            this.deadlineMillis = deadlineMillis;
+        }
+    }
+
+    /** 等待记录的期限。一次窗口带生成以秒计，五分钟是兜底，不是预期时长。 */
+    private static final long WAITED_TTL_MILLIS = 300_000L;
+
+    /** 从「即将阻塞」到「确认在阻塞」的门槛。泵只在等待期间运行，过了这个时长才登记。 */
+    private static final long WAIT_CONFIRM_MILLIS = 2_000L;
+
+    /** 维度的一次取数与坐标到等待记录。 */
+    private static final Long2ObjectOpenHashMap<Waited> WAITED = new Long2ObjectOpenHashMap<>();
+
+    /** 最近一次会阻塞的 FULL 取数。只在空位时写，提升后清空，所以同一时刻只跟一条等待。 */
+    private static ServerLevel pendingLevel;
+
+    private static int pendingChunkX;
+
+    private static int pendingChunkZ;
+
+    private static long pendingSinceMillis;
+
+    /** 泵体执行中。为真时泵自身引起的阻塞取数不占位，否则会把外层真正冻结的那一格覆盖掉。 */
+    private static boolean inPump;
+
+    /** 键：维度的一次取数与坐标。同坐标在两个维度里互不相干。 */
+    private static long keyOf(ServerLevel level, int chunkX, int chunkZ) {
+        return ((long) System.identityHashCode(level.getChunkSource().chunkMap) << 32)
+                ^ ChunkPos.pack(chunkX, chunkZ);
+    }
+
+    /**
+     * 记下一次会阻塞的 FULL 取数。由 {@code ServerChunkCache.getChunk} 调 {@code managedBlock} 之前调。
+     *
+     * <p>这里只占位，不登记也不铺票：绝大多数 FULL 取数会立即返回，在这里做事等于给每一格都铺一张结构票。
+     * 真正的登记与提交由泵在等待持续超过门槛之后做一次。
+     *
+     * <p>只在空位时写。泵体会反向取数，空位规则保证外层那一格不被它覆盖；提升清空之后，嵌在那里的等待
+     * 才轮到自己占位。
+     */
+    public static void noteBlockingFullGet(ServerLevel level, int chunkX, int chunkZ) {
+        if (inPump || pendingLevel != null) {
+            return;
+        }
+        pendingLevel = level;
+        pendingChunkX = chunkX;
+        pendingChunkZ = chunkZ;
+        pendingSinceMillis = System.currentTimeMillis();
+    }
+
+    /** 进入泵体。 */
+    public static void beginPump() {
+        inPump = true;
+    }
+
+    /** 退出泵体。必须与 {@link #beginPump()} 成对，走 finally。 */
+    public static void endPump() {
+        inPump = false;
+    }
+
+    /**
+     * 一次阻塞取数返回时清掉占位。只在占位仍是这一格时清，嵌套取数不会误清外层。
+     *
+     * <p>没有这一步，任何一次没过门槛的短等待都会把占位永久占住，此后的等待再也登记不进来。
+     */
+    public static void clearPendingWait(ServerLevel level, int chunkX, int chunkZ) {
+        if (pendingLevel != level || pendingChunkX != chunkX || pendingChunkZ != chunkZ) {
+            return;
+        }
+        pendingLevel = null;
+    }
+
+    /**
+     * 把已持续阻塞的取数提升为等待记录，并在壳在场时把它放回候选表。由泵每轮调一次。
+     *
+     * <p>提交是必需的：那一格可能刚因为太远被一次性移除，而等待者阻塞在 future 上，不会再有人显式提交它。
+     */
+    public static void promotePendingWait() {
+        ServerLevel level = pendingLevel;
+        if (level == null) {
+            return;
+        }
+        if (System.currentTimeMillis() - pendingSinceMillis < WAIT_CONFIRM_MILLIS) {
+            return;
+        }
+        int chunkX = pendingChunkX;
+        int chunkZ = pendingChunkZ;
+        pendingLevel = null;
+        sweepExpiredWaiters();
+        long key = keyOf(level, chunkX, chunkZ);
+        long deadline = System.currentTimeMillis() + WAITED_TTL_MILLIS;
+        Waited waited = WAITED.get(key);
+        if (waited != null) {
+            waited.deadlineMillis = deadline;
+        } else {
+            WAITED.put(key, new Waited(level, new ChunkPos(chunkX, chunkZ), deadline));
+        }
+        LevelChunk chunk = SectionLifecycle.latestChunk(level, chunkX, chunkZ);
+        if (chunk != null) {
+            submit(chunk);
+        }
+    }
+
+    /**
+     * 给被等待的格铺一张结构票。
+     *
+     * <p>只在派发发现结构门过不去时调。铺在置标记处会让每一次立即返回的 FULL 取数都铺一张，票会泛滥；
+     * 走到这一支的格才真的需要 ±8 的壳。
+     */
+    private static void pinWaited(ServerLevel level, int chunkX, int chunkZ) {
+        Waited waited = WAITED.get(keyOf(level, chunkX, chunkZ));
+        if (waited == null || waited.pinned) {
+            return;
+        }
+        waited.pinned = NeighborhoodTickets.hold(level, new ChunkPos(chunkX, chunkZ));
+    }
+
+    /** 撤掉等待记录。结构票是本类铺的才撤，别人的票不碰。 */
+    public static void clearWaited(ServerLevel level, int chunkX, int chunkZ) {
+        Waited waited = WAITED.remove(keyOf(level, chunkX, chunkZ));
+        if (waited != null && waited.pinned) {
+            NeighborhoodTickets.release(waited.level, waited.pos);
+        }
+    }
+
+    /** 该格是否正被等待且未过期。到期即视为不再等待，记录留给清扫。 */
+    private static boolean isWaited(ServerLevel level, int chunkX, int chunkZ) {
+        Waited waited = WAITED.get(keyOf(level, chunkX, chunkZ));
+        return waited != null && System.currentTimeMillis() <= waited.deadlineMillis;
+    }
+
+    /** 清过期记录，并把它们铺的票撤掉。票不撤会让那一圈壳永久保加载。 */
+    private static void sweepExpiredWaiters() {
+        if (WAITED.isEmpty()) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        List<Long> expired = null;
+        for (Long2ObjectMap.Entry<Waited> entry : WAITED.long2ObjectEntrySet()) {
+            Waited waited = entry.getValue();
+            if (waited != null && now > waited.deadlineMillis) {
+                if (expired == null) {
+                    expired = new ArrayList<>();
+                }
+                expired.add(entry.getLongKey());
+            }
+        }
+        if (expired == null) {
+            return;
+        }
+        for (Long key : expired) {
+            Waited waited = WAITED.remove(key.longValue());
+            if (waited != null && waited.pinned) {
+                NeighborhoodTickets.release(waited.level, waited.pos);
+            }
+        }
+    }
 
     /** 退避梯度，单位毫秒。超出长度后取最后一档。 */
     private static final long[] RETRY_BACKOFF_MILLIS = { 2L, 8L, 200L };
@@ -353,11 +538,13 @@ public final class Scheduler {
             SectionLifecycle.ChunkCursor cursor = cursors.computeIfAbsent(level, SectionLifecycle::cursor);
             int ticketLevel = cursor.ticketLevelAt(pos.x(), pos.z());
             int allowed = DependencyTable.allowedStage(ticketLevel);
+            // 被阻塞取数等着的那一格不受距离门约束：等待本身证明它必须现在推进。
+            boolean waited = isWaited(level, pos.x(), pos.z());
             if (allowed < SectionStage.TERRAIN) {
-                requeue(key, candidate);
+                retry(key, candidate, waited);
                 continue;
             }
-            if (!GenQueue.isNearPlayer(chunk)) {
+            if (!waited && !GenQueue.isNearPlayer(chunk)) {
                 // 该维度有玩家、窗口表里却没有它的带，说明刷新还没发生：此刻是「还不知道」，不是
                 // 「确实太远」。丢掉等于把活永久丢掉，因为重投与重扫都不在这条路径上。判据取窗口表，
                 // 因为准入的竖直面用它。两条出口都自解：刷新之后按正常路径准入，玩家离开之后判据转假，
@@ -377,6 +564,7 @@ public final class Scheduler {
             if (wrDone && sections.length > 0
                     && DependencyTable.pendingBelowIn(chunk, sections, SectionStage.LIGHTED) == 0) {
                 ChunkReadiness.completeFull(chunk);
+                clearWaited(level, pos.x(), pos.z());
                 continue;
             }
             // 生成支：范围内还有低于 CARVERS 的段。装饰支：本 chunk 已有段停在 CARVERS。两支分开判，
@@ -393,7 +581,7 @@ public final class Scheduler {
                     requeuePersistent(key, candidate);
                     continue;
                 }
-                requeue(key, candidate);
+                retry(key, candidate, waited);
                 continue;
             }
             if (deco && DecorationFiller.trySubmitDecoration(chunk)) {
@@ -417,16 +605,20 @@ public final class Scheduler {
                             Beardifier.forStructuresInChunk(level.structureManager(), chunk.getPos()));
                     submit(chunk);
                 } else {
-                    requeue(key, candidate);
+                    if (waited && enabled && inRange) {
+                        pinWaited(level, pos.x(), pos.z());
+                    }
+                    retry(key, candidate, waited);
                 }
                 continue;
             }
-            if (GenQueue.enqueueTask(chunk, sections)) {
+            boolean submitted = GenQueue.enqueueTask(chunk, sections);
+            if (submitted) {
                 continue;
             } else {
                 // 候选已在派发之前离表，这里必须重投。TERRAIN 认领是瞬时争用，退避上限约十二秒；
                 // 期间的收尾还会再提交一次同一个 chunk，两路都进候选表，同键覆盖，无害。
-                requeue(key, candidate);
+                retry(key, candidate, waited);
             }
         }
     }
@@ -498,6 +690,20 @@ public final class Scheduler {
             sorted[n++] = sy;
         }
         return n == sorted.length ? sorted : Arrays.copyOf(sorted, n);
+    }
+
+    /**
+     * 暂时性拒绝的重投分流：被等待的格走不封顶的那一支。
+     *
+     * <p>封顶那一支的语义是「暂时性原因，试几下就该放弃，等下一次显式提交」。被等待的格没有那一次显式
+     * 提交，提交它的人正阻塞在这个 future 上，所以对它只能用固定节奏重投。
+     */
+    private static void retry(long key, Candidate candidate, boolean waited) {
+        if (waited) {
+            requeuePersistent(key, candidate);
+        } else {
+            requeue(key, candidate);
+        }
     }
 
     /**

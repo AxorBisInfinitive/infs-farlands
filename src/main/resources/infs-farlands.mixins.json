@@ -80,6 +80,7 @@
     "fix.thread.LevelBlockEntityChangedMixin",
     "fix.thread.EventLoopSchedulerPumpMixin",
     "fix.thread.ChunkCachePumpMixin",
+    "fix.thread.ChunkWaitMarkMixin",
     "fix.xz.AABBMixin",
     "fix.xz.BoundingBoxMixin",
     "fix.xz.ChunkGeneratorMixin",

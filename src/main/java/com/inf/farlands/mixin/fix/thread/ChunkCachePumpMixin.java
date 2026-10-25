@@ -96,7 +96,10 @@ public abstract class ChunkCachePumpMixin {
             return;
         }
         farlands$IN_PUMP.set(Boolean.TRUE);
+        Scheduler.beginPump();
         try {
+            // 排在刷新与派发之前：提升会提交一次，提交自己会派发一轮；放在前面，本轮末尾的票传播仍赶得上。
+            Scheduler.promotePendingWait();
             FarlandsTick.refreshTickState(server);
             Scheduler.tick();
         } catch (Throwable t) {
@@ -104,6 +107,7 @@ public abstract class ChunkCachePumpMixin {
                 InfsFarlands.LOGGER.error("farlands: chunk cache pump failed during a blocked wait", t);
             }
         } finally {
+            Scheduler.endPump();
             farlands$IN_PUMP.remove();
         }
     }
