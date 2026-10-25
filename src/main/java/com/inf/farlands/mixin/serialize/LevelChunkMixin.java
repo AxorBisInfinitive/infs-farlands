@@ -1,23 +1,32 @@
 package com.inf.farlands.mixin.serialize;
 
 import com.inf.farlands.serialize.ChunkReadiness;
+import com.inf.farlands.serialize.PendingFluidPostProcess;
 import com.inf.farlands.serialize.SectionSerializer;
 import com.inf.farlands.util.window.WindowedChunk;
 
 import java.util.Map;
 
+import it.unimi.dsi.fastutil.shorts.ShortList;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.chunk.ProtoChunk;
 import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.material.FluidState;
 
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
@@ -118,5 +127,50 @@ public abstract class LevelChunkMixin {
      */
     @Redirect(method = "postProcessGeneration(Lnet/minecraft/server/level/ServerLevel;)V", at = @At(value = "INVOKE", target = "Ljava/util/Map;clear()V"))
     private void farlands$keepUnreadyPending(Map<BlockPos, CompoundTag> pending) {
+    }
+
+    /**
+     * 生成期流体的结算。
+     *
+     * <p>
+     * 下面那个原版循环只读 postProcessing 表，而本 port 的 chunk 从存在流程起就是 LevelChunk，生成期的
+     * 记账落在 ChunkAccess 的覆写里，这张数组在生成路径上恒为空，于是循环一项都跑不到：含水层与地表规则
+     * 写下的流体写完就再也不会被 tick，边界的水因此不向相邻空腔铺开。
+     *
+     * <p>
+     * 挂 HEAD 而不是 TAIL：原版顺序就是流体循环先于待建方块实体的晋升，HEAD 与它同位。此刻本 chunk 与它
+     * 3x3 邻居的 FULL future 都已完成，流体规则的邻居取数不会进阻塞分支。
+     *
+     * <p>
+     * 写入仍过 Level 的门：已移出窗口的段、未到终态的段、读回在途的段都会被拒，那几格保持生成时的原样。
+     */
+    @Inject(method = "postProcessGeneration(Lnet/minecraft/server/level/ServerLevel;)V", at = @At("HEAD"))
+    private void farlands$settleGeneratedFluid(ServerLevel level, CallbackInfo ci) {
+        LevelChunk self = (LevelChunk) (Object) this;
+        Map<Integer, ShortList> pending = ((PendingFluidPostProcess) this).takePendingFluidPost();
+        if (pending.isEmpty()) {
+            return;
+        }
+        ChunkPos chunkPos = self.getPos();
+        for (Map.Entry<Integer, ShortList> entry : pending.entrySet()) {
+            int sectionY = entry.getKey();
+            for (short packed : entry.getValue()) {
+                BlockPos pos = ProtoChunk.unpackOffsetCoordinates(packed, sectionY, chunkPos);
+                BlockState state = self.getBlockState(pos);
+                FluidState fluid = state.getFluidState();
+                if (!fluid.isEmpty()) {
+                    fluid.tick(level, pos, state);
+                }
+
+                if (state.getBlock() instanceof LiquidBlock) {
+                    state.tick(level, pos, level.getRandom());
+                } else {
+                    BlockState next = Block.updateFromNeighbourShapes(state, level, pos);
+                    if (next != state) {
+                        level.setBlock(pos, next, 276);
+                    }
+                }
+            }
+        }
     }
 }

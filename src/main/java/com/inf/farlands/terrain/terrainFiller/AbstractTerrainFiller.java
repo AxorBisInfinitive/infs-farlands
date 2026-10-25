@@ -17,7 +17,6 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.LevelChunkSection;
-import net.minecraft.world.level.chunk.ProtoChunk;
 import net.minecraft.world.level.levelgen.Aquifer;
 import net.minecraft.world.level.levelgen.Beardifier;
 import net.minecraft.world.level.levelgen.Heightmap;
@@ -242,9 +241,10 @@ public abstract class AbstractTerrainFiller implements TerrainFiller {
                             hmSurface.update(rx, blockY, rz, bs);
                             if (aquifer.shouldScheduleFluidUpdate() && !bs.getFluidState().isEmpty()) {
                                 mpos.set(blockX, blockY, blockZ);
-                                if (chunk instanceof ProtoChunk) {
-                                    chunk.markPosForPostprocessing(mpos);
-                                }
+                                // 流体写下去之后还要在 chunk 升到 ticking 时结算一次，否则含水层边界的水不向
+                                // 相邻空腔铺开。vanilla 记在 ProtoChunk 的 postProcessing 上，而本 port 的 chunk
+                                // 从存在流程起就是 LevelChunk，记账落在 ChunkAccess 的覆写里。
+                                chunk.markPosForPostprocessing(mpos);
                             }
                         }
                     }

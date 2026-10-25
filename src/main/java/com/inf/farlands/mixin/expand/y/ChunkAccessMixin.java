@@ -4,13 +4,16 @@ import com.inf.farlands.light.FarLandsLightEngine;
 import com.inf.farlands.serialize.CounterIdentities;
 import com.inf.farlands.serialize.CounterIdentity;
 import com.inf.farlands.serialize.PendingBlockEntities;
+import com.inf.farlands.serialize.PendingFluidPostProcess;
 import com.inf.farlands.serialize.SectionStage;
 import com.inf.farlands.terrain.CarvingMaskStorage;
 import com.inf.farlands.terrain.ChunkBeardifier;
 import com.inf.farlands.util.window.EntitySectionWindow;
 import com.inf.farlands.util.window.WindowedChunk;
+import com.inf.farlands.util.world.WorldBounds;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -22,6 +25,8 @@ import it.unimi.dsi.fastutil.ints.IntIterator;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import it.unimi.dsi.fastutil.ints.IntRBTreeSet;
 import it.unimi.dsi.fastutil.ints.IntSet;
+import it.unimi.dsi.fastutil.shorts.ShortArrayList;
+import it.unimi.dsi.fastutil.shorts.ShortList;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
@@ -64,7 +69,8 @@ import org.slf4j.Logger;
 
 @Mixin(ChunkAccess.class)
 public abstract class ChunkAccessMixin
-        implements WindowedChunk, CarvingMaskStorage, ChunkBeardifier, PendingBlockEntities, CounterIdentity {
+        implements WindowedChunk, CarvingMaskStorage, ChunkBeardifier, PendingBlockEntities, CounterIdentity,
+        PendingFluidPostProcess {
 
     @Unique
     private final Map<Integer, LevelChunkSection> allSections = new ConcurrentHashMap<>();
@@ -106,6 +112,14 @@ public abstract class ChunkAccessMixin
      */
     @Unique
     private CarvingMask farlandsCarvingMask;
+
+    /**
+     * 生成期待结算的流体位置，按绝对 sectionY 分组，值是该段内的打包偏移。懒建，见 farlands$fluidPostTable。
+     *
+     * <p>volatile：生成池线程写，服务端主线程在 postProcessGeneration 里换出。
+     */
+    @Unique
+    private volatile Map<Integer, ShortList> farlands$fluidPostProcess;
 
     @Override
     public CarvingMask getCarvingMask() {
@@ -557,9 +571,79 @@ public abstract class ChunkAccessMixin
         }
     }
 
+    /**
+     * 记一笔「这一格写完之后要结算流体」。
+     *
+     * <p>
+     * vanilla 在 ProtoChunk 上记进 postProcessing 数组，而本 port 的 chunk 从存在流程起就是 LevelChunk，
+     * 且那个数组的下标是窗口相对索引，服务端 chunk 构造时窗口只有一段，任何窗口外的段都会越界。所以这里
+     * 按绝对 sectionY 另记一张表，由 LevelChunk.postProcessGeneration 的 HEAD 取走。
+     *
+     * <p>
+     * 段号先过可玩段界：表里的段号解包时左移四位，只有落在可玩段内的才保证不越过 int。
+     */
     @Overwrite
     public void markPosForPostprocessing(BlockPos pos) {
-        // LevelChunk 不支持后处理；静默忽略。
+        int sectionY = pos.getY() >> 4;
+        if (!WorldBounds.inSection(sectionY)) {
+            return;
+        }
+        short packed = ProtoChunk.packOffsetCoordinates(pos);
+        this.farlands$fluidPostTable().compute(sectionY, (key, list) -> {
+            ShortList target = list == null ? new ShortArrayList() : list;
+            target.add(packed);
+            return target;
+        });
+    }
+
+    /**
+     * 待办表的懒建入口。
+     *
+     * <p>
+     * 不用字段初始化器：本类没有显式构造器，@Unique 实例字段的初始化器不保证执行，读到的会是 null。
+     *
+     * <p>
+     * 同一个 chunk 的表只有一个写者，即持有 TERRAIN 认领的那个生成任务；这里仍用双重检查加 ConcurrentHashMap
+     * 的逐键 compute，因为结算在服务端主线程、记录在生成池线程，两侧都可能先到。
+     */
+    @Unique
+    private Map<Integer, ShortList> farlands$fluidPostTable() {
+        Map<Integer, ShortList> table = this.farlands$fluidPostProcess;
+        if (table != null) {
+            return table;
+        }
+        synchronized (this) {
+            table = this.farlands$fluidPostProcess;
+            if (table == null) {
+                table = new ConcurrentHashMap<>();
+                this.farlands$fluidPostProcess = table;
+            }
+            return table;
+        }
+    }
+
+    /**
+     * 换出全部待办并清表。
+     *
+     * <p>
+     * 逐键摘除而不是整体 clear：摘下来的列表此后不会再被写，因为记录侧要在空槽上建新列表；而迭代期间新
+     * 记进来的键会被漏掉，那与 vanilla 的语义一致，postProcessGeneration 一生只跑一次，晚于它的标记同样
+     * 无人消费。
+     */
+    @Override
+    public Map<Integer, ShortList> takePendingFluidPost() {
+        Map<Integer, ShortList> table = this.farlands$fluidPostProcess;
+        if (table == null || table.isEmpty()) {
+            return Map.of();
+        }
+        Map<Integer, ShortList> taken = new HashMap<>();
+        for (Integer sectionY : table.keySet()) {
+            ShortList list = table.remove(sectionY);
+            if (list != null) {
+                taken.put(sectionY, list);
+            }
+        }
+        return taken;
     }
 
     @Overwrite
