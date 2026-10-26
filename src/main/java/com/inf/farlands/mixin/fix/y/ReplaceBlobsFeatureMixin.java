@@ -48,14 +48,18 @@ public abstract class ReplaceBlobsFeatureMixin {
      * 向下找目标方块，最多往下 {@link FarlandsConfig#maxCapIter} 格。
      *
      * <p>
-     * 地板取 {@code max(维度下界 + 1, 起点 - maxCapIter)}。减法走 long，起点在 int 下界附近时不回绕；
-     * 结果不可能超过起点，所以落回 int 是安全的。
+     * 地板取 {@code clamp(起点 - maxCapIter, 可玩下界 + 1, 可玩上界)}。
+     *
+     * <p>
+     * 两侧都取可玩界。原版下界 -64 加一不能当夹取的一侧：负侧起点在它以下时，它反过来成了地板，循环第一轮
+     * 即假。上界夹住是因为起点逼近 int 上界时减法会越界。减法走 long，起点在 int 下界附近时不回绕；结果
+     * 不可能超过起点，所以落回 int 是安全的。
      */
     @Overwrite
     private static BlockPos findTarget(LevelAccessor level, BlockPos.MutableBlockPos cursor, Block target) {
-        long vanillaFloor = (long) level.getMinY() + 1L;
+        long playableFloor = (long) WorldBounds.MIN_PLAYABLE_BLOCK + 1L;
         long cappedFloor = (long) cursor.getY() - FarlandsConfig.maxCapIter;
-        int floor = (int) Math.max(vanillaFloor, cappedFloor);
+        int floor = (int) Math.min((long) WorldBounds.MAX_PLAYABLE_BLOCK, Math.max(playableFloor, cappedFloor));
         while (cursor.getY() > floor) {
             BlockState blockState = level.getBlockState(cursor);
             if (blockState.is(target)) {
