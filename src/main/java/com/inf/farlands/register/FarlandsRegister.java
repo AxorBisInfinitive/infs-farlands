@@ -32,6 +32,7 @@ import com.inf.farlands.terrain.system.terrain.noise.overworld.Oct.OctNoiseSyste
 import com.inf.farlands.terrain.system.terrain.noise.overworld.TheBeneath.TheBeneathNoiseSystem;
 import com.inf.farlands.terrain.system.terrain.noise.overworld.Vanilla.VanillaNoiseSystem;
 import com.inf.farlands.terrain.system.terrain.noise.overworld.Vanilla263.Vanilla263NoiseSystem;
+import com.inf.farlands.terrain.system.terrain.section.misc.Library.LibrarySectionSystem;
 import com.inf.farlands.terrain.system.terrain.section.misc.Void.VoidSectionSystem;
 
 public class FarlandsRegister {
@@ -78,11 +79,13 @@ public class FarlandsRegister {
         }
     }
 
-    /** 38 个内置系统按五族登记，id 与实现类的对应关系集中在此。 */
+    /** 39 个内置系统按五族登记，id 与实现类的对应关系集中在此。 */
     private static void registerSystems() {
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_VOID_NOISE_SYSTEM, VoidNoiseSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_VOID_SECTION_SYSTEM,
                 VoidSectionSystem.class);
+        SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_LIBRARY_SECTION_SYSTEM,
+                LibrarySectionSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_OVERWORLD_VANILLA_NOISE_SYSTEM,
                 VanillaNoiseSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_OVERWORLD_BETA_1_7_3_NOISE_SYSTEM,
