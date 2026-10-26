@@ -176,7 +176,9 @@ public final class SystemsData extends SavedData {
         private static <T> String text(String key, Dynamic<T> value) {
             return value.getOps().getStringValue(value.getValue()).getOrThrow(
                     error -> new IllegalStateException(
-                            "farlands: system arg " + key + " 需要字符串形式的浮点数，这个文件是旧格式: " + error));
+                            "farlands: system arg " + key
+                                    + " must be a string holding a float; the file is in the old numeric format: "
+                                    + error));
         }
 
         public static Arg ofBoolean(boolean value) {

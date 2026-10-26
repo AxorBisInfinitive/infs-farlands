@@ -7,6 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
@@ -21,7 +22,7 @@ import com.inf.farlands.terrain.registry.SystemsIO;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.toasts.SystemToast;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.resources.Identifier;
 
 /**
@@ -138,7 +139,8 @@ public final class CreatingWorldSystemsConfig {
     public static SystemsData buildSystemsData() {
         List<FamilyViolation> violations = violations();
         if (!violations.isEmpty()) {
-            throw new IllegalStateException("farlands: 系统参数不合规: " + message(violations).getString());
+            throw new IllegalStateException(
+                    "farlands: invalid params at world creation: " + describe(violations));
         }
         Map<Identifier, SystemsData.LevelSelection> levels = new LinkedHashMap<>();
         for (Identifier page : dimensions) {
@@ -182,21 +184,32 @@ public final class CreatingWorldSystemsConfig {
         return out;
     }
 
-    /** 把违规拼成一段可显示的文本，每条一行。每条自身已经是语言键渲染出来的。 */
-    public static Component message(List<FamilyViolation> violations) {
-        MutableComponent out = Component.empty();
-        boolean first = true;
+    /**
+     * 违规的定位串：维度 / 族 / 系统，接键名与理由标识。
+     *
+     * <p>
+     * 键名按 TreeSet 排序去重，同一份配置每次产出同一行。理由只取语言键、不取渲染文本：这条消息落在崩溃报告
+     * 与服务端日志里，不该带客户端语言。
+     */
+    private static String describe(List<FamilyViolation> violations) {
+        StringBuilder sb = new StringBuilder();
         for (FamilyViolation violation : violations) {
-            if (!first) {
-                out.append("\n");
+            if (sb.length() > 0) {
+                sb.append("; ");
             }
-            first = false;
-            out.append(violation.dimension().toString()).append(" / ")
-                    .append(violation.family().name()).append(" / ")
-                    .append(violation.system().toString()).append(": ")
-                    .append(violation.message());
+            Set<String> keys = new TreeSet<>(violation.keys());
+            sb.append(violation.dimension()).append(" / ").append(violation.family().name()).append(" / ")
+                    .append(violation.system()).append(": ")
+                    .append(keys.isEmpty() ? "-" : String.join(",", keys))
+                    .append(" [").append(reasonOf(violation.message())).append(']');
         }
-        return out;
+        return sb.toString();
+    }
+
+    /** 理由标识：translatable 取语言键名，其余取渲染文本。内置系统的检查与规则一律用 translatable。 */
+    private static String reasonOf(Component message) {
+        return message.getContents() instanceof TranslatableContents translatable ? translatable.getKey()
+                : message.getString();
     }
 
     /**

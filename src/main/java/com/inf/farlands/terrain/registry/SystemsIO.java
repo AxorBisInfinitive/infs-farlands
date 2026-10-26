@@ -6,6 +6,8 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.WeakHashMap;
 import java.util.function.Function;
 
@@ -24,6 +26,8 @@ import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.NbtOps;
 import net.minecraft.nbt.Tag;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
@@ -389,19 +393,41 @@ public final class SystemsIO {
         List<SystemParams.Violation> violations = SystemParams.declaredBy(classOf.apply(id))
                 .validate(selection.args());
         if (!violations.isEmpty()) {
-            throw new IllegalStateException("farlands: system " + id + " 参数不合规: " + describe(violations));
+            throw new IllegalStateException(
+                    "farlands: invalid params for system " + id + ": " + describe(violations));
         }
         return SystemArgs.of(selection.args());
     }
 
+    /**
+     * 违规的定位串：键名加理由标识。
+     *
+     * <p>
+     * 键名按 TreeSet 排序去重，同一份配置每次产出同一行，日志可 grep。理由只取语言键，不取
+     * {@code getArgs()}：参数里可能有 {@code Component}，渲染它们等于把客户端语言拉回服务端消息。
+     */
     private static String describe(List<SystemParams.Violation> violations) {
         StringBuilder sb = new StringBuilder();
         for (SystemParams.Violation violation : violations) {
             if (sb.length() > 0) {
                 sb.append("; ");
             }
-            sb.append(violation.message().getString());
+            Set<String> keys = new TreeSet<>(violation.keys());
+            sb.append(keys.isEmpty() ? "-" : String.join(",", keys));
+            sb.append(" [").append(reasonOf(violation.message())).append(']');
         }
         return sb.toString();
+    }
+
+    /**
+     * 理由标识：translatable 取语言键名，其余取渲染文本。
+     *
+     * <p>
+     * 本模组内置的检查与规则一律用 translatable，因此本条产出的消息恒为 ASCII；第三方用 literal 时原样带入
+     * 它自己的文本。
+     */
+    private static String reasonOf(Component message) {
+        return message.getContents() instanceof TranslatableContents translatable ? translatable.getKey()
+                : message.getString();
     }
 }
