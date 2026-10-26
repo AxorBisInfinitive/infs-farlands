@@ -1,8 +1,13 @@
 package com.inf.farlands.serialize;
 
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.concurrent.CompletableFuture;
+
+import com.mojang.datafixers.util.Pair;
 
 import net.minecraft.server.level.ChunkHolder;
+import net.minecraft.server.level.ChunkResult;
 import net.minecraft.server.level.GenerationChunkHolder;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
@@ -13,9 +18,10 @@ import net.minecraft.world.level.chunk.status.ChunkStatus;
 /**
  * FULL 的执行体与玩家写的段级门。
  *
- * <p>就绪的判据已收进调度器的第七行：本类不再判就绪，也不再观察登记表，只在第七行成立时被调用。
- * 单次完成以 {@link ChunkCounters#claimFull} 为令牌：{@code completeFuture} 对已完成的 future 再调会抛，
- * 那次领取把「补过」记在记账实例上，卸载随实例消亡。
+ * <p>就绪的判据在调度器第七行：本类不判就绪，只在第七行成立时被调用。补 FULL 的判据是 FULL 那一格
+ * future 的当前状态，不是「补过一次」：票级下降时 {@code failAndClearPendingFuturesBetween} 会把槽
+ * 清空，之后 {@code scheduleChunkGenerationTask} 会建一个新的待完成 future，一次性令牌在那之后就会
+ * 与读侧分叉。
  *
  * <p>玩家写的门是段级的：该段已到 LIGHTED 且不在读回。它不参与块级就绪，两件事不同面。
  */
@@ -69,10 +75,15 @@ public final class ChunkReadiness {
     }
 
     /**
-     * 补 FULL：只调反射。判据在调度器的第七行，令牌在记账实例上。
+     * 补 FULL：只调反射。判据是 FULL 那一格 future 的当前状态，可重入。
      *
-     * <p>先取 holder 再领令牌。反过来的话，holder 暂时取不到也照样把令牌吃掉了，该 chunk 这一代就再
-     * 没有补 FULL 的机会，而令牌只随卸载消亡。
+     * <p>
+     * 三态。槽为 null 或 future 未完成才补；future 已完成一律跳过。已完成而失败的那一态必须跳过：
+     * {@code completeFuture} 在它上面 {@code complete} 返回假、{@code isSuccess} 也为假，于是
+     * {@code Thread.yield} 重试，永不返回。
+     *
+     * <p>
+     * 先取 holder 再判：holder 暂时取不到时不写任何状态，该 chunk 这一代仍有下一次机会。
      */
     public static void completeFull(LevelChunk chunk) {
         if (!(chunk.getLevel() instanceof ServerLevel level)) {
@@ -82,14 +93,37 @@ public final class ChunkReadiness {
         if (holder == null) {
             return;
         }
-        if (!ChunkCounters.claimFull(chunk)) {
+        CompletableFuture<ChunkResult<ChunkAccess>> future = farlands$fullFuture(holder);
+        if (future != null && future.isDone()) {
+            if (future.getNow(GenerationChunkHolder.UNLOADED_CHUNK).isSuccess()) {
+                // 读数同步：这一代已经补过，账上的「补过」标记跟上。
+                ChunkCounters.claimFull(chunk);
+            }
             return;
         }
         try {
             M_COMPLETE_FUTURE.invoke(holder, ChunkStatus.FULL, chunk);
+        } catch (InvocationTargetException e) {
+            // 竞态只有一种形态：另一个完成者刚把它补成成功。复查状态，已落定就按成功返回。
+            CompletableFuture<ChunkResult<ChunkAccess>> again = farlands$fullFuture(holder);
+            if (again != null && again.isDone()) {
+                return;
+            }
+            throw new RuntimeException("farlands: failed to complete FULL for " + chunk.getPos(), e.getCause());
         } catch (Exception e) {
             throw new RuntimeException("farlands: failed to complete FULL for " + chunk.getPos(), e);
         }
+        ChunkCounters.claimFull(chunk);
+    }
+
+    /** FULL 那一格的 future，槽为空返回 null。 */
+    private static CompletableFuture<ChunkResult<ChunkAccess>> farlands$fullFuture(ChunkHolder holder) {
+        for (Pair<ChunkStatus, CompletableFuture<ChunkResult<ChunkAccess>>> pair : holder.getAllFutures()) {
+            if (pair.getFirst() == ChunkStatus.FULL) {
+                return pair.getSecond();
+            }
+        }
+        return null;
     }
 
     /** 关服入口置位，由 MinecraftServerMixin 在 stopServer 的 HEAD 调。 */

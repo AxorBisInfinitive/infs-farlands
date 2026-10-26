@@ -22,8 +22,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * {@code ServerChunkCache$MainThreadExecutor}，不是 {@code managedBlock} 的声明类
  * {@code BlockableEventLoop}。
  *
- * <p>这一处只写一个占位，不登记也不铺票：绝大多数 FULL 取数会立即返回，在这里做事等于给每一格都铺一张
- * 结构票。真正的登记、提交与铺票由 {@link Scheduler} 在等待被确认之后做。
+ * <p>这里做两件事。先按第七行的判据试一次就地补 FULL：已就绪时 future 当场落定，等待不会发生。再写一个
+ * 占位，不登记也不铺票：绝大多数 FULL 取数会立即返回，在这里铺票等于给每一格都铺一张结构票。真正的
+ * 登记、提交与铺票由 {@link Scheduler} 在等待被确认之后做。
  *
  * <p>只登记 FULL。其余状态各有自己的完成者，本类不替它们表态。
  */
@@ -38,6 +39,9 @@ public abstract class ChunkWaitMarkMixin {
     private void farlands$noteBlockingGet(int x, int z, ChunkStatus targetStatus, boolean loadOrGenerate,
             CallbackInfoReturnable<ChunkAccess> cir) {
         if (targetStatus == ChunkStatus.FULL) {
+            // 先就地补一次：已就绪时 future 在这一句之后就已落定，下面那次 waitForTasks 立刻返回，
+            // 不必等泵的确认门槛与派发。
+            Scheduler.completeIfReady(this.level, x, z);
             Scheduler.noteBlockingFullGet(this.level, x, z);
         }
     }

@@ -590,8 +590,7 @@ public final class Scheduler {
             boolean wrDone = ChunkCounters.isWindowReadDone(chunk);
             // 第七行：本候选范围内每段都已点亮，且窗口面读过盘。范围为空不算完成：那是「没有可做的
             // 段」，不是「做完了」。FULL 只对「有人等」的 chunk 承诺，所以这一行排在面与窗口之后。
-            if (wrDone && sections.length > 0
-                    && DependencyTable.pendingBelowIn(chunk, sections, SectionStage.LIGHTED) == 0) {
+            if (isReadyForFull(chunk, sections, wrDone)) {
                 ChunkReadiness.completeFull(chunk);
                 clearWaited(level, pos.x(), pos.z());
                 continue;
@@ -719,6 +718,53 @@ public final class Scheduler {
             sorted[n++] = sy;
         }
         return n == sorted.length ? sorted : Arrays.copyOf(sorted, n);
+    }
+
+    /**
+     * 第七行的判据：本候选范围内每段都已点亮，且窗口面读过盘。
+     *
+     * <p>
+     * 派发与等待点共用一份。两处各写一遍会让「有人等的那一格」与「派发认为该补的那一格」分叉，而分叉的
+     * 症状就是等的那一侧永远等不到。
+     */
+    public static boolean isReadyForFull(LevelChunk chunk) {
+        if (!(chunk.getLevel() instanceof ServerLevel level)) {
+            return false;
+        }
+        int[] sections = sectionsFor(level, chunk, null);
+        return isReadyForFull(chunk, sections, ChunkCounters.isWindowReadDone(chunk));
+    }
+
+    /** 同一判据的复用形：段集合与读回标记由调用方给出，省掉一次收集。 */
+    static boolean isReadyForFull(LevelChunk chunk, int[] sections, boolean windowReadDone) {
+        return windowReadDone && sections.length > 0
+                && DependencyTable.pendingBelowIn(chunk, sections, SectionStage.LIGHTED) == 0;
+    }
+
+    /**
+     * 有人正要阻塞在 FULL 取数上：当场补一次。
+     *
+     * <p>
+     * 不让它走泵：泵对被等待的格有确认门槛与一次派发，那一段延迟在实机上就是一次卡顿。
+     *
+     * <p>
+     * 判据与派发一致，两条支。界内用第七行，所以不会把未就绪的段放出去。界外不用第七行：界外 chunk 的段
+     * 永不变点亮，第七行对它恒假，而它的 FULL 只有派发的界外支会补；等待点不复制那一条，它的 future 一旦
+     * 被票级变化重建，读的人就永远等。壳不在时两支柱都做不了，那一格只能继续等。
+     */
+    public static void completeIfReady(ServerLevel level, int chunkX, int chunkZ) {
+        LevelChunk chunk = SectionLifecycle.latestChunk(level, chunkX, chunkZ);
+        if (chunk == null) {
+            return;
+        }
+        if (!WorldBounds.inChunkRange(chunkX, chunkZ)) {
+            ChunkReadiness.completeFull(chunk);
+            return;
+        }
+        if (!isReadyForFull(chunk)) {
+            return;
+        }
+        ChunkReadiness.completeFull(chunk);
     }
 
     /**

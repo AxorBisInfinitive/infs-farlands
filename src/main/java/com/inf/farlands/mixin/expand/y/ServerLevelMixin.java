@@ -1,6 +1,8 @@
 package com.inf.farlands.mixin.expand.y;
 
+import com.inf.farlands.serialize.ChunkCounters;
 import com.inf.farlands.util.window.WindowedChunk;
+import com.inf.farlands.util.world.WorldBounds;
 
 import it.unimi.dsi.fastutil.ints.IntArraySet;
 import it.unimi.dsi.fastutil.ints.IntSet;
@@ -38,8 +40,19 @@ public abstract class ServerLevelMixin {
     @SuppressWarnings("resource")
     @Overwrite
     public void tickChunk(LevelChunk chunk, int randomTickSpeed) {
-        Level level = (Level) (Object) this;
         ChunkPos chunkpos = chunk.getPos();
+        // 界外 chunk 不刻。票位表不区分可玩性，界外 chunk 会因玩家相邻的票进 tick 列表，而它没有可玩方块；
+        // 降水那一段还会对它自己读高度图，那条读等的是只有界外支才会补的 FULL。
+        if (!WorldBounds.inChunkRange(chunkpos.x(), chunkpos.z())) {
+            return;
+        }
+        // 数据未就绪不刻。tick 资格看的是 tickingChunkFuture，它不判数据；而本方法里降水那一段不按玩家
+        // 窗口筛段，走的是 getHeightmapPos 到 getChunk(FULL)，等一个只有调度器才会补的 future，等的又是
+        // 自己。补 FULL 判据换成 future 状态之后仍有一类补不上：数据从未就绪，第七行不成立，那时只能不刻。
+        if (!ChunkCounters.isFullDone(chunk)) {
+            return;
+        }
+        Level level = (Level) (Object) this;
         int i = chunkpos.getMinBlockX();
         int j = chunkpos.getMinBlockZ();
         ProfilerFiller profilerfiller = Profiler.get();

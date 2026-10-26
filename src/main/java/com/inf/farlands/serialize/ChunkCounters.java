@@ -95,7 +95,13 @@ public final class ChunkCounters {
         }
     }
 
-    /** FULL 补发令牌：取到才算本次补。身份为 0 返回假。 */
+    /**
+     * 记一笔「FULL 补过」，首次调用返真。身份为 0 返回假。
+     *
+     * <p>
+     * 它不是补 FULL 的前置门：判据在 {@link ChunkReadiness#completeFull} 里，看的是 FULL 那一格 future
+     * 的当前状态。这里只维护读数，供加载页的网格与之后的统计用。
+     */
     public static boolean claimFull(LevelChunk chunk) {
         long identity = identityOf(chunk);
         if (identity == 0L) {
