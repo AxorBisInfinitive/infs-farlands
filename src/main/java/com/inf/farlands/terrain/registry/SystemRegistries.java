@@ -12,7 +12,7 @@ import com.inf.farlands.terrain.TerrainSystem;
 import net.minecraft.resources.Identifier;
 
 /**
- * 系统注册表的静态门面：五张类型化表、31 个内置 id 常量、五个登记入口、五个取用入口与元信息。
+ * 系统注册表的静态门面：五张类型化表、38 个内置 id 常量、五个登记入口、五个取用入口与元信息。
  *
  * <p>
  * 门面不读配置也不引 level：维度到 id 的选择由调用点给出，注册表层因此不依赖任何上层。
@@ -34,6 +34,7 @@ public final class SystemRegistries {
     // overworld。
 
     public static final SystemId TERRAIN_MISC_VOID_NOISE_SYSTEM = id("misc_void_noise_system");
+    public static final SystemId TERRAIN_MISC_VOID_SECTION_SYSTEM = id("misc_void_section_system");
     public static final SystemId TERRAIN_OVERWORLD_VANILLA_NOISE_SYSTEM = id("overworld_vanilla_noise_system");
     public static final SystemId TERRAIN_OVERWORLD_BETA_1_7_3_NOISE_SYSTEM = id(
             "overworld_beta_1_7_3_noise_system");

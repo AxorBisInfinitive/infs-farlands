@@ -5,6 +5,8 @@ import com.inf.farlands.terrain.BlockSystem;
 import com.inf.farlands.terrain.ChunkBeardifier;
 import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.NoiseSystem;
+import com.inf.farlands.terrain.SectionContext;
+import com.inf.farlands.terrain.SectionSystem;
 import com.inf.farlands.terrain.TerrainSystem;
 
 import java.util.Objects;
@@ -114,6 +116,11 @@ public abstract class AbstractTerrainFiller implements TerrainFiller {
             fillByBlocks(chunk, minSectionY, maxSectionY, block);
             return;
         }
+        // 逐段系统同理，段内的方块由系统自己组织。
+        if (sys instanceof SectionSystem sectionSystem) {
+            fillBySections(level, chunk, minSectionY, maxSectionY, sectionSystem);
+            return;
+        }
         NoiseGeneratorSettings settings = gen.generatorSettings().value();
         Aquifer.FluidPicker defaultPicker = createFluidPicker(settings);
         RandomState randomState = level.getChunkSource().randomState();
@@ -198,6 +205,55 @@ public abstract class AbstractTerrainFiller implements TerrainFiller {
                             continue;
                         }
                         section.setBlockState(rx, ry, rz, bs, false);
+                        hmOcean.update(rx, blockY, rz, bs);
+                        hmSurface.update(rx, blockY, rz, bs);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 逐段系统的直写路径。
+     *
+     * <p>
+     * 与 {@link #fillByBlocks} 的差别只有两处：段内的方块由系统自己组织，填充器只给段对象与绝对基址；写完之后
+     * 填充器扫该段一遍，把非空气块喂进两张高度图。
+     *
+     * <p>
+     * 只对非空气块调 {@code update}：送进来的段一定是空的。fsa 只写 {@code stage >= LIGHTED} 的段，读回的段
+     * 因此早已过 TERRAIN，会被 {@code collectSegments} 的 {@code isOrAfter(TERRAIN)} 过滤掉，不会进 fill。
+     * 若把 4096 格连同空气一起传进 {@code update}，会在 {@code firstAvailable - 1} 那一格反复触发向下扫描。
+     *
+     * <p>
+     * 调试空地形整段不调系统：系统直接写段，填充器没有单格可跳的落点。
+     */
+    private void fillBySections(ServerLevel level, ChunkAccess chunk, int minSectionY, int maxSectionY,
+            SectionSystem sys) {
+        ChunkPos cpos = chunk.getPos();
+        if (SharedConstants.debugVoidTerrain(cpos)) {
+            return;
+        }
+        Heightmap hmOcean = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.OCEAN_FLOOR_WG);
+        Heightmap hmSurface = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
+        int baseX = cpos.getMinBlockX();
+        int baseZ = cpos.getMinBlockZ();
+        for (int sy = minSectionY; sy <= maxSectionY; sy++) {
+            LevelChunkSection section = chunk.getSection(chunk.getSectionIndexFromSectionY(sy));
+            if (section == null) {
+                continue;
+            }
+            // sy 由调用方按可玩段界过滤，左移四位不会越过 int。
+            int baseY = sy * 16;
+            sys.fillSection(new SectionContext(level, chunk, section, sy, baseX, baseY, baseZ));
+            for (int ry = 0; ry < 16; ry++) {
+                int blockY = baseY + ry;
+                for (int rx = 0; rx < 16; rx++) {
+                    for (int rz = 0; rz < 16; rz++) {
+                        BlockState bs = section.getBlockState(rx, ry, rz);
+                        if (bs == Blocks.AIR.defaultBlockState()) {
+                            continue;
+                        }
                         hmOcean.update(rx, blockY, rz, bs);
                         hmSurface.update(rx, blockY, rz, bs);
                     }

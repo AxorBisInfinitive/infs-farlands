@@ -10,13 +10,14 @@ import net.minecraft.world.level.levelgen.NoiseRouter;
 import net.minecraft.world.level.levelgen.PositionalRandomFactory;
 
 /**
- * 地形系统基接口，两类互斥的填充范式共享的部分，生命周期回调加流体与 aquifer 提供。
+ * 地形系统基接口，三类互斥的填充范式共享的部分，生命周期回调加流体与 aquifer 提供。
  *
- * 两个互斥子接口，一个实现类只实现其一，分派点 instanceof BlockSystem 优先：
- * NoiseSystem 走密度链，BlockSystem 走逐块几何。
+ * 三个互斥子接口，一个实现类只实现其一，分派顺序 instanceof BlockSystem、再 instanceof SectionSystem、
+ * 最后走密度链：NoiseSystem 走密度链，BlockSystem 逐块几何，SectionSystem 逐段组织。
  *
  * 线程模型：createFluidPicker 与 createAquifer 在
- * NoiseChunk 构造时调用，跑 genPool 或主线程。onChunkFillStart 当前无调用方，默认空实现。
+ * NoiseChunk 构造时调用，跑 genPool 或主线程。后两种范式不建 NoiseChunk，这两个方法对它们没有调用点。
+ * onChunkFillStart 当前无调用方，默认空实现。
  */
 public interface TerrainSystem {
 
