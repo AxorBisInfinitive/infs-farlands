@@ -7,6 +7,8 @@ import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.NoiseSystem;
 import com.inf.farlands.terrain.TerrainSystem;
 
+import java.util.Objects;
+
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.QuartPos;
@@ -30,13 +32,15 @@ import net.minecraft.world.level.levelgen.blending.Blender;
 /**
  * 维度地形填充器抽象基类，按维度填充一段 section。
  *
- * 与原版 NoiseBasedChunkGenerator.doFill 的差异：
+ * <p>两条路径，由 {@link BlockSystem} 分派。逐块几何系统走 {@code fillByBlocks}：不建
+ * {@code NoiseChunk}，逐段逐格直写，密度链与插值器一概不参与。密度链系统走
+ * {@code doFillRangeWithNoiseChunk}，与 {@code NoiseBasedChunkGenerator.doFill} 的差异是：
  *   Y 循环裁剪到 [minSection, maxSection]，即按需生成的窗口段，不是全量 cellCountY
  *   每个 X cell 处理完后 swapSlices，全部结束后 stopInterpolation。vanilla 链带 Interpolated
  *   标记的函数依赖 slice 双缓冲推进，缺失会让第 2 个 X cell 起 X 方向错位。纯函数系统不用
  *   slice，无影响。
  *
- * 并发约束：fillCellColumn 更新 chunk 共享的高度图，BitStorage 非线程安全，同 chunk 的 fill
+ * 并发约束：两条路径都更新 chunk 共享的高度图，BitStorage 非线程安全，同 chunk 的 fill
  * 必须串行，由调用方保证，不同 chunk 并行。
  *
  * <p>维度系统与 generatorSettings 都从 fill 的 level 形参现取：填充器实例挂在 level 上，
@@ -94,7 +98,7 @@ public abstract class AbstractTerrainFiller implements TerrainFiller {
         }
     }
 
-    /** 填一段 section 的地形，1 段对应 1 个 NoiseChunk。调用方保证同 chunk 串行。 */
+    /** 填一段 section 的地形。密度链路径下 1 段对应 1 个 NoiseChunk；逐块几何系统不建。调用方保证同 chunk 串行。 */
     @Override
     public void fill(ServerLevel level, ChunkAccess chunk, int minSectionY, int maxSectionY) {
         // 非噪声生成器的维度不归本管线。维度泛化之后任何数据包或模组都能加维度，生成器类型不再只有
@@ -105,6 +109,11 @@ public abstract class AbstractTerrainFiller implements TerrainFiller {
             return;
         }
         TerrainSystem sys = ((LevelSystems) level).terrainSystem();
+        // 逐块几何系统走直写路径：不建 NoiseChunk，不装密度链与插值器，也不设任何侧信道。
+        if (sys instanceof BlockSystem block) {
+            fillByBlocks(chunk, minSectionY, maxSectionY, block);
+            return;
+        }
         NoiseGeneratorSettings settings = gen.generatorSettings().value();
         Aquifer.FluidPicker defaultPicker = createFluidPicker(settings);
         RandomState randomState = level.getChunkSource().randomState();
@@ -146,6 +155,54 @@ public abstract class AbstractTerrainFiller implements TerrainFiller {
         } finally {
             clearContext();
             TerrainSystemContext.clear();
+        }
+    }
+
+    /**
+     * 逐块几何系统的直写路径。
+     *
+     * <p>
+     * 与密度链路径的差异逐条：不建 {@code NoiseChunk}，不装 {@code TerrainSystemContext} 与
+     * {@code setContext} 的侧信道，不取 {@code generatorSettings} 与 {@code RandomState}，也不读
+     * Beardifier。范围取精确的 {@code [minSectionY * 16, maxSectionY * 16 + 15]}，不写 cell 对齐路径会多写
+     * 的那几个顶端格；那几格由相邻段的精确范围覆盖，前提是同一批段是连续区间。
+     *
+     * <p>
+     * 不做流体结算。密度链路径只在含水层要求时记待结算位置，而逐块几何系统不建含水层。
+     *
+     * <p>
+     * {@code fillBlock} 必须每格给方块，返回 null 在这里直接抛，不退化成像以前那样读成空气。
+     */
+    private void fillByBlocks(ChunkAccess chunk, int minSectionY, int maxSectionY, BlockSystem sys) {
+        Heightmap hmOcean = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.OCEAN_FLOOR_WG);
+        Heightmap hmSurface = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
+        ChunkPos cpos = chunk.getPos();
+        int baseX = cpos.getMinBlockX();
+        int baseZ = cpos.getMinBlockZ();
+        boolean voidTerrain = SharedConstants.debugVoidTerrain(cpos);
+        for (int sy = minSectionY; sy <= maxSectionY; sy++) {
+            LevelChunkSection section = chunk.getSection(chunk.getSectionIndexFromSectionY(sy));
+            if (section == null) {
+                continue;
+            }
+            // sy 由调用方按可玩段界过滤，左移四位不会越过 int。
+            int sectionBaseY = sy * 16;
+            for (int ry = 0; ry < 16; ry++) {
+                int blockY = sectionBaseY + ry;
+                for (int rx = 0; rx < 16; rx++) {
+                    int blockX = baseX + rx;
+                    for (int rz = 0; rz < 16; rz++) {
+                        BlockState bs = Objects.requireNonNull(sys.fillBlock(blockX, blockY, baseZ + rz),
+                                "farlands: BlockSystem.fillBlock returned null");
+                        if (bs == Blocks.AIR.defaultBlockState() || voidTerrain) {
+                            continue;
+                        }
+                        section.setBlockState(rx, ry, rz, bs, false);
+                        hmOcean.update(rx, blockY, rz, bs);
+                        hmSurface.update(rx, blockY, rz, bs);
+                    }
+                }
+            }
         }
     }
 
@@ -226,14 +283,11 @@ public abstract class AbstractTerrainFiller implements TerrainFiller {
                         int blockZ = baseZ + cz * cw + kz;
                         int rz = blockZ & 15;
                         noisechunk.updateForZ(blockZ, (double) kz / (double) cw);
-                        // 块级填充优先，否则走密度链。
-                        BlockState bs = sys instanceof BlockSystem b ? b.fillBlock(blockX, blockY, blockZ) : null;
+                        // 走到这里的一定是密度链系统：逐块几何系统在 fill 里已分支出去。
+                        BlockState bs = inv.farlands$getInterpolatedState();
                         if (bs == null) {
-                            bs = inv.farlands$getInterpolatedState();
-                            if (bs == null) {
-                                // 落点按系统口径取，不直读维度设置：系统换到别的维度时要自带方块。
-                                bs = sys.defaultBlock(settings);
-                            }
+                            // 落点按系统口径取，不直读维度设置：系统换到别的维度时要自带方块。
+                            bs = sys.defaultBlock(settings);
                         }
                         if (bs != Blocks.AIR.defaultBlockState() && !SharedConstants.debugVoidTerrain(cpos)) {
                             section.setBlockState(rx, ry, rz, bs, false);

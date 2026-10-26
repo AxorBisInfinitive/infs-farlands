@@ -1,42 +1,20 @@
 package com.inf.farlands.terrain;
 
-import net.minecraft.world.level.ChunkPos;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.levelgen.Aquifer;
-import net.minecraft.world.level.levelgen.DensityFunction;
-import net.minecraft.world.level.levelgen.NoiseChunk;
-import net.minecraft.world.level.levelgen.NoiseRouter;
-import net.minecraft.world.level.levelgen.PositionalRandomFactory;
 
 /**
- * 逐块几何地形系统，fillBlock 每格直接判定，绕过密度链。
+ * 逐块几何地形系统，fillBlock 每格直接判定，不参与密度链。
  *
- * fillBlock 恒非 null 时密度链不执行，因此本类没有 createFinalDensity，
- * NoiseChunk 构造用的 finalDensity 由调用方给占位。
+ * <p>
+ * 填充器为它走直写路径：不建 {@code NoiseChunk}，不装载密度链与插值器，逐段逐格写 section。本类因此没有
+ * {@code createFinalDensity}，也不需要 aquifer 的替身。
+ *
+ * <p>
+ * {@link #fillBlock} 必须对每一格都给出方块，返回 null 是契约违反。今天的行为不是「交回密度链」：直写路径
+ * 不判密度，填充器在写入前用 {@code requireNonNull} 把违约当场炸出来，而不是把它当空气。
  */
 public interface BlockSystem extends TerrainSystem {
 
-    /** 块级判定，返回 AIR 表示空气，返回方块表示实。 */
+    /** 块级判定，返回 AIR 表示空气，返回方块表示实。不得返回 null。 */
     BlockState fillBlock(int x, int y, int z);
-
-    /**
-     * 空气 aquifer，覆盖基接口的 null 默认。fillBlock 短路下密度链不参与，
-     * vanilla aquifer 构造只浪费，恒 AIR 且非 null 可让 MaterialRuleList 短路。
-     */
-    @Override
-    default Aquifer createAquifer(NoiseChunk chunk, ChunkPos pos, NoiseRouter router,
-            PositionalRandomFactory random, int minY, int height, Aquifer.FluidPicker picker) {
-        return new Aquifer() {
-            @Override
-            public BlockState computeSubstance(DensityFunction.FunctionContext context, double substance) {
-                return Blocks.AIR.defaultBlockState();
-            }
-
-            @Override
-            public boolean shouldScheduleFluidUpdate() {
-                return false;
-            }
-        };
-    }
 }
