@@ -60,6 +60,8 @@
     "expand.y.ServerGamePacketListenerImplMixin",
     "expand.y.ServerLevelMixin",
     "expand.y.ServerLevelEntityTickMixin",
+    "expand.y.border.PlayerMixin",
+    "expand.y.border.PlayerBoundaryCollisionMixin",
     "noise.NoiseChunkInvoker",
     "noise.NoiseChunkMixin",
     "noise.HeightmapInvoker",
