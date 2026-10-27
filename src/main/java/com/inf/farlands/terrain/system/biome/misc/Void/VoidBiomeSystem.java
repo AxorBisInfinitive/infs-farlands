@@ -46,4 +46,16 @@ public final class VoidBiomeSystem implements BiomeSystem {
             section.fillBiomesFromNoise(resolver, empty, qx, QuartPos.fromSection(sy), qz);
         }
     }
+
+    /** 恒为 the_void，与 fillBiomes 填进网格的是同一份，所以两条分支不会分叉。 */
+    @Override
+    public Holder<Biome> computeBiome(ServerLevel level, int quartX, int quartY, int quartZ) {
+        return level.registryAccess().lookupOrThrow(Registries.BIOME).getOrThrow(Biomes.THE_VOID);
+    }
+
+    /** 没有交界可言，取世界种子只为让缩放种子是确定的。 */
+    @Override
+    public long biomeSeed(ServerLevel level) {
+        return level.getSeed();
+    }
 }

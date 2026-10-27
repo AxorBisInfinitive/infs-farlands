@@ -1,5 +1,6 @@
 package com.inf.farlands.terrain.system.surface.overworld.Bin;
 
+import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.SurfaceSystem;
 import com.inf.farlands.terrain.registry.SystemArgs;
 import com.inf.farlands.terrain.registry.SystemDefaultParams;
@@ -8,18 +9,14 @@ import com.inf.farlands.terrain.registry.SystemParams;
 import com.inf.farlands.terrain.system.common.overworld.Vanilla.VanillaFamilyRandom;
 import com.inf.farlands.terrain.system.common.overworld.Vanilla.VanillaFamilySeed;
 import com.inf.farlands.terrain.terrainFiller.AbstractTerrainFiller;
-import com.inf.farlands.util.window.WindowedChunk;
 
-import net.minecraft.core.Holder;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.data.worldgen.SurfaceRuleData;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.BiomeManager;
-import net.minecraft.world.level.biome.Biomes;
 import net.minecraft.world.level.chunk.ChunkAccess;
-import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseChunk;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
@@ -34,9 +31,8 @@ import net.minecraft.world.level.levelgen.WorldGenerationContext;
  * <p>
  * 依赖四样东西。vanilla SurfaceSystem，其全高适配由 SurfaceSystemMixin 的 @Overwrite 提供，列扫描下界到
  * maxCapIter；维度全高 NoiseChunk，其 preliminarySurfaceLevel 在极端 Y 列约等于 vanilla 地表，
- * abovePreliminarySurface 恒 true 自动放行；自定义 BiomeManager 的 source 直查本 port section 的
- * 4×4×4 biome 网格，绕开 @Overwrite getNoiseBiome 的维度 clamp，极端 Y 才正确；
- * BiomeManager.obfuscateSeed(本系统 seed)，复刻 vanilla WorldGenRegion fiddle 语义。
+ * abovePreliminarySurface 恒 true 自动放行；群系取数走 biome 族交付的 BiomeManager，界内读它填的
+ * 4×4×4 网格、界外与缺段由它自己算，缩放种子也归它，两个阶段因此对同一条交界答同一个群系。
  *
  * <p>
  * surfaceSystem 与 buildSurface 的首参必须来自同一份 RandomState：SurfaceSystem 的噪声在构造时就从它取定，
@@ -92,21 +88,11 @@ public final class BinSurfaceSystem implements SurfaceSystem {
         NoiseChunk nc = chunk.getOrCreateNoiseChunk(
                 p -> AbstractTerrainFiller.createDimensionNoiseChunk(level, chunk));
         Registry<Biome> biomes = level.registryAccess().lookupOrThrow(Registries.BIOME);
-        // 自定义 source 直查 section 的 4×4×4 biome 网格，绕开 clamp；seed 用
-        // obfuscateSeed(本系统 seed) 复刻 vanilla WorldGenRegion fiddle 语义
-        BiomeManager biomeManager = new BiomeManager(
-                (qx, qy, qz) -> biomeAt(chunk, biomes, qx, qy, qz),
-                BiomeManager.obfuscateSeed(this.seed));
+        // 群系取数整体交给 biome 族：界内读它填的网格，界外与缺段由它自己算，缩放种子也归它。
+        BiomeManager biomeManager = ((LevelSystems) level).biomeSystem().biomeManager(level, chunk);
         WorldGenerationContext context = new WorldGenerationContext(gen, chunk);
         random.surfaceSystem().buildSurface(
                 random, biomeManager, biomes, settings.useLegacyRandomSource(),
                 context, chunk, nc, this.surfaceRule(settings));
-    }
-
-    /** 直查 section biome 网格，quart 局部索引取 &3；section 不存在时 the_void 兜底。 */
-    private static Holder<Biome> biomeAt(ChunkAccess chunk, Registry<Biome> biomes, int qx, int qy, int qz) {
-        LevelChunkSection s = ((WindowedChunk) chunk).windowedAllSections().get(qy >> 2);
-        return s == null ? biomes.getOrThrow(Biomes.THE_VOID)
-                : s.getNoiseBiome(qx & 3, qy & 3, qz & 3);
     }
 }

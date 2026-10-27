@@ -1,5 +1,6 @@
 package com.inf.farlands.terrain.system.carver.overworld.Vanilla;
 
+import com.inf.farlands.terrain.BiomeSystem;
 import com.inf.farlands.terrain.CarverSystem;
 import com.inf.farlands.terrain.CarvingMaskStorage;
 import com.inf.farlands.terrain.LevelSystems;
@@ -19,6 +20,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.BiomeGenerationSettings;
+import net.minecraft.world.level.biome.BiomeManager;
 import net.minecraft.world.level.chunk.CarvingMask;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.levelgen.Aquifer;
@@ -89,11 +91,11 @@ public final class VanillaCarverSystem implements CarverSystem {
                 nc, random, surfaceRule);
         CarvingMask carvingMask = ((CarvingMaskStorage) chunk).getOrCreateCarvingMask();
 
-        // biomeAccessor 直接查 biomeSource，供 carveBlock 的表面 dirt 换草皮 topMaterial 用，
-        // 不依赖 chunk section biome，起点可能尚未生成
-        Function<BlockPos, Holder<Biome>> biomeAccessor = pos -> gen.getBiomeSource()
-                .getNoiseBiome(QuartPos.fromBlock(pos.getX()), QuartPos.fromBlock(pos.getY()),
-                        QuartPos.fromBlock(pos.getZ()), random.sampler());
+        // 群系与 surface 阶段同源，都走 biome 族。起点那一问用裸 quart，与 vanilla 相同；
+        // carveBlock 的 accessor 用带 ±2 模糊的 manager，于是两处看到的是同一条交界。
+        BiomeSystem biomeSystem = ((LevelSystems) level).biomeSystem();
+        BiomeManager biomeManager = biomeSystem.biomeManager(level, chunk);
+        Function<BlockPos, Holder<Biome>> biomeAccessor = biomeManager::getBiome;
 
         ChunkPos target = chunk.getPos();
         WorldgenRandom worldgenrandom = new WorldgenRandom(
@@ -103,9 +105,8 @@ public final class VanillaCarverSystem implements CarverSystem {
                 ChunkPos start = new ChunkPos(target.x() + j, target.z() + k);
                 // quart 用 fromSection，等于 start*4，而非 fromBlock(getMinBlockX())：
                 // getMinBlockX 被本 port 的饱和 @Overwrite 覆盖，边界 chunk 会错位
-                Holder<Biome> biome = gen.getBiomeSource().getNoiseBiome(
-                        QuartPos.fromSection(start.x()), 0, QuartPos.fromSection(start.z()),
-                        random.sampler());
+                Holder<Biome> biome = biomeSystem.computeBiome(level,
+                        QuartPos.fromSection(start.x()), 0, QuartPos.fromSection(start.z()));
                 // 26.1.2 把 ChunkGenerator.getBiomeGenerationSettings 标了 @Deprecated，而它对
                 // NoiseBasedChunkGenerator 的实现就是 biome.value().getGenerationSettings()
                 BiomeGenerationSettings biomeGen = biome.value().getGenerationSettings();

@@ -8,8 +8,10 @@ import com.inf.farlands.terrain.registry.SystemParams;
 import com.inf.farlands.terrain.system.common.overworld.Vanilla.VanillaFamilyRandom;
 import com.inf.farlands.terrain.system.common.overworld.Vanilla.VanillaFamilySeed;
 
+import net.minecraft.core.Holder;
 import net.minecraft.core.QuartPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.biome.Climate;
 import net.minecraft.world.level.chunk.ChunkAccess;
@@ -76,5 +78,17 @@ public final class SakuraBiomeSystem implements BiomeSystem {
             return VanillaFamilyRandom.forSeed(level, this.seed, noiseGen).sampler();
         }
         return level.getChunkSource().randomState().sampler();
+    }
+
+    /** 与 fillBiomes 同一个源，即换过的那一份，采样器也同一份，两条分支因此不会分叉。 */
+    @Override
+    public Holder<Biome> computeBiome(ServerLevel level, int quartX, int quartY, int quartZ) {
+        ChunkGenerator gen = level.getChunkSource().getGenerator();
+        return gen.getBiomeSource().getNoiseBiome(quartX, quartY, quartZ, sampler(level, gen));
+    }
+
+    @Override
+    public long biomeSeed(ServerLevel level) {
+        return this.seed;
     }
 }

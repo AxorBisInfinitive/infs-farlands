@@ -14,8 +14,10 @@ import com.inf.farlands.terrain.system.common.overworld.Oct.OctNoiseSource;
 import com.inf.farlands.terrain.system.common.overworld.Oct.OctOverworldDensity;
 import com.inf.farlands.terrain.system.common.overworld.Oct.OctScale;
 
+import net.minecraft.core.Holder;
 import net.minecraft.core.QuartPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Climate;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
@@ -98,6 +100,18 @@ public final class OctBiomeSystem implements BiomeSystem {
         this.cachedSampler = built;
         this.cachedVanilla = vanilla;
         return built;
+    }
+
+    /** 与 fillBiomes 同一份缩放采样器，两条分支因此给出同一个群系。 */
+    @Override
+    public Holder<Biome> computeBiome(ServerLevel level, int quartX, int quartY, int quartZ) {
+        return level.getChunkSource().getGenerator().getBiomeSource()
+                .getNoiseBiome(quartX, quartY, quartZ, sampler(level));
+    }
+
+    @Override
+    public long biomeSeed(ServerLevel level) {
+        return this.seed;
     }
 
     private static List<Climate.ParameterPoint> spawnTarget(ServerLevel level) {
