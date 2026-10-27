@@ -134,8 +134,8 @@ public class BetaDensityFunction implements DensityFunction.SimpleFunction {
         }
     }
 
-    /** 反射读 Biome.ClimateSettings.downfall。该 record 非公开，只能按名取。 */
-    private static float downfall(Biome biome) {
+    /** 反射读 Biome.ClimateSettings.downfall。该 record 非公开，只能按名取。prelim 也用它，所以是包私有。 */
+    static float downfall(Biome biome) {
         try {
             return ((Float) M_DOWNFALL.invoke(F_CLIMATE_SETTINGS.get(biome))).floatValue();
         } catch (ReflectiveOperationException e) {

@@ -2,14 +2,19 @@ package com.inf.farlands.terrain.system.terrain.noise.overworld.Beta173;
 
 import java.util.concurrent.ThreadLocalRandom;
 
+import com.inf.farlands.terrain.BiomeSystem;
+import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.NoiseSystem;
 import com.inf.farlands.terrain.registry.SystemArgs;
 import com.inf.farlands.terrain.registry.SystemDefaultParams;
 import com.inf.farlands.terrain.registry.SystemParamSpec;
 import com.inf.farlands.terrain.registry.SystemParams;
 import com.inf.farlands.terrain.registry.SystemsData.Arg;
+import com.inf.farlands.terrain.terrainFiller.TerrainSystemContext;
 
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.levelgen.DensityFunction;
+import net.minecraft.world.level.levelgen.DensityFunctions;
 import net.minecraft.world.level.levelgen.NoiseRouter;
 
 /**
@@ -43,6 +48,50 @@ public final class Beta173NoiseSystem implements NoiseSystem {
     @Override
     public DensityFunction createFinalDensity(NoiseRouter router) {
         return new BetaDensityFunction(this.noise, this.topFadeEnabled);
+    }
+
+    /**
+     * 本系统的整条路由：只换表面与深暗，其余照抄宿主。
+     *
+     * <p>
+     * 换 {@code preliminarySurfaceLevel} 是因为含水层的水线、地表规则的 {@code above_preliminary_surface} 与
+     * 深暗判定都从这一条取表面。沿用宿主那一份时，密度是 beta 的、表面是宿主地形的，水会按一份与地形无关的
+     * 表面灌出来，地表层也按它错位。
+     *
+     * <p>
+     * {@code erosion} 与 {@code depth} 取常量 0：深暗的判据是
+     * {@code erosion < -0.225 && depth > 0.9}，beta 没有这两个概念，常量 0 让它永不成立，含水层不会出现与
+     * 地形无关的干井。
+     *
+     * <p>
+     * 四条含水层噪声与三条矿脉噪声仍取宿主的：它们是坐标上的独立随机场，不派生自地形形状，取哪一份只决定用
+     * 哪个种子。
+     *
+     * <p>
+     * 群系布局在这里取、存进 {@link BetaPreliminarySurface}：本方法跑在 {@code NoiseChunk} 的构造点之内，
+     * 那时侧信道是设着的；而 prelim 的 {@code compute} 跑在含水层与地表规则里，那时已经清了。
+     */
+    @Override
+    public NoiseRouter createRouter(NoiseRouter vanilla) {
+        ServerLevel level = TerrainSystemContext.get();
+        BiomeSystem.BiomeLayout layout = ((LevelSystems) level).biomeSystem().layout(level);
+        DensityFunction zero = DensityFunctions.constant(0.0);
+        return new NoiseRouter(
+                vanilla.barrierNoise(),
+                vanilla.fluidLevelFloodednessNoise(),
+                vanilla.fluidLevelSpreadNoise(),
+                vanilla.lavaNoise(),
+                vanilla.temperature(),
+                vanilla.vegetation(),
+                vanilla.continents(),
+                zero,
+                zero,
+                vanilla.ridges(),
+                new BetaPreliminarySurface(this.noise, layout),
+                this.createFinalDensity(vanilla),
+                vanilla.veinToggle(),
+                vanilla.veinRidged(),
+                vanilla.veinGap());
     }
 
     /**

@@ -14,6 +14,18 @@ import net.minecraft.world.level.levelgen.PositionalRandomFactory;
  */
 final class OverworldDensity263 {
 
+    /**
+     * 一条链与它派生出的几个截面函数。
+     *
+     * <p>
+     * {@code offset}、{@code factor}、{@code depth}、{@code erosion} 是 26.3 在 {@code registerTerrainNoises}
+     * 里一并注册的函数，本移植体原先只把 {@code tree} 交出去。26.3 的 preliminary surface 由 offset 与 factor
+     * 拼成，含水层的深暗判定读 erosion 与 depth，矿脉的竖直门读 {@code y}，所以这几件必须一起带出。
+     */
+    record Tree(FloatNode263 tree, FloatNode263 y, FloatNode263 offset, FloatNode263 factor,
+            FloatNode263 depth, FloatNode263 erosion) {
+    }
+
     /** 26.3 的 {@code DimensionType.MIN_Y * 2}。不能读运行期字段，本仓库把 DimensionType 改成了全 int 量程。 */
     private static final int Y_BELOW_BOTTOM = -4064;
 
@@ -23,7 +35,7 @@ final class OverworldDensity263 {
     private OverworldDensity263() {
     }
 
-    static FloatNode263 build(PositionalRandomFactory noises, boolean enableFarlands, boolean topFadeEnabled,
+    static Tree build(PositionalRandomFactory noises, boolean enableFarlands, boolean topFadeEnabled,
             boolean enableJagged, boolean enableSkyGrid) {
         FloatNode263 shiftX = cache(new ShiftNode263(ShiftNode263.Type.SHIFT_A,
                 NoiseData263.SHIFT.create(noises, enableFarlands)));
@@ -60,7 +72,8 @@ final class OverworldDensity263 {
         FloatNode263 caves = caves(slopedCheese, entrances, underground);
         FloatNode263 noodle = noodle(noises, enableFarlands, y, enableSkyGrid);
 
-        return min(postProcess(slideOverworld(caves, topFadeEnabled), 4, 8, enableSkyGrid), noodle);
+        return new Tree(min(postProcess(slideOverworld(caves, topFadeEnabled), 4, 8, enableSkyGrid), noodle),
+                y, offset, factor, depth, erosion);
     }
 
     /**

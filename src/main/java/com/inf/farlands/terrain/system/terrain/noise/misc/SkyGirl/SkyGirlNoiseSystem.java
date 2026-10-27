@@ -6,8 +6,15 @@ import com.inf.farlands.terrain.registry.SystemDefaultParams;
 import com.inf.farlands.terrain.registry.SystemParamSpec;
 import com.inf.farlands.terrain.registry.SystemParams;
 
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.levelgen.Aquifer;
 import net.minecraft.world.level.levelgen.DensityFunction;
+import net.minecraft.world.level.levelgen.NoiseChunk;
+import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.NoiseRouter;
+import net.minecraft.world.level.levelgen.PositionalRandomFactory;
 
 import net.minecraft.network.chat.Component;
 
@@ -54,5 +61,42 @@ public final class SkyGirlNoiseSystem implements NoiseSystem {
     @Override
     public DensityFunction createFinalDensity(NoiseRouter router) {
         return new SkyGirlNode(this.cellXz, this.cellY);
+    }
+
+    /**
+     * 恒出空气的流体档。
+     *
+     * <p>
+     * 液面取 {@link Integer#MIN_VALUE}，而 {@code FluidStatus.at(y)} 的判据是 y 小于液面才给流体；y 不可能小于
+     * int 下界，所以任何坐标都落回空气。维度关闭含水层时 {@code NoiseChunk} 走 {@code createDisabled}，用的也
+     * 是这一个，所以两条路都要它。
+     */
+    @Override
+    public Aquifer.FluidPicker createFluidPicker(NoiseGeneratorSettings settings) {
+        return (x, y, z) -> new Aquifer.FluidStatus(Integer.MIN_VALUE, Blocks.AIR.defaultBlockState());
+    }
+
+    /**
+     * 非正密度一律空气。
+     *
+     * <p>
+     * 本系统的密度只有两态：格点 {@code 1.0}，其余 {@code NaN}。含水层的判据是 {@code density > 0}，于是格点
+     * 返回 null 落回 {@code default_block}，{@code NaN} 与其余非正数都落成空气。默认含水层的判据同样是
+     * {@code > 0}，{@code NaN} 在那一条上落空之后并不返回，而是继续按宿主的表面灌出水，所以这里必须换掉。
+     */
+    @Override
+    public Aquifer createAquifer(NoiseChunk chunk, ChunkPos pos, NoiseRouter router,
+            PositionalRandomFactory random, int minY, int height, Aquifer.FluidPicker picker) {
+        return new Aquifer() {
+            @Override
+            public BlockState computeSubstance(DensityFunction.FunctionContext context, double substance) {
+                return substance > 0.0 ? null : Blocks.AIR.defaultBlockState();
+            }
+
+            @Override
+            public boolean shouldScheduleFluidUpdate() {
+                return false;
+            }
+        };
     }
 }

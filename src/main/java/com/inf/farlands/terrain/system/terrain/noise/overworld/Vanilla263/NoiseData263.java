@@ -3,11 +3,11 @@ package com.inf.farlands.terrain.system.terrain.noise.overworld.Vanilla263;
 import net.minecraft.world.level.levelgen.PositionalRandomFactory;
 
 /**
- * 26.3 主世界密度链用到的噪声参数表。
+ * 26.3 主世界密度链与矿脉用到的噪声参数表。
  *
  * <p>参数取自 {@code NoiseData}，与 26.1.2 同名条目逐字相同，所以不读数据包也不需要 {@code noise}
- * 目录下那 64 份 json。表里只列本链用到的 25 条；其余的如 {@code surface}、{@code badlands_*}
- * 只服务表面与材料规则，不在这条链上。
+ * 目录下那 64 份 json。表里列本链与矿脉用到的 29 条；其余的如 {@code surface}、{@code badlands_*}
+ * 只服务表面与材料规则，不在这里。
  *
  * <p>路径是 {@code minecraft:} 命名空间下的名字，与注册表键逐字一致。它是随机流的哈希输入，
  * 写错一个字符就是另一条噪声，而地形仍然看得过去。
@@ -38,7 +38,11 @@ enum NoiseData263 {
     NOODLE_RIDGE_B("noodle_ridge_b", -7, 1.0),
     PILLAR("pillar", -7, 1.0, 1.0),
     PILLAR_RARENESS("pillar_rareness", -8, 1.0),
-    PILLAR_THICKNESS("pillar_thickness", -8, 1.0);
+    PILLAR_THICKNESS("pillar_thickness", -8, 1.0),
+    ORE_VEININESS("ore_veininess", -8, 1.0),
+    ORE_VEIN_A("ore_vein_a", -7, 1.0),
+    ORE_VEIN_B("ore_vein_b", -7, 1.0),
+    ORE_GAP("ore_gap", -5, 1.0);
 
     private final String path;
     private final int firstOctave;

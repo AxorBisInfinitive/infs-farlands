@@ -53,9 +53,24 @@ public final class Vanilla263NoiseSystem implements NoiseSystem {
     private final boolean enableSkyGrid;
     private final long seed;
 
-    /** 按 vanilla 路由身份缓存的树。NoiseChunk 每段构造一次，不缓存就会每段重造一棵。 */
-    private volatile NoiseRouter cachedVanilla;
-    private volatile FloatNode263 cachedTree;
+    /** 本系统 seed 派生的一次性随机源工厂，树与矿脉共用同一份。构造期建好，之后跨线程只读。 */
+    private final PositionalRandomFactory noises;
+
+    /**
+     * 按 vanilla 路由身份缓存的一整套节点。{@code NoiseChunk} 每段构造一次 {@code createRouter}，不缓存就每段
+     * 重造一棵树、四条矿脉噪声。
+     *
+     * <p>
+     * 树与矿脉一起缓存，因为它们只由 seed 与 {@code enableFarlands} 决定，且矿脉要用树里的 {@code y}。
+     * 写序是灯标在前、键在后，读者先读键再读灯标，因此不会拿到半个状态。
+     */
+    private NoiseRouter cachedVanilla;
+
+    private volatile Built cached;
+
+    /** 一次建成的树与矿脉。 */
+    private record Built(OverworldDensity263.Tree tree, OreVeins263 veins) {
+    }
 
     public Vanilla263NoiseSystem(SystemArgs args) {
         this.enableFarlands = args.getBoolean("enableFarlands");
@@ -63,22 +78,60 @@ public final class Vanilla263NoiseSystem implements NoiseSystem {
         this.enableJagged = args.getBoolean("enableJagged");
         this.enableSkyGrid = args.getBoolean("enableSkyGrid");
         this.seed = args.getLong("seed");
+        this.noises = WorldgenRandom.Algorithm.XOROSHIRO.newInstance(this.seed).forkPositional();
     }
 
     @Override
     public DensityFunction createFinalDensity(NoiseRouter router) {
-        if (this.cachedVanilla == router) {
-            FloatNode263 cached = this.cachedTree;
-            if (cached != null) {
-                return cached;
-            }
+        return this.built(router).tree().tree();
+    }
+
+    /**
+     * 本系统的整条路由：只换本系统自带的那几项，其余照抄宿主。
+     *
+     * <p>
+     * 换掉的三组都有明确的下游。{@code depth} 与 {@code erosion} 被含水层的深暗判定读；{@code preliminarySurfaceLevel}
+     * 被含水层的水线与地表规则的 {@code above_preliminary_surface} 读；三条矿脉被 {@code OreVeinifier} 读。
+     * 交给它们的是 26.3 自己的树、自己的表面与自己的矿脉噪声，宿主那边的同一批字段因此不再参与。
+     *
+     * <p>
+     * 不换 {@code temperature}、{@code vegetation}、{@code continents}、{@code ridges}：26.3 的树从
+     * {@link NoiseData263} 自建这几条，不读路由，而本 port 的群系族另有自己的一份 {@code RandomState}。
+     */
+    @Override
+    public NoiseRouter createRouter(NoiseRouter vanilla) {
+        Built built = this.built(vanilla);
+        OverworldDensity263.Tree tree = built.tree();
+        OreVeins263 veins = built.veins();
+        return new NoiseRouter(
+                vanilla.barrierNoise(),
+                vanilla.fluidLevelFloodednessNoise(),
+                vanilla.fluidLevelSpreadNoise(),
+                vanilla.lavaNoise(),
+                vanilla.temperature(),
+                vanilla.vegetation(),
+                vanilla.continents(),
+                tree.erosion(),
+                tree.depth(),
+                vanilla.ridges(),
+                new PreliminarySurface263(tree.offset(), tree.factor()),
+                tree.tree(),
+                veins.toggle(),
+                veins.ridged(),
+                veins.gap());
+    }
+
+    /** 该 vanilla 路由对应的那一套节点，按身份缓存，一次构造只建一份。 */
+    private Built built(NoiseRouter vanilla) {
+        Built current = this.cached;
+        if (this.cachedVanilla == vanilla && current != null) {
+            return current;
         }
-        PositionalRandomFactory noises = WorldgenRandom.Algorithm.XOROSHIRO.newInstance(this.seed)
-                .forkPositional();
-        FloatNode263 tree = OverworldDensity263.build(noises, this.enableFarlands, this.topFadeEnabled,
-                this.enableJagged, this.enableSkyGrid);
-        this.cachedTree = tree;
-        this.cachedVanilla = router;
-        return tree;
+        OverworldDensity263.Tree tree = OverworldDensity263.build(this.noises, this.enableFarlands,
+                this.topFadeEnabled, this.enableJagged, this.enableSkyGrid);
+        Built fresh = new Built(tree, OreVeins263.of(tree.y(), this.noises, this.enableFarlands));
+        this.cached = fresh;
+        this.cachedVanilla = vanilla;
+        return fresh;
     }
 }
