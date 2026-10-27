@@ -52,10 +52,4 @@ public final class VoidBiomeSystem implements BiomeSystem {
     public Holder<Biome> computeBiome(ServerLevel level, int quartX, int quartY, int quartZ) {
         return level.registryAccess().lookupOrThrow(Registries.BIOME).getOrThrow(Biomes.THE_VOID);
     }
-
-    /** 没有交界可言，取世界种子只为让缩放种子是确定的。 */
-    @Override
-    public long biomeSeed(ServerLevel level) {
-        return level.getSeed();
-    }
 }

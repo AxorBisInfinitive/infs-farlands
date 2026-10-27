@@ -8,15 +8,10 @@ import com.inf.farlands.terrain.registry.SystemParams;
 import com.inf.farlands.terrain.system.common.overworld.Vanilla.VanillaFamilyRandom;
 import com.inf.farlands.terrain.system.common.overworld.Vanilla.VanillaFamilySeed;
 
-import net.minecraft.core.Holder;
-import net.minecraft.core.QuartPos;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.biome.Climate;
-import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
-import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 
 /**
@@ -34,8 +29,8 @@ import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
  *
  * <p>
  * 换源挂在 {@link #adaptBiomeSource} 上，由 level 构造末尾调一次并按生成器实例登记，因此雕刻取群系、
- * 结构判群系、刷怪取群系与 {@code /locate biome} 都跟随；{@link #fillBiomes} 因此不需要第二处判据，
- * 它取的 {@code gen.getBiomeSource()} 已经是换过的那份。
+ * 结构判群系、刷怪取群系与 {@code /locate biome} 都跟随。{@link #layout} 取的是
+ * {@code gen.getBiomeSource()}，也就是换过的那份，所以不必再挂第二处判据。
  *
  * <p>
  * 与另三族 vanilla 实现同形：只服务噪声生成器的维度。非噪声生成器的维度既没有噪声设置可建
@@ -53,23 +48,17 @@ public final class SakuraBiomeSystem implements BiomeSystem {
         this.seed = args.getLong("seed");
     }
 
-    @Override
-    public void fillBiomes(ServerLevel level, ChunkAccess chunk, int minSectionY, int maxSectionY) {
-        ChunkGenerator gen = level.getChunkSource().getGenerator();
-        Climate.Sampler sampler = sampler(level, gen);
-        int qx = QuartPos.fromSection(chunk.getPos().x());
-        int qz = QuartPos.fromSection(chunk.getPos().z());
-        for (int sy = minSectionY; sy <= maxSectionY; sy++) {
-            LevelChunkSection section = chunk.getSection(chunk.getSectionIndexFromSectionY(sy));
-            section.fillBiomesFromNoise(gen.getBiomeSource(), sampler, qx, QuartPos.fromSection(sy), qz);
-        }
-    }
-
     /** 把森林群系的条目改指樱花树林；不适用的源原样返回。 */
     @Override
     public BiomeSource adaptBiomeSource(ServerLevel level, BiomeSource raw) {
         BiomeSource adapted = BiomeSourceFilter.handForestsToSakura(level, raw);
         return adapted != null ? adapted : raw;
+    }
+
+    @Override
+    public BiomeLayout layout(ServerLevel level) {
+        ChunkGenerator gen = level.getChunkSource().getGenerator();
+        return new BiomeLayout(gen.getBiomeSource(), sampler(level, gen), this.seed);
     }
 
     /** 该 seed 的气候采样器；非噪声生成器的维度退回该 level 自己那份。 */
@@ -78,17 +67,5 @@ public final class SakuraBiomeSystem implements BiomeSystem {
             return VanillaFamilyRandom.forSeed(level, this.seed, noiseGen).sampler();
         }
         return level.getChunkSource().randomState().sampler();
-    }
-
-    /** 与 fillBiomes 同一个源，即换过的那一份，采样器也同一份，两条分支因此不会分叉。 */
-    @Override
-    public Holder<Biome> computeBiome(ServerLevel level, int quartX, int quartY, int quartZ) {
-        ChunkGenerator gen = level.getChunkSource().getGenerator();
-        return gen.getBiomeSource().getNoiseBiome(quartX, quartY, quartZ, sampler(level, gen));
-    }
-
-    @Override
-    public long biomeSeed(ServerLevel level) {
-        return this.seed;
     }
 }

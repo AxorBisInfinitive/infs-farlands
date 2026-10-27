@@ -14,14 +14,8 @@ import com.inf.farlands.terrain.system.common.overworld.Oct.OctNoiseSource;
 import com.inf.farlands.terrain.system.common.overworld.Oct.OctOverworldDensity;
 import com.inf.farlands.terrain.system.common.overworld.Oct.OctScale;
 
-import net.minecraft.core.Holder;
-import net.minecraft.core.QuartPos;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Climate;
-import net.minecraft.world.level.chunk.ChunkAccess;
-import net.minecraft.world.level.chunk.ChunkGenerator;
-import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseRouter;
 import net.minecraft.world.level.levelgen.PositionalRandomFactory;
@@ -33,6 +27,9 @@ import net.minecraft.world.level.levelgen.WorldgenRandom;
  * <p>vanilla 的群系气候来自 RandomState 的 sampler，那里的密度函数没有缩放。这里按 level 的
  * vanilla router 自建一个用 Oct 缩放链的 Climate.Sampler，链按 router 身份缓存一次。
  * 采集不全时回退 vanilla sampler。
+ *
+ * <p>
+ * 源仍是生成器那一份，换的只是采样器与缩放种子，三者由 {@link #layout} 一次交出。
  */
 public final class OctBiomeSystem implements BiomeSystem {
 
@@ -60,15 +57,9 @@ public final class OctBiomeSystem implements BiomeSystem {
     }
 
     @Override
-    public void fillBiomes(ServerLevel level, ChunkAccess chunk, int minSectionY, int maxSectionY) {
-        ChunkGenerator gen = level.getChunkSource().getGenerator();
-        Climate.Sampler sampler = sampler(level);
-        int qx = QuartPos.fromSection(chunk.getPos().x());
-        int qz = QuartPos.fromSection(chunk.getPos().z());
-        for (int sy = minSectionY; sy <= maxSectionY; sy++) {
-            LevelChunkSection section = chunk.getSection(chunk.getSectionIndexFromSectionY(sy));
-            section.fillBiomesFromNoise(gen.getBiomeSource(), sampler, qx, QuartPos.fromSection(sy), qz);
-        }
+    public BiomeLayout layout(ServerLevel level) {
+        return new BiomeLayout(level.getChunkSource().getGenerator().getBiomeSource(), sampler(level),
+                this.seed);
     }
 
     /** 自建缩放气候采样器，按 level 的 vanilla router 身份缓存；采集不全回退上层的 sampler。 */
@@ -100,18 +91,6 @@ public final class OctBiomeSystem implements BiomeSystem {
         this.cachedSampler = built;
         this.cachedVanilla = vanilla;
         return built;
-    }
-
-    /** 与 fillBiomes 同一份缩放采样器，两条分支因此给出同一个群系。 */
-    @Override
-    public Holder<Biome> computeBiome(ServerLevel level, int quartX, int quartY, int quartZ) {
-        return level.getChunkSource().getGenerator().getBiomeSource()
-                .getNoiseBiome(quartX, quartY, quartZ, sampler(level));
-    }
-
-    @Override
-    public long biomeSeed(ServerLevel level) {
-        return this.seed;
     }
 
     private static List<Climate.ParameterPoint> spawnTarget(ServerLevel level) {
