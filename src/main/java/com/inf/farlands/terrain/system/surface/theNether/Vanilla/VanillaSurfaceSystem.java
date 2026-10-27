@@ -81,7 +81,7 @@ public final class VanillaSurfaceSystem implements SurfaceSystem {
         WorldGenerationContext context = new WorldGenerationContext(gen, chunk);
         random.surfaceSystem().buildSurface(
                 random, biomeManager, biomes, settings.useLegacyRandomSource(),
-                context, chunk, nc, settings.surfaceRule());
+                context, chunk, nc, this.surfaceRule(settings));
     }
 
     /** 直查 section biome 网格，quart 局部索引取 &3；section 不存在时 the_void 兜底。 */

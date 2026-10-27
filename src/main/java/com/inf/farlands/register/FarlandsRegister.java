@@ -16,6 +16,7 @@ import com.inf.farlands.terrain.system.common.overworld.Vanilla.VanillaFamilySee
 import com.inf.farlands.terrain.system.decoration.misc.Void.VoidDecorationSystem;
 import com.inf.farlands.terrain.system.decoration.overworld.Vanilla.VanillaDecorationSystem;
 import com.inf.farlands.terrain.system.surface.misc.Void.VoidSurfaceSystem;
+import com.inf.farlands.terrain.system.surface.overworld.Bin.BinSurfaceSystem;
 import com.inf.farlands.terrain.system.surface.overworld.Vanilla.VanillaSurfaceSystem;
 import com.inf.farlands.terrain.system.terrain.block.misc.Inf32768.Inf32768BlockSystem;
 import com.inf.farlands.terrain.system.terrain.block.misc.Sierpinski.SierpinskiPyramidBlockSystem;
@@ -79,7 +80,7 @@ public class FarlandsRegister {
         }
     }
 
-    /** 39 个内置系统按五族登记，id 与实现类的对应关系集中在此。 */
+    /** 40 个内置系统按五族登记，id 与实现类的对应关系集中在此。 */
     private static void registerSystems() {
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_VOID_NOISE_SYSTEM, VoidNoiseSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_VOID_SECTION_SYSTEM,
@@ -133,6 +134,8 @@ public class FarlandsRegister {
                 VoidSurfaceSystem.class);
         SystemRegistries.registerSurface(SystemRegistries.SURFACE_OVERWORLD_VANILLA_SURFACE_SYSTEM,
                 VanillaSurfaceSystem.class);
+        SystemRegistries.registerSurface(SystemRegistries.SURFACE_OVERWORLD_BIN_SURFACE_SYSTEM,
+                BinSurfaceSystem.class);
         SystemRegistries.registerSurface(SystemRegistries.SURFACE_THE_NETHER_VANILLA_SURFACE_SYSTEM,
                 com.inf.farlands.terrain.system.surface.theNether.Vanilla.VanillaSurfaceSystem.class);
         SystemRegistries.registerSurface(SystemRegistries.SURFACE_THE_END_VANILLA_SURFACE_SYSTEM,

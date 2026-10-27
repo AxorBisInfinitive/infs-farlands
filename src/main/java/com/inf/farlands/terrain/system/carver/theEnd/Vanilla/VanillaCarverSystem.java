@@ -2,6 +2,7 @@ package com.inf.farlands.terrain.system.carver.theEnd.Vanilla;
 
 import com.inf.farlands.terrain.CarverSystem;
 import com.inf.farlands.terrain.CarvingMaskStorage;
+import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.registry.SystemArgs;
 import com.inf.farlands.terrain.registry.SystemDefaultParams;
 import com.inf.farlands.terrain.registry.SystemParams;
@@ -27,6 +28,7 @@ import net.minecraft.world.level.levelgen.NoiseChunk;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.RandomSupport;
+import net.minecraft.world.level.levelgen.SurfaceRules;
 import net.minecraft.world.level.levelgen.WorldgenRandom;
 import net.minecraft.world.level.levelgen.carver.CarvingContext;
 import net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver;
@@ -40,7 +42,8 @@ import net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver;
  *   再取该 biome 的 carver 列表，不依赖起点 chunk 的数据，起点未生成也能查询
  * - setLargeFeatureSeed(本系统 seed + carver序号, 起点cx, 起点cz) 做确定性随机，经 isStartChunk
  *   概率过滤，再 ConfiguredWorldCarver.carve。carvingMask 去重，只雕目标 chunk
- * - CarvingContext 用维度全高 NoiseChunk，其 aquifer 覆盖 carver 带，同 SURFACE 模式
+ * - CarvingContext 用维度全高 NoiseChunk，其 aquifer 覆盖 carver 带，同 SURFACE 模式；它那条
+ *   surface rule 取地表族的那一份，与 surface 阶段同源，不直读维度设置的
  *
  * seed 只驱动起点随机与两处 biome 查询的采样器；NoiseChunk 内部的 aquifer 与矿脉随机源不在这里取，
  * 它们仍来自该 level 的 RandomState。
@@ -79,9 +82,11 @@ public final class VanillaCarverSystem implements CarverSystem {
         NoiseChunk nc = chunk.getOrCreateNoiseChunk(
                 p -> AbstractTerrainFiller.createDimensionNoiseChunk(level, chunk));
         Aquifer aquifer = nc.aquifer();
+        // 表层材料那条规则与 surface 阶段同源：取地表族交付的那一份，不直读维度设置。
+        SurfaceRules.RuleSource surfaceRule = ((LevelSystems) level).surfaceSystem().surfaceRule(settings);
         CarvingContext carvingContext = new CarvingContext(
                 gen, level.registryAccess(), chunk.getHeightAccessorForGeneration(),
-                nc, random, settings.surfaceRule());
+                nc, random, surfaceRule);
         CarvingMask carvingMask = ((CarvingMaskStorage) chunk).getOrCreateCarvingMask();
 
         // biomeAccessor 直接查 biomeSource，供 carveBlock 的表面 dirt 换草皮 topMaterial 用，
