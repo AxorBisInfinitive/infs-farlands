@@ -1,8 +1,11 @@
 package com.inf.farlands.mixin.debug;
 
+import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.NoiseSystem;
 import com.inf.farlands.terrain.TerrainSystem;
 import com.inf.farlands.terrain.terrainFiller.TerrainSystemContext;
+
+import net.minecraft.server.level.ServerLevel;
 
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
@@ -42,7 +45,8 @@ public abstract class NoiseBasedChunkGeneratorDebugMixin {
     @Redirect(method = "addDebugScreenInfo(Ljava/util/List;Lnet/minecraft/world/level/levelgen/RandomState;Lnet/minecraft/core/BlockPos;)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/levelgen/RandomState;router()Lnet/minecraft/world/level/levelgen/NoiseRouter;"))
     private static NoiseRouter farlands$systemRouter(RandomState randomState) {
         NoiseRouter vanilla = randomState.router();
-        TerrainSystem system = TerrainSystemContext.getOrNull();
+        ServerLevel level = TerrainSystemContext.getOrNull();
+        TerrainSystem system = level == null ? null : ((LevelSystems) level).terrainSystem();
         return system instanceof NoiseSystem noise ? noise.createRouter(vanilla) : vanilla;
     }
 
@@ -56,7 +60,8 @@ public abstract class NoiseBasedChunkGeneratorDebugMixin {
     @Redirect(method = "getInterpolatedNoiseValue(Lnet/minecraft/world/level/levelgen/RandomState;Lnet/minecraft/world/level/levelgen/DensityFunction$FunctionContext;)D", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/levelgen/NoiseGeneratorSettings;noiseSettings()Lnet/minecraft/world/level/levelgen/NoiseSettings;"))
     private static NoiseSettings farlands$systemGrid(NoiseGeneratorSettings settings) {
         NoiseSettings vanilla = settings.noiseSettings();
-        TerrainSystem system = TerrainSystemContext.getOrNull();
+        ServerLevel level = TerrainSystemContext.getOrNull();
+        TerrainSystem system = level == null ? null : ((LevelSystems) level).terrainSystem();
         if (!(system instanceof NoiseSystem noise)) {
             return vanilla;
         }

@@ -27,7 +27,7 @@ import net.minecraft.world.level.levelgen.RandomState;
  * <p>
  * 生成器只用它的 {@code biomeSource} 与 {@code getBaseHeight}：前者决定生物群系谓词，后者决定 Y 锚。
  * 后者内部构造的 {@code NoiseChunk} 用的是这里的 settings 与 {@link RandomState}，所以调用方必须在
- * {@code TerrainSystemContext.setVanilla()} 里跑，否则宿主的地形系统会顶掉这条链。
+ * {@code TerrainSystemContext.setVanilla(level)} 里跑，否则宿主的地形系统会顶掉这条链。
  *
  * <p>
  * 结构状态的环位置是惰性算的，首次被 {@code isStructureChunk} 问到时会在调用线程上 join，见

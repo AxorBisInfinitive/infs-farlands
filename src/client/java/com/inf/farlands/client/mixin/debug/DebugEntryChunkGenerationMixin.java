@@ -3,7 +3,6 @@ package com.inf.farlands.client.mixin.debug;
 import java.util.List;
 
 import com.inf.farlands.terrain.LevelSystems;
-import com.inf.farlands.terrain.TerrainSystem;
 import com.inf.farlands.terrain.terrainFiller.TerrainSystemContext;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
@@ -37,12 +36,11 @@ public abstract class DebugEntryChunkGenerationMixin {
     private static void farlands$withTerrainSystem(ChunkGenerator generator, List<String> result,
             RandomState randomState, BlockPos feetPos, Operation<Void> original, LevelChunk serverChunk,
             BlockPos cachedFeetPos, ServerLevel level) {
-        TerrainSystem system = ((LevelSystems) level).terrainSystem();
-        if (system == null) {
+        if (((LevelSystems) level).terrainSystem() == null) {
             original.call(generator, result, randomState, feetPos);
             return;
         }
-        TerrainSystemContext.set(system);
+        TerrainSystemContext.set(level);
         try {
             original.call(generator, result, randomState, feetPos);
         } finally {

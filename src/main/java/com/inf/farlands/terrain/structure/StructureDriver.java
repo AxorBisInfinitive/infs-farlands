@@ -5,7 +5,6 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import com.inf.farlands.serialize.SectionLifecycle;
-import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.decorationFiller.DecorationRegion;
 import com.inf.farlands.terrain.decorationFiller.ScopedStructureManager;
 import com.inf.farlands.terrain.terrainFiller.TerrainSystemContext;
@@ -76,7 +75,7 @@ public final class StructureDriver {
         if (!claimStructures(level, chunk)) {
             return;
         }
-        TerrainSystemContext.set(((LevelSystems) level).terrainSystem());
+        TerrainSystemContext.set(level);
         try {
             level.getChunkSource().getGenerator().createStructures(
                     level.registryAccess(),
@@ -142,7 +141,7 @@ public final class StructureDriver {
      */
     public static void buildReferences(ServerLevel level, LevelChunk center) {
         DecorationRegion region = DecorationRegion.readingFrom(level, center, STRUCTURE_READ_RADIUS);
-        TerrainSystemContext.set(((LevelSystems) level).terrainSystem());
+        TerrainSystemContext.set(level);
         try {
             level.getChunkSource().getGenerator().createReferences(
                     region, ScopedStructureManager.of(level, region), center);

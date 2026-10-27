@@ -109,7 +109,7 @@ public final class VanillaDecorationSystem implements DecorationSystem {
      * 起点相用本族自带的基座：主世界的群系源、噪声设置与生成器，种子取本系统的 seed。
      *
      * <p>
-     * 夹在 setVanilla 与 clear 之间，因为起点取 Y 锚会在主线程上构造 NoiseChunk。哨兵让那次构造不替换
+     * 夹在 setVanilla 与 clear 之间，因为起点取 Y 锚会在主线程上构造 NoiseChunk。标志让那次构造不替换
      * router 与 aquifer，高度场因此是本族 settings 在族 seed 下的场，与宿主地形族无关。
      */
     @Override
@@ -118,7 +118,7 @@ public final class VanillaDecorationSystem implements DecorationSystem {
             return true;
         }
         StructureBasis built = this.basis(level);
-        TerrainSystemContext.setVanilla();
+        TerrainSystemContext.setVanilla(level);
         try {
             built.generator().createStructures(level.registryAccess(), built.state(),
                     level.structureManager(), chunk, level.getStructureManager(), built.dimension());

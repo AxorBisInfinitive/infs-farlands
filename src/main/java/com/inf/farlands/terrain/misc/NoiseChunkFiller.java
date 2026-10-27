@@ -2,7 +2,6 @@ package com.inf.farlands.terrain.misc;
 
 import com.inf.farlands.mixin.noise.NoiseChunkInvoker;
 import com.inf.farlands.terrain.ChunkBeardifier;
-import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.terrainFiller.TerrainSystemContext;
 
 import java.util.function.Supplier;
@@ -68,9 +67,9 @@ public final class NoiseChunkFiller {
         Beardifier beardifier = ((ChunkBeardifier) chunk).getBeardifier();
 
         int cellCountXZ = 16 / cellW;
-        // NoiseChunk 构造会走 NoiseChunkMixin 的两处 @Redirect，构造点必须先 set 系统。
+        // NoiseChunk 构造会走 NoiseChunkMixin 的两处 @Redirect，构造点必须先 set level。
         // 本类当前不可达，生成金字塔被 GenerationChunkHolderMixin 短路，此 set 是为复活时留的正确入口。
-        TerrainSystemContext.set(((LevelSystems) level).terrainSystem());
+        TerrainSystemContext.set(level);
         NoiseChunk nc;
         try {
             nc = new NoiseChunk(

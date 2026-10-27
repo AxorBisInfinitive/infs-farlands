@@ -325,7 +325,7 @@ public final class DecorationFiller {
                             this.descentFloorY);
                     // 结构起点的 Y 锚会经 getFirstOccupiedHeight 构造 NoiseChunk，而 NoiseChunk 的
                     // 构造点要求 TerrainSystemContext 已设，否则抛。夹法照 fill 的形状。
-                    TerrainSystemContext.set(((LevelSystems) this.level).terrainSystem());
+                    TerrainSystemContext.set(this.level);
                     long decStart = System.nanoTime();
                     try {
                         ((LevelSystems) this.level).decorationSystem().applyDecoration(this.level, this.center,

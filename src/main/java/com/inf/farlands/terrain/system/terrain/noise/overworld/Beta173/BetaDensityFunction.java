@@ -3,12 +3,16 @@ package com.inf.farlands.terrain.system.terrain.noise.overworld.Beta173;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
+import com.inf.farlands.terrain.BiomeSystem;
+import com.inf.farlands.terrain.LevelSystems;
+import com.inf.farlands.terrain.terrainFiller.TerrainSystemContext;
 import com.inf.farlands.util.hash.HashMath;
 import com.mojang.serialization.MapCodec;
 
 import it.unimi.dsi.fastutil.longs.Long2DoubleOpenHashMap;
 import net.minecraft.core.Holder;
 import net.minecraft.core.QuartPos;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.KeyDispatchDataCodec;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.levelgen.DensityFunction;
@@ -26,6 +30,9 @@ public class BetaDensityFunction implements DensityFunction.SimpleFunction {
 
     private static final double MAX = 2000;
     private static final double MIN = -2000;
+
+    /** 海平面 63 的 quart Y。beta 按列取温度湿度，固定在海平面那一层。 */
+    private static final int SEA_LEVEL_QUART = QuartPos.fromBlock(63);
 
     private static final Field F_CLIMATE_SETTINGS;
     private static final Method M_DOWNFALL;
@@ -50,6 +57,15 @@ public class BetaDensityFunction implements DensityFunction.SimpleFunction {
     private final double[] cachedCorners = new double[8];
     private double cachedTemp;
     private double cachedHum;
+
+    /**
+     * 本段用的群系布局，首次用到时从上下文取一次。
+     *
+     * <p>
+     * 密度实例由 {@code createFinalDensity} 按段新建，所以缓存粒度是每段；布局取的是 biome 族的
+     * {@code layout}，源与采样器同源，温度湿度因此与世界里的群系同一颗种子。
+     */
+    private BiomeSystem.BiomeLayout biomeLayout;
 
     private final Long2DoubleOpenHashMap pointCache = new Long2DoubleOpenHashMap();
     private final Long2DoubleOpenHashMap sample3Cache = new Long2DoubleOpenHashMap();
@@ -98,12 +114,16 @@ public class BetaDensityFunction implements DensityFunction.SimpleFunction {
                 cachedCorners[4], cachedCorners[5], cachedCorners[6], cachedCorners[7], fx, fy, fz);
     }
 
-    /** biome 变化时更新温度湿度并清网格点缓存。侧信道未设置时沿用上一次的值。 */
+    /** biome 变化时更新温度湿度并清网格点缓存。上下文缺席即抛，不再退化成温度湿度 0。 */
     private void updateClimate(int x, int z) {
-        Holder<Biome> holder = BetaContext.biomeAt(QuartPos.fromBlock(x), QuartPos.fromBlock(z));
-        if (holder == null) {
-            return;
+        BiomeSystem.BiomeLayout layout = this.biomeLayout;
+        if (layout == null) {
+            ServerLevel level = TerrainSystemContext.get();
+            layout = ((LevelSystems) level).biomeSystem().layout(level);
+            this.biomeLayout = layout;
         }
+        Holder<Biome> holder = layout.source().getNoiseBiome(
+                QuartPos.fromBlock(x), SEA_LEVEL_QUART, QuartPos.fromBlock(z), layout.sampler());
         Biome biome = holder.value();
         double t = biome.getBaseTemperature();
         double h = downfall(biome);

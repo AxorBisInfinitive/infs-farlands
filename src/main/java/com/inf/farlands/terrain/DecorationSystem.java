@@ -37,8 +37,8 @@ public interface DecorationSystem {
      * {@link net.minecraft.world.level.levelgen.Beardifier#EMPTY}。
      *
      * <p>
-     * 覆写若自己算起点，必须夹在 {@code TerrainSystemContext.setVanilla()} 与 {@code clear()} 之间：
-     * 起点取 Y 锚会在主线程上构造 {@code NoiseChunk}，那处要求侧信道已设，而哨兵让这次构造不替换
+     * 覆写若自己算起点，必须夹在 {@code TerrainSystemContext.setVanilla(level)} 与 {@code clear()} 之间：
+     * 起点取 Y 锚会在主线程上构造 {@code NoiseChunk}，那处要求侧信道已设，而标志让这次构造不替换
      * router 与 aquifer，高度场因此来自族自己的 settings 与 seed。
      *
      * <p>

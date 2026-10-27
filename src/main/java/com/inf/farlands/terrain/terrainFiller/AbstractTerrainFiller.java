@@ -54,15 +54,6 @@ public abstract class AbstractTerrainFiller implements TerrainFiller {
     protected AbstractTerrainFiller() {
     }
 
-    /** 维度 biome 查询侧信道设置。DensityFunction.compute 没有 level 引用，需要维度
-     * 上下文的系统由子类覆写本钩子。默认空，当前无子类覆写。 */
-    protected void setContext(RandomState randomState, ServerLevel level) {
-    }
-
-    /** 与 {@link #setContext} 对称的清理，fill 出口的 finally 调用。 */
-    protected void clearContext() {
-    }
-
     private static Aquifer.FluidPicker createFluidPicker(NoiseGeneratorSettings settings) {
         Aquifer.FluidStatus lava = new Aquifer.FluidStatus(-54, Blocks.LAVA.defaultBlockState());
         int seaLevel = settings.seaLevel();
@@ -82,7 +73,7 @@ public abstract class AbstractTerrainFiller implements TerrainFiller {
         // 入口处先判了生成器类型，非噪声维度根本走不到这里。裸转留在这里，判据由调用方持有，因为
         // 它们手上的生成器类型判据同时也决定「这一整套是否该跑」。
         NoiseBasedChunkGenerator gen = (NoiseBasedChunkGenerator) level.getChunkSource().getGenerator();
-        TerrainSystemContext.set(((LevelSystems) level).terrainSystem());
+        TerrainSystemContext.set(level);
         try {
             NoiseGeneratorSettings genSettings = gen.generatorSettings().value();
             NoiseSettings orig = genSettings.noiseSettings();
@@ -124,8 +115,7 @@ public abstract class AbstractTerrainFiller implements TerrainFiller {
         NoiseGeneratorSettings settings = gen.generatorSettings().value();
         Aquifer.FluidPicker defaultPicker = createFluidPicker(settings);
         RandomState randomState = level.getChunkSource().randomState();
-        TerrainSystemContext.set(sys);
-        setContext(randomState, level);
+        TerrainSystemContext.set(level);
         try {
             NoiseSettings orig = settings.noiseSettings();
             // 网格分派：逐轴取系统自定义的 cell 网格，0 表示用维度 settings 的那一份。
@@ -166,7 +156,6 @@ public abstract class AbstractTerrainFiller implements TerrainFiller {
 
             doFillRangeWithNoiseChunk(nc, chunk, minSectionY, maxSectionY, minCellY, cellCountY, sys, settings);
         } finally {
-            clearContext();
             TerrainSystemContext.clear();
         }
     }
@@ -175,8 +164,8 @@ public abstract class AbstractTerrainFiller implements TerrainFiller {
      * 逐块几何系统的直写路径。
      *
      * <p>
-     * 与密度链路径的差异逐条：不建 {@code NoiseChunk}，不装 {@code TerrainSystemContext} 与
-     * {@code setContext} 的侧信道，不取 {@code generatorSettings} 与 {@code RandomState}，也不读
+     * 与密度链路径的差异逐条：不建 {@code NoiseChunk}，不装 {@code TerrainSystemContext} 的侧信道，
+     * 不取 {@code generatorSettings} 与 {@code RandomState}，也不读
      * Beardifier。范围取精确的 {@code [minSectionY * 16, maxSectionY * 16 + 15]}，不写 cell 对齐路径会多写
      * 的那几个顶端格；那几格由相邻段的精确范围覆盖，前提是同一批段是连续区间。
      *
