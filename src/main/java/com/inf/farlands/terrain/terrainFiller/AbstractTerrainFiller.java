@@ -128,13 +128,19 @@ public abstract class AbstractTerrainFiller implements TerrainFiller {
         setContext(randomState, level);
         try {
             NoiseSettings orig = settings.noiseSettings();
-            // 网格分派：NoiseSystem 可自定义 noiseSize，null 用维度 settings 默认。
-            int[] ns = null;
+            // 网格分派：逐轴取系统自定义的 cell 网格，0 表示用维度 settings 的那一份。
+            int noiseH = orig.noiseSizeHorizontal();
+            int noiseV = orig.noiseSizeVertical();
             if (sys instanceof NoiseSystem n) {
-                ns = n.noiseSize();
+                int xz = n.noiseSizeXZ();
+                int y = n.noiseSizeY();
+                if (xz != 0) {
+                    noiseH = xz;
+                }
+                if (y != 0) {
+                    noiseV = y;
+                }
             }
-            int noiseH = ns != null ? ns[0] : orig.noiseSizeHorizontal();
-            int noiseV = ns != null ? ns[1] : orig.noiseSizeVertical();
             int cellW = QuartPos.toBlock(noiseH);
             int cellH = QuartPos.toBlock(noiseV);
 

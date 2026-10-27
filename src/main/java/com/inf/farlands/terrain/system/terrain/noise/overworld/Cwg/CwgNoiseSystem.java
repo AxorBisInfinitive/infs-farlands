@@ -231,8 +231,13 @@ public final class CwgNoiseSystem implements NoiseSystem {
 
     /** cell 网格按采样格换算：cell 边长是采样格乘 4，水平只有一个分量。 */
     @Override
-    public int[] noiseSize() {
-        return new int[] { this.noiseSampleSizeX / 4, this.noiseSampleSizeY / 4 };
+    public int noiseSizeXZ() {
+        return this.noiseSampleSizeX / 4;
+    }
+
+    @Override
+    public int noiseSizeY() {
+        return this.noiseSampleSizeY / 4;
     }
 
     /** 液面取 MIN_VALUE 恒出空气。否则密度非正的留空半边会被默认 picker 填成水或岩浆。 */

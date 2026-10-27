@@ -81,10 +81,4 @@ public final class Vanilla263NoiseSystem implements NoiseSystem {
         this.cachedVanilla = router;
         return tree;
     }
-
-    /** 用维度噪声设置里的 cell 尺寸，B 这一层不自定义网格。 */
-    @Override
-    public int[] noiseSize() {
-        return null;
-    }
 }

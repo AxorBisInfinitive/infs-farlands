@@ -103,16 +103,21 @@ public final class VanillaNoiseSystem implements NoiseSystem {
     }
 
     /**
-     * 末地的 cell 网格：{@code size_horizontal 2} 即 8 格宽，{@code size_vertical 1} 即 4 格高，与
-     * {@code NoiseSettings.END_NOISE_SETTINGS} 同值。
+     * 末地的 cell 网格：水平 2 即 8 格宽，竖直 1 即 4 格高，与 {@code NoiseSettings.END_NOISE_SETTINGS}
+     * 同值。
      *
      * <p>
-     * 不能返回 null。null 表示用宿主维度的尺寸，那样同一段密度函数会按宿主的网格采样，主世界的 4 宽 8 高
-     * 与末地的 8 宽 4 高给出不同的形状，系统就又随维度走了。
+     * 两轴都必须给。留 0 等于用宿主维度的尺寸，同一段密度函数就会按宿主的网格采样，主世界的 4 宽 8 高与
+     * 末地的 8 宽 4 高给出不同的形状，系统又随维度走了。
      */
     @Override
-    public int[] noiseSize() {
-        return new int[] { 2, 1 };
+    public int noiseSizeXZ() {
+        return 2;
+    }
+
+    @Override
+    public int noiseSizeY() {
+        return 1;
     }
 
     /** 末地的 default_block：密度为正处的落点，不取宿主维度的默认方块。 */

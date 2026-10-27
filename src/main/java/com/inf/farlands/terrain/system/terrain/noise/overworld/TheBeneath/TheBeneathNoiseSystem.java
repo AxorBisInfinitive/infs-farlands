@@ -83,12 +83,17 @@ public final class TheBeneathNoiseSystem implements NoiseSystem {
     }
 
     /**
-     * 数据包的 cell 网格是水平 1、竖直 2，换算成方块即 4 宽 8 高。必须显式给出，返回 null 会跟宿主维度
-     * 的网格走，末地是 2 与 1，同一段密度会按另一套网格采样。
+     * 数据包的 cell 网格是水平 1、竖直 2，换算成方块即 4 宽 8 高。两轴都必须给，留 0 会跟宿主维度的网格
+     * 走，末地是 2 与 1，同一段密度会按另一套网格采样。
      */
     @Override
-    public int[] noiseSize() {
-        return new int[] { 1, 2 };
+    public int noiseSizeXZ() {
+        return 1;
+    }
+
+    @Override
+    public int noiseSizeY() {
+        return 2;
     }
 
     /** 数据包的默认方块是深板岩，密度为正处的落点。 */

@@ -24,7 +24,7 @@ import org.spongepowered.asm.mixin.injection.Redirect;
  * <p>
  * 同一行的 {@code N} 由 {@code getInterpolatedNoiseValue} 构造 {@code NoiseChunk} 求得，那个构造点
  * 已经被 {@code NoiseChunkMixin} 接管，只要上下文在位就同样用系统的 router。它的插值网格原本取维度
- * 设置，与生成侧取的系统 {@code noiseSize()} 不同，所以第二处把网格也换成系统的，保留维度设置给出的
+ * 设置，与生成侧取的系统网格不同，所以第二处把网格也换成系统的，保留维度设置给出的
  * 起止 Y，Y 门不变。
  *
  * <p>
@@ -50,8 +50,8 @@ public abstract class NoiseBasedChunkGeneratorDebugMixin {
      * N 的插值网格改取系统的 cell。起止 Y 保留维度设置那一份，Y 门与维度高度因此不变。
      *
      * <p>
-     * 系统的 {@code noiseSize()} 与生成侧同一单位，见 {@code AbstractTerrainFiller} 的换算。返回 null
-     * 表示该族不自定义网格，原样返回。
+     * 系统的两轴与生成侧同一单位，见 {@code AbstractTerrainFiller} 的换算。两轴都是 0 表示该族不自定义
+     * 网格，原样返回；只设一轴时另一轴取维度设置的。
      */
     @Redirect(method = "getInterpolatedNoiseValue(Lnet/minecraft/world/level/levelgen/RandomState;Lnet/minecraft/world/level/levelgen/DensityFunction$FunctionContext;)D", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/levelgen/NoiseGeneratorSettings;noiseSettings()Lnet/minecraft/world/level/levelgen/NoiseSettings;"))
     private static NoiseSettings farlands$systemGrid(NoiseGeneratorSettings settings) {
@@ -60,10 +60,13 @@ public abstract class NoiseBasedChunkGeneratorDebugMixin {
         if (!(system instanceof NoiseSystem noise)) {
             return vanilla;
         }
-        int[] size = noise.noiseSize();
-        if (size == null) {
+        int xz = noise.noiseSizeXZ();
+        int y = noise.noiseSizeY();
+        if (xz == 0 && y == 0) {
             return vanilla;
         }
-        return new NoiseSettings(vanilla.minY(), vanilla.height(), size[0], size[1]);
+        return new NoiseSettings(vanilla.minY(), vanilla.height(),
+                xz != 0 ? xz : vanilla.noiseSizeHorizontal(),
+                y != 0 ? y : vanilla.noiseSizeVertical());
     }
 }

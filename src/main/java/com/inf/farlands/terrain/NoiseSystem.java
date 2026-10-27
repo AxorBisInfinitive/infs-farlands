@@ -39,10 +39,17 @@ public interface NoiseSystem extends TerrainSystem {
     }
 
     /**
-     * 自定义 cell 网格，单位是 noiseSize，乘 4 得 cell 格数。
-     * 返回 {horizontal, vertical}，null 表示用维度 settings 默认。
+     * 水平方向的自定义 cell 网格，单位是 noiseSize，乘 4 得 cell 宽。两轴各自独立。
+     *
+     * <p>
+     * 0 表示这一轴用维度设置的那一份。只改一个方向时不必把另一个也填上。
      */
-    default int[] noiseSize() {
-        return null;
+    default int noiseSizeXZ() {
+        return 0;
+    }
+
+    /** 竖直方向的自定义 cell 网格，单位是 noiseSize，乘 4 得 cell 高。0 表示用维度设置的那一份。 */
+    default int noiseSizeY() {
+        return 0;
     }
 }

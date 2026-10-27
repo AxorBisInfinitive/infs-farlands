@@ -55,10 +55,4 @@ public final class SkyGirlNoiseSystem implements NoiseSystem {
     public DensityFunction createFinalDensity(NoiseRouter router) {
         return new SkyGirlNode(this.cellXz, this.cellY);
     }
-
-    /** 用维度噪声设置里的 cell 尺寸，本系统不自定义网格。 */
-    @Override
-    public int[] noiseSize() {
-        return null;
-    }
 }

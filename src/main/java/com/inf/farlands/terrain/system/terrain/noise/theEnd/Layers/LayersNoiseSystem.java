@@ -84,8 +84,13 @@ public final class LayersNoiseSystem implements NoiseSystem {
     }
 
     @Override
-    public int[] noiseSize() {
-        return new int[] { CELL_WIDTH / 4, CELL_HEIGHT / 4 };
+    public int noiseSizeXZ() {
+        return CELL_WIDTH / 4;
+    }
+
+    @Override
+    public int noiseSizeY() {
+        return CELL_HEIGHT / 4;
     }
 
     /** 末地的 default_block：密度为正处的落点。 */
