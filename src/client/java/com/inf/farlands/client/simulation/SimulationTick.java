@@ -6,9 +6,9 @@ import net.minecraft.world.level.block.Blocks;
 public class SimulationTick {
     public static void tickSimulation(Minecraft minecraft) {
         Simulation simulation = ((SimulationHolder) minecraft).simulation();
-        SimulationSection section = simulation.section(134217728L,
-                134217728L,
-                134217728L);
+        SimulationSection section = simulation.section(1L << 58,
+                1L << 58,
+                1L << 58);
         SimulationBlock block = SimulationBlock
                 .full(Blocks.GRASS_BLOCK.defaultBlockState());
         section.clearAll();

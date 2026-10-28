@@ -109,6 +109,7 @@
     "fix.xyz.NaturalSpawnerMixin",
     "fix.xyz.SpawnPlacementsMixin",
     "fix.xyz.EntityFluidInteractionMixin",
+    "fix.xyz.TeleportCommandMixin",
     "fix.y.BlockBlobFeatureMixin",
     "fix.y.TreeFeatureMixin",
     "fix.y.AbstractHugeMushroomFeatureMixin",
