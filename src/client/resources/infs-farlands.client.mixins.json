@@ -64,8 +64,8 @@
     "compat.sodium.ArrayLightDataCacheMixin",
     "compat.sodium.OcclusionCullerDirectionSetsMixin",
     "compat.sodium.RayOcclusionSectionTreeMixin",
-    "simulation.RenderSectionRegionMixin",
-    "simulation.SectionOcclusionGraphMixin"
+    "simulation.CollisionGetterMixin",
+    "simulation.LevelRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1

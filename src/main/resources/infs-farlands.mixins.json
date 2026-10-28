@@ -145,6 +145,7 @@
     "outside.LivingEntityMixin",
     "outside.WorldBorder$StaticBorderExtentMixin",
     "outside.WorldBorderMixin",
+    "simulation.ServerGamePacketListenerImplMixin",
     "compat.chunky.FabricWorldMixin"
   ],
   "injectors": {
