@@ -65,7 +65,8 @@
     "compat.sodium.OcclusionCullerDirectionSetsMixin",
     "compat.sodium.RayOcclusionSectionTreeMixin",
     "simulation.CollisionGetterMixin",
-    "simulation.LevelRendererMixin"
+    "simulation.LevelRendererMixin",
+    "simulation.MinecraftMixin"
   ],
   "injectors": {
     "defaultRequire": 1
