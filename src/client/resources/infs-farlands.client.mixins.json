@@ -63,7 +63,9 @@
     "compat.sodium.LevelBiomeSliceMixin",
     "compat.sodium.ArrayLightDataCacheMixin",
     "compat.sodium.OcclusionCullerDirectionSetsMixin",
-    "compat.sodium.RayOcclusionSectionTreeMixin"
+    "compat.sodium.RayOcclusionSectionTreeMixin",
+    "simulation.RenderSectionRegionMixin",
+    "simulation.SectionOcclusionGraphMixin"
   ],
   "injectors": {
     "defaultRequire": 1
