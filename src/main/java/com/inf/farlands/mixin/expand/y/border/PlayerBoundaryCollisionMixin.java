@@ -31,7 +31,8 @@ import org.spongepowered.asm.mixin.injection.ModifyArg;
  *
  * <p>
  * 两张板对每个玩家每次 {@code collide} 都加，不按距离开关：没有门就没有可被穿透的窗口，而远处的板不参与
- * {@code Shapes.collide} 的结果，代价只是每次多两个 shape。
+ * {@code Shapes.collide} 的结果，代价只是每次多两个 shape。{@code outside} 为真时不加：那一支连位置钳制
+ * 一起关掉，板留着会把 Y 卡回同一对平面上。
  *
  * <p>
  * 注入点选 {@code collide} 里对 {@code collideBoundingBox} 的那次调用，换第五个实参，不 redirect
@@ -49,6 +50,9 @@ public class PlayerBoundaryCollisionMixin {
     private List<VoxelShape> farlands$withBoundaryFaces(List<VoxelShape> hits) {
         Entity self = (Entity) (Object) this;
         if (!(self instanceof Player)) {
+            return hits;
+        }
+        if (FarlandsConfig.outside) {
             return hits;
         }
         AABB box = self.getBoundingBox();

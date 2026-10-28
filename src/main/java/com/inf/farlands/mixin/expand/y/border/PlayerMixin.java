@@ -29,9 +29,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(Player.class)
 public class PlayerMixin {
 
-    /** 越界时拉回并写回位置，正常坐标不动。 */
+    /** 越界时拉回并写回位置，正常坐标不动。outside 为真时不写回，Y 因此不再被夹。 */
     @Inject(method = "tick()V", at = @At("RETURN"))
     private void farlands$clampY(CallbackInfo ci) {
+        if (FarlandsConfig.outside) {
+            return;
+        }
         Player self = (Player) (Object) this;
         double y = Mth.clamp(self.getY(), ~FarlandsConfig.borderAbsoluteMax + 1,
                 FarlandsConfig.borderAbsoluteMax - 1);
