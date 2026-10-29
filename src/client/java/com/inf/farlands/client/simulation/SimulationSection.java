@@ -42,6 +42,16 @@ public final class SimulationSection {
     /** 最近一次重建出来的快照段，空段为 null。 */
     private Simulation.SnapSection snap;
 
+    /**
+     * 非空格的槽位下标，供碰撞、拾取与烘几何按需遍历，避免每次扫 4096 槽。
+     *
+     * <p>
+     * 维护点只有 {@link #set}、{@link #clear} 与 {@link #clearAll} 三处，摘除用尾元素顶上，不保序。
+     */
+    private int[] occupied = new int[16];
+
+    private int occupiedCount;
+
     SimulationSection(long sectionX, long sectionY, long sectionZ) {
         this.sectionX = sectionX;
         this.sectionY = sectionY;
@@ -96,8 +106,10 @@ public final class SimulationSection {
         }
         if (previous == null) {
             this.count++;
+            this.farlands$occupy(index);
         } else if (block == null) {
             this.count--;
+            this.farlands$vacate(index);
         }
         this.slots[index] = block;
         this.dirty = true;
@@ -108,6 +120,21 @@ public final class SimulationSection {
         this.set(localX, localY, localZ, null);
     }
 
+    /** 读一格，供烘几何与命中用。局部坐标必须在 0 到 15 内。 */
+    public SimulationBlock blockAt(int localX, int localY, int localZ) {
+        return this.slots[farlands$index(localX, localY, localZ)];
+    }
+
+    /** 非空格的数量。 */
+    public int occupiedCount() {
+        return this.occupiedCount;
+    }
+
+    /** 第 i 个非空格的下标，形如 {@code (x << 8) | (y << 4) | z}。 */
+    public int occupiedIndex(int i) {
+        return this.occupied[i];
+    }
+
     /** 清整段。 */
     public void clearAll() {
         if (!this.eligible || this.count == 0) {
@@ -115,7 +142,25 @@ public final class SimulationSection {
         }
         Arrays.fill(this.slots, null);
         this.count = 0;
+        this.occupiedCount = 0;
         this.dirty = true;
+    }
+
+    private void farlands$occupy(int index) {
+        if (this.occupiedCount == this.occupied.length) {
+            this.occupied = Arrays.copyOf(this.occupied, this.occupied.length * 2);
+        }
+        this.occupied[this.occupiedCount++] = index;
+    }
+
+    /** 摘除用尾元素顶上，不保序，省一次搬移。 */
+    private void farlands$vacate(int index) {
+        for (int i = 0; i < this.occupiedCount; i++) {
+            if (this.occupied[i] == index) {
+                this.occupied[i] = this.occupied[--this.occupiedCount];
+                return;
+            }
+        }
     }
 
     /** 取走脏标记。 */
@@ -130,25 +175,25 @@ public final class SimulationSection {
     }
 
     /**
-     * 重建快照段：非空块表与段局部包围盒。
+     * 重建快照段：段局部包围盒，以及指向本段的引用。
      *
      * <p>
-     * 只在这里遍历 4096 槽，且只在脏的时候，逐块取 {@code shape.bounds()} 求并。形状本身不合并，合并
-     * 推迟到碰撞查询命中的那几块上。
+     * 不再为每个非空块造一条记录：渲染读显存里的段几何，碰撞与拾取按 {@link #occupiedIndex} 现取，所以快照只需
+     * 一段引用与包围盒。逐块对象的分配因此从提交路径上去掉。
      */
     void rebuild() {
         if (this.count == 0) {
             this.snap = null;
             return;
         }
-        List<Simulation.SnapBlock> blocks = new ArrayList<>(this.count);
         double minX = Double.POSITIVE_INFINITY;
         double minY = Double.POSITIVE_INFINITY;
         double minZ = Double.POSITIVE_INFINITY;
         double maxX = Double.NEGATIVE_INFINITY;
         double maxY = Double.NEGATIVE_INFINITY;
         double maxZ = Double.NEGATIVE_INFINITY;
-        for (int index = 0; index < this.slots.length; index++) {
+        for (int i = 0; i < this.occupiedCount; i++) {
+            int index = this.occupied[i];
             SimulationBlock block = this.slots[index];
             if (block == null) {
                 continue;
@@ -156,7 +201,6 @@ public final class SimulationSection {
             int localX = (index >> 8) & 15;
             int localY = (index >> 4) & 15;
             int localZ = index & 15;
-            blocks.add(new Simulation.SnapBlock(localX, localY, localZ, block));
             VoxelShape shape = block.shape();
             AABB bounds = shape.bounds().move(localX, localY, localZ);
             if (bounds.minX < minX) {
@@ -179,7 +223,7 @@ public final class SimulationSection {
             }
         }
         this.snap = new Simulation.SnapSection(this.sectionX, this.sectionY, this.sectionZ,
-                new AABB(minX, minY, minZ, maxX, maxY, maxZ), List.copyOf(blocks));
+                new AABB(minX, minY, minZ, maxX, maxY, maxZ), this);
     }
 
     private static int farlands$index(int localX, int localY, int localZ) {

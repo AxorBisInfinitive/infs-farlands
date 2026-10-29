@@ -61,17 +61,27 @@ public final class SimulationPick {
             if (Double.isNaN(sectionT) || sectionT >= bestT) {
                 continue;
             }
-            for (Simulation.SnapBlock block : section.blocks()) {
-                double minX = baseX + block.localX();
-                double minY = baseY + block.localY();
-                double minZ = baseZ + block.localZ();
+            SimulationSection live = section.section();
+            int occupied = live.occupiedCount();
+            for (int i = 0; i < occupied; i++) {
+                int index = live.occupiedIndex(i);
+                int localX = (index >> 8) & 15;
+                int localY = (index >> 4) & 15;
+                int localZ = index & 15;
+                SimulationBlock block = live.blockAt(localX, localY, localZ);
+                if (block == null) {
+                    continue;
+                }
+                double minX = baseX + localX;
+                double minY = baseY + localY;
+                double minZ = baseZ + localZ;
                 double t = enter(view, minX, minY, minZ, minX + 1.0, minY + 1.0, minZ + 1.0);
                 if (Double.isNaN(t) || t >= bestT) {
                     continue;
                 }
                 bestT = t;
                 best = new Hit(section.originX(), section.originY(), section.originZ(),
-                        block.localX(), block.localY(), block.localZ(), block.block().shape());
+                        localX, localY, localZ, block.shape());
             }
         }
         return best;

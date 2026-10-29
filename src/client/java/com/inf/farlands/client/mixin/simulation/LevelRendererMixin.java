@@ -1,12 +1,8 @@
 package com.inf.farlands.client.mixin.simulation;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
 import com.mojang.blaze3d.vertex.PoseStack;
 
+import com.inf.farlands.client.render.simulation.SimulationRenderPass;
 import com.inf.farlands.client.simulation.Simulation;
 import com.inf.farlands.client.simulation.SimulationHolder;
 import com.inf.farlands.client.simulation.SimulationPick;
@@ -17,19 +13,10 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.ShapeRenderer;
-import net.minecraft.client.renderer.Sheets;
-import net.minecraft.client.renderer.SubmitNodeCollector;
-import net.minecraft.client.renderer.block.BlockStateModelSet;
-import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
-import net.minecraft.client.renderer.block.dispatch.BlockStateModelPart;
-import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.state.level.LevelRenderState;
-import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.util.ARGB;
-import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -41,43 +28,22 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * 把模拟方块层的快照画出来，纯客户端。
+ * 模拟方块层的选择框，另加它需要的部分刻采集。
  *
  * <p>
- * 挂提交层而不是段编译：段的落点来自三个 int，段偏移是 {@code sectionCoord << 4}、块坐标是
- * {@code BlockPos}、区块坐标是 {@code SectionPos}，三者都在 int 上，int 之外的坐标那一路必然回绕。
- * 这里的位置只由姿态携带，每段一次平移，平移量由 {@link Simulation#delta} 给出，靠 long 相减保住精度。
+ * 方块本体与段几何已改由段级显存缓冲绘制，见 {@code ChunkSectionsToRenderMixin}；本类只剩选择框。
  *
  * <p>
- * 每帧在 {@code submitEntities} 的头部提交，同一个 {@code pass.executes} 里的 {@code renderSolidFeatures}
- * 随后消费它。几何在局部原点烘焙，位置全部来自这里压入的平移。
+ * 选择框不能借原版的数据流：{@code BlockOutlineRenderState} 的 {@code pos} 是三个 int，装不下 int 之外的段
+ * 原点；而 {@code ShapeRenderer} 只吃 double 偏移，量化只发生在最后写顶点的 float 上，命中本身已经保证偏移落
+ * 在 reach 加 16 之内。所以命中自己算，偏移自己给。
  *
  * <p>
- * 亮度写死 15 与 15。方块模型那条提交接口自带 lightCoords 参数，不走世界光照查询，所以不会画成黑的。
- *
- * <p>
- * 方块只活在客户端：不挡光、不可破坏、不参与遮挡与视锥，服务端不知道。碰撞也只在客户端算，见
- * {@code CollisionGetterMixin}。
- *
- * <p>
- * 选择框在这里一并画：{@code extractBlockOutline} 的尾部按原版的命中输入在快照上重算一次视线命中，
- * 结果留到渲染期由 {@code renderBlockOutline} 的头部画出来。位置只走 double 与 float，不经过
- * {@code BlockPos}，所以 int 之外也成立。准星先命中真实方块时不画，那时原版自己会画。
+ * 选择框在这里画：{@code extractBlockOutline} 的返回处按原版的命中输入在快照上重算一次视线命中，结果留到
+ * 渲染期由 {@code renderBlockOutline} 的头部画出来。准星先命中真实方块时不画，那时原版自己会画。
  */
 @Mixin(LevelRenderer.class)
 public class LevelRendererMixin {
-
-    /** 方块光与天光都是 15。打包式是 {@code blockLight << 4 | skyLight << 20}。 */
-    @Unique
-    private static final int FULL_BRIGHT = (15 << 4) | (15 << 20);
-
-    /** 无染色层。空数组让每个 quad 的 tintIndex 都落空。 */
-    @Unique
-    private static final int[] NO_TINT = new int[0];
-
-    /** 方块状态到模型部件表，取一次缓存。渲染线程独占，不需要同步。 */
-    @Unique
-    private static final Map<BlockState, List<BlockStateModelPart>> PARTS = new HashMap<>();
 
     /** 本帧 {@code pick} 用的部分刻。由 {@code extractLevel} 的第三参带入，与 vanilla 的命中同源。 */
     @Unique
@@ -86,48 +52,6 @@ public class LevelRendererMixin {
     /** 本帧算好的选择框命中，渲染期取用一次即清。 */
     @Unique
     private SimulationPick.Hit farlands$outline;
-
-    @Inject(method = "submitEntities", at = @At("HEAD"))
-    private void farlands$renderSimulation(PoseStack poseStack, LevelRenderState state,
-            SubmitNodeCollector output, CallbackInfo ci) {
-        Simulation.Snapshot snapshot = ((SimulationHolder) Minecraft.getInstance()).simulation().snapshot();
-        List<Simulation.SnapSection> sections = snapshot.sections();
-        if (sections.isEmpty()) {
-            return;
-        }
-        Vec3 camera = state.cameraRenderState.pos;
-        RenderType renderType = Sheets.cutoutBlockSheet();
-        for (Simulation.SnapSection section : sections) {
-            poseStack.pushPose();
-            poseStack.translate(Simulation.delta(section.originX(), camera.x()),
-                    Simulation.delta(section.originY(), camera.y()),
-                    Simulation.delta(section.originZ(), camera.z()));
-            for (Simulation.SnapBlock block : section.blocks()) {
-                poseStack.pushPose();
-                poseStack.translate(block.localX(), block.localY(), block.localZ());
-                output.submitBlockModel(poseStack, renderType, farlands$parts(block.block().state()), NO_TINT,
-                        FULL_BRIGHT, OverlayTexture.NO_OVERLAY, 0);
-                poseStack.popPose();
-            }
-            poseStack.popPose();
-        }
-    }
-
-    /** 该方块状态的模型部件表，首次取用时建。 */
-    @Unique
-    private static List<BlockStateModelPart> farlands$parts(BlockState state) {
-        List<BlockStateModelPart> parts = PARTS.get(state);
-        if (parts != null) {
-            return parts;
-        }
-        BlockStateModelSet set = Minecraft.getInstance().getModelManager().getBlockStateModelSet();
-        BlockStateModel model = set.get(state);
-        List<BlockStateModelPart> built = new ArrayList<>();
-        model.collectParts(RandomSource.create(0L), built);
-        parts = List.copyOf(built);
-        PARTS.put(state, parts);
-        return parts;
-    }
 
     /**
      * 记下本帧的部分刻，并作废上一帧留下的命中。
@@ -141,6 +65,23 @@ public class LevelRendererMixin {
             CallbackInfo ci) {
         this.farlands$partialTicks = deltaPartialTick;
         this.farlands$outline = null;
+    }
+
+    /**
+     * 在抽取阶段末尾把模拟层的绘制批次准备好。
+     *
+     * <p>
+     * 必须落在 pass 之外：{@code CommandEncoder.writeToBuffer} 在 pass 打开期间会抛
+     * {@code Close the existing render pass before performing additional commands}，而渲染期那次拼接点就在
+     * 宿主的段 pass 之内。抽取阶段没有开 pass，段 UBO 因此在这里写。
+     */
+    @Inject(method = "extractLevel(Lnet/minecraft/client/DeltaTracker;Lnet/minecraft/client/Camera;F)V", at = @At("RETURN"))
+    private void farlands$prepareSimulation(DeltaTracker deltaTracker, Camera camera, float deltaPartialTick,
+            CallbackInfo ci) {
+        LevelRenderState state = Minecraft.getInstance().gameRenderer.getGameRenderState().levelRenderState;
+        SimulationRenderPass.INSTANCE.prepare(
+                state.chunkSectionsToRender == null ? null : state.chunkSectionsToRender.textureView(),
+                state.cameraRenderState);
     }
 
     /**
@@ -203,5 +144,18 @@ public class LevelRendererMixin {
         Minecraft minecraft = Minecraft.getInstance();
         ShapeRenderer.renderShape(poseStack, bufferSource.getBuffer(RenderTypes.lines()), hit.shape(), x, y, z,
                 ARGB.black(102), minecraft.gameRenderer.getGameRenderState().windowRenderState.appropriateLineWidth);
+    }
+
+    /**
+     * 一帧的命令全部提交之后推进一步段 UBO 的轮转。
+     *
+     * <p>
+     * 锚点选这里而不是抽取阶段：{@code DynamicUniformStorage} 的 fence 建在轮转那一刻，只有建在本帧 draw 之后，
+     * 三帧后复用同一条缓冲时等待它才是等在途的读。vanilla 自己也在 {@code RenderSystem.flipFrame} 里做同一件事，
+     * 而 {@code flipFrame} 调的就是本方法。
+     */
+    @Inject(method = "endFrame", at = @At("RETURN"))
+    private void farlands$endSimulationFrame(CallbackInfo ci) {
+        SimulationRenderPass.INSTANCE.endFrame();
     }
 }

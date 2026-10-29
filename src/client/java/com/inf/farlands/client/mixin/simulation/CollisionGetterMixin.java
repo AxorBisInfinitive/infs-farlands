@@ -6,6 +6,7 @@ import java.util.List;
 import com.google.common.collect.Iterables;
 
 import com.inf.farlands.client.simulation.Simulation;
+import com.inf.farlands.client.simulation.SimulationBlock;
 import com.inf.farlands.client.simulation.SimulationHolder;
 import com.inf.farlands.client.simulation.SimulationSection;
 
@@ -61,17 +62,26 @@ public interface CollisionGetterMixin {
             if (!local.intersects(section.localBounds())) {
                 continue;
             }
-            for (Simulation.SnapBlock block : section.blocks()) {
-                VoxelShape shape = block.block().shape();
-                AABB blockBounds = shape.bounds().move(block.localX(), block.localY(), block.localZ());
+            SimulationSection live = section.section();
+            int occupied = live.occupiedCount();
+            for (int i = 0; i < occupied; i++) {
+                int index = live.occupiedIndex(i);
+                int localX = (index >> 8) & 15;
+                int localY = (index >> 4) & 15;
+                int localZ = index & 15;
+                SimulationBlock block = live.blockAt(localX, localY, localZ);
+                if (block == null) {
+                    continue;
+                }
+                VoxelShape shape = block.shape();
+                AABB blockBounds = shape.bounds().move(localX, localY, localZ);
                 if (!local.intersects(blockBounds)) {
                     continue;
                 }
                 if (hits == null) {
                     hits = new ArrayList<>();
                 }
-                hits.add(shape.move(block.localX(), block.localY(), block.localZ())
-                        .move(originX, originY, originZ));
+                hits.add(shape.move(localX, localY, localZ).move(originX, originY, originZ));
             }
         }
         if (hits == null) {

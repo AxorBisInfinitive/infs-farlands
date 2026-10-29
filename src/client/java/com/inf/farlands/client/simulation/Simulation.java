@@ -5,6 +5,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.inf.farlands.client.render.simulation.SimulationGeometry;
+
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.util.Mth;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.phys.AABB;
 
 /**
@@ -30,6 +37,172 @@ public final class Simulation {
 
     private volatile Snapshot snapshot = Snapshot.EMPTY;
 
+    /** 当前图层定义。为空表示没有自动模拟的层。 */
+    private SimulationLayer layer;
+
+    /** 已绑定的列，键是 {@code ChunkPos.pack}。 */
+    private final LongOpenHashSet boundColumns = new LongOpenHashSet();
+
+    /** 已绑定但几何尚未烘的列。每 tick 按到玩家的距离取最近的一批。 */
+    private final LongOpenHashSet pending = new LongOpenHashSet();
+
+    /** 每 tick 烘几段几何，把建立成本摊开。取最近的那几列。 */
+    private static final int BUILD_PER_TICK = 8;
+
+    /**
+     * 换层或退世界时调。层为空即关闭自动模拟。
+     *
+     * <p>
+     * 段容器与显存一并清空：换层之后旧层的段没有意义，几何也不再被任何 draw 引用。
+     */
+    public void setLayer(SimulationLayer layer) {
+        this.layer = layer;
+        this.boundColumns.clear();
+        this.pending.clear();
+        this.sections.clear();
+        this.structureChanged = true;
+        this.snapshot = Snapshot.EMPTY;
+        SimulationGeometry.instance().clear();
+    }
+
+    /**
+     * 一列进入方阵：绑定并跑一次生产者。
+     *
+     * <p>
+     * 绑定与客户端有没有这一列的 chunk 无关，判据只有「在不在方阵里」。
+     */
+    private void farlands$bind(SimulationLayer current, int chunkX, int chunkZ) {
+        long key = ChunkPos.pack(chunkX, chunkZ);
+        if (!this.boundColumns.add(key)) {
+            return;
+        }
+        SimulationSection section = this.section(chunkX, current.sectionY(), chunkZ);
+        current.produce(section);
+        this.pending.add(key);
+    }
+
+    /** 一列离开方阵：摘段并记待释放的几何。释放由调用方批量做。 */
+    private void farlands$unbind(long key) {
+        int chunkX = ChunkPos.getX(key);
+        int chunkZ = ChunkPos.getZ(key);
+        if (!this.boundColumns.remove(key)) {
+            return;
+        }
+        this.pending.remove(key);
+        this.removeSection(chunkX, this.layer.sectionY(), chunkZ);
+    }
+
+    /**
+     * 每 tick 一次：按玩家方阵对账绑定、按距离限量烘几何、发布快照。
+     *
+     * <p>
+     * 半径取客户端渲染距离，不另设上限。绑定与客户端有没有那些 chunk 无关：方阵覆盖到的列一律有段，于是碰撞、
+     * 线框与渲染都不依赖 chunk 是否存在。
+     */
+    public void tickSimulation(ClientLevel level) {
+        SimulationLayer current = this.layer;
+        if (current == null) {
+            return;
+        }
+        net.minecraft.client.Minecraft minecraft = net.minecraft.client.Minecraft.getInstance();
+        net.minecraft.world.entity.player.Player player = minecraft.player;
+        if (player == null) {
+            return;
+        }
+        int radius = minecraft.options.renderDistance().get();
+        int centerX = Mth.floor(player.getX()) >> 4;
+        int centerZ = Mth.floor(player.getZ()) >> 4;
+        this.farlands$reconcileSquare(current, centerX, centerZ, radius);
+        this.farlands$buildNearest(current, centerX, centerZ);
+        this.commit();
+    }
+
+    /**
+     * 方阵对账：出方阵的解绑并批量释放几何，进方阵的绑定。
+     *
+     * <p>
+     * 释放走一次 fence：瞬移或视距变化时会有成百上千列同时解绑，逐列建 fence 会把主线程按在 GPU 上。
+     */
+    private void farlands$reconcileSquare(SimulationLayer current, int centerX, int centerZ, int radius) {
+        List<Long> stale = null;
+        for (long key : this.boundColumns) {
+            int chunkX = ChunkPos.getX(key);
+            int chunkZ = ChunkPos.getZ(key);
+            if (Math.abs(chunkX - centerX) > radius || Math.abs(chunkZ - centerZ) > radius) {
+                if (stale == null) {
+                    stale = new ArrayList<>();
+                }
+                stale.add(key);
+            }
+        }
+        if (stale != null) {
+            for (long key : stale) {
+                this.farlands$unbind(key);
+            }
+            SimulationGeometry.instance().releaseAll(stale);
+        }
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                int chunkX = centerX + dx;
+                int chunkZ = centerZ + dz;
+                if (this.boundColumns.contains(ChunkPos.pack(chunkX, chunkZ))) {
+                    continue;
+                }
+                this.farlands$bind(current, chunkX, chunkZ);
+            }
+        }
+    }
+
+    /**
+     * 从待烘集合里按到中心的切比雪夫距离取最近的一批，烘完上传。
+     *
+     * <p>
+     * 先进先出在半径 32 时会让脚下的草等半分钟，按距离取之后近的先出。
+     */
+    private void farlands$buildNearest(SimulationLayer current, int centerX, int centerZ) {
+        if (this.pending.isEmpty()) {
+            return;
+        }
+        int want = Math.min(BUILD_PER_TICK, this.pending.size());
+        long[] picked = new long[want];
+        int[] distances = new int[want];
+        int found = 0;
+        for (long key : this.pending) {
+            int distance = Math.max(Math.abs(ChunkPos.getX(key) - centerX),
+                    Math.abs(ChunkPos.getZ(key) - centerZ));
+            if (found < want) {
+                picked[found] = key;
+                distances[found] = distance;
+                found++;
+                continue;
+            }
+            int worst = 0;
+            for (int i = 1; i < want; i++) {
+                if (distances[i] > distances[worst]) {
+                    worst = i;
+                }
+            }
+            if (distance < distances[worst]) {
+                picked[worst] = key;
+                distances[worst] = distance;
+            }
+        }
+        for (int i = 0; i < found; i++) {
+            long key = picked[i];
+            this.pending.remove(key);
+            int chunkX = ChunkPos.getX(key);
+            int chunkZ = ChunkPos.getZ(key);
+            SimulationSection section = this.sections.get(new SectionKey(chunkX, current.sectionY(), chunkZ));
+            if (section == null || section.count() == 0) {
+                continue;
+            }
+            SimulationMesher.Mesh mesh = SimulationMesher.build(section);
+            if (mesh != null) {
+                SimulationGeometry.instance().upload(key, mesh);
+            }
+        }
+    }
+
     /** 取或建一段。可玩界内的段也会返回对象，只是写入被丢弃。 */
     public SimulationSection section(long sectionX, long sectionY, long sectionZ) {
         SectionKey key = new SectionKey(sectionX, sectionY, sectionZ);
@@ -51,6 +224,8 @@ public final class Simulation {
 
     /** 全部清空。卸关卡时调用。 */
     public void clear() {
+        this.boundColumns.clear();
+        this.pending.clear();
         this.sections.clear();
         this.structureChanged = true;
         this.snapshot = Snapshot.EMPTY;
@@ -125,9 +300,15 @@ public final class Simulation {
         }
     }
 
-    /** 快照里的一段：段原点的 long、段局部包围盒、非空块。 */
+    /**
+     * 快照里的一段：段坐标系的三轴、段局部包围盒，以及指向段本身的引用。
+     *
+     * <p>
+     * 引用而不是逐块拷贝：渲染读的是上传好的段几何，碰撞与拾取按 {@code occupiedIndex} 现取。代价是快照从
+     * 完全不可变退成「引用不可变」，那两张容器只在客户端主线程写，碰撞与拾取也在主线程调，所以读侧不跨线程。
+     */
     public record SnapSection(long sectionX, long sectionY, long sectionZ, AABB localBounds,
-            List<SnapBlock> blocks) {
+            SimulationSection section) {
 
         /** 世界坐标的段原点。 */
         public long originX() {
@@ -141,9 +322,5 @@ public final class Simulation {
         public long originZ() {
             return this.sectionZ * SimulationSection.SIZE;
         }
-    }
-
-    /** 快照里的一个块：段内局部坐标与方块。 */
-    public record SnapBlock(int localX, int localY, int localZ, SimulationBlock block) {
     }
 }
