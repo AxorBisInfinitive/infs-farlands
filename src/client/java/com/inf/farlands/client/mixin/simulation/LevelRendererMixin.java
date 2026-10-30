@@ -2,9 +2,11 @@ package com.inf.farlands.client.mixin.simulation;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 
+import com.inf.farlands.client.render.simulation.SimulationGeometry;
 import com.inf.farlands.client.render.simulation.SimulationRenderPass;
 import com.inf.farlands.client.simulation.Simulation;
 import com.inf.farlands.client.simulation.SimulationHolder;
+import com.inf.farlands.client.simulation.SimulationMesher;
 import com.inf.farlands.client.simulation.SimulationPick;
 
 import net.minecraft.client.Camera;
@@ -52,6 +54,30 @@ public class LevelRendererMixin {
     /** 本帧算好的选择框命中，渲染期取用一次即清。 */
     @Unique
     private SimulationPick.Hit farlands$outline;
+
+    /**
+     * 全局重建时作废模拟层的已烘结果。
+     *
+     * <p>
+     * 触发点：资源重载成功分支、{@code ambientOcclusion}、{@code cutoutLeaves}、{@code improvedTransparency}、
+     * 群系混合半径、有效渲染距离变化，以及 {@code setLevel}。这些都改已烘入顶点或落在模型与图集上的东西，
+     * 所以清模型部件缓存、释放全部段几何、把已绑定的列放回待烘。
+     *
+     * <p>
+     * {@code setLevel} 那一次要跳过：此时 {@code Simulation.setLayer} 还没跑，缓存与列都属于旧关卡，
+     * 放回去也会被 {@code setLayer} 清掉。
+     */
+    @Inject(method = "allChanged", at = @At("RETURN"))
+    private void farlands$invalidateBakedGeometry(CallbackInfo ci) {
+        Minecraft minecraft = Minecraft.getInstance();
+        Simulation simulation = ((SimulationHolder) minecraft).simulation();
+        if (simulation.level() != minecraft.level) {
+            return;
+        }
+        SimulationMesher.clearParts();
+        SimulationGeometry.instance().clear();
+        simulation.requeueAllBound();
+    }
 
     /**
      * 记下本帧的部分刻，并作废上一帧留下的命中。
@@ -108,8 +134,10 @@ public class LevelRendererMixin {
         if (entity == null || minecraft.player == null) {
             return;
         }
+        Simulation simulation = ((SimulationHolder) minecraft).simulation();
         this.farlands$outline = SimulationPick.pick(
-                ((SimulationHolder) minecraft).simulation().snapshot(),
+                simulation.snapshot(),
+                simulation,
                 entity.getEyePosition(this.farlands$partialTicks),
                 entity.getViewVector(this.farlands$partialTicks),
                 minecraft.player.blockInteractionRange());

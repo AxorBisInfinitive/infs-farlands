@@ -10,6 +10,7 @@ import java.util.Map;
 import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.systems.RenderSystem;
 
+import com.inf.farlands.client.simulation.Simulation.SectionKey;
 import com.inf.farlands.client.simulation.SimulationMesher;
 
 import org.lwjgl.system.MemoryUtil;
@@ -32,7 +33,7 @@ public final class SimulationGeometry {
     public record Entry(GpuBuffer buffer, int vertexCount) {
     }
 
-    private final Map<Long, Entry> entries = new HashMap<>();
+    private final Map<SectionKey, Entry> entries = new HashMap<>();
 
     private SimulationGeometry() {
     }
@@ -42,7 +43,7 @@ public final class SimulationGeometry {
     }
 
     /** 上传一列的顶点。已有条目先释放。 */
-    public void upload(long columnKey, SimulationMesher.Mesh mesh) {
+    public void upload(SectionKey columnKey, SimulationMesher.Mesh mesh) {
         Entry previous = this.entries.remove(columnKey);
         if (previous != null) {
             farlands$release(previous.buffer());
@@ -62,12 +63,12 @@ public final class SimulationGeometry {
         this.entries.put(columnKey, new Entry(buffer, mesh.vertexCount()));
     }
 
-    public Entry get(long columnKey) {
+    public Entry get(SectionKey columnKey) {
         return this.entries.get(columnKey);
     }
 
     /** 释放一列。 */
-    public void release(long columnKey) {
+    public void release(SectionKey columnKey) {
         Entry entry = this.entries.remove(columnKey);
         if (entry != null) {
             farlands$release(entry.buffer());
@@ -77,13 +78,13 @@ public final class SimulationGeometry {
     /**
      * 成批释放。一批只建一条 fence：瞬移或视距变化时会有成百上千列同时解绑，逐列建 fence 会把主线程按在 GPU 上。
      */
-    public void releaseAll(Collection<Long> columnKeys) {
+    public void releaseAll(Collection<SectionKey> columnKeys) {
         if (columnKeys.isEmpty()) {
             return;
         }
         List<GpuBuffer> buffers = new ArrayList<>(columnKeys.size());
-        for (Long columnKey : columnKeys) {
-            Entry entry = this.entries.remove(columnKey.longValue());
+        for (SectionKey columnKey : columnKeys) {
+            Entry entry = this.entries.remove(columnKey);
             if (entry != null) {
                 buffers.add(entry.buffer());
             }

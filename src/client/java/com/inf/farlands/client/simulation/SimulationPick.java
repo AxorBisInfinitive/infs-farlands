@@ -1,5 +1,8 @@
 package com.inf.farlands.client.simulation;
 
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
@@ -15,7 +18,10 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * 实体，所以没有实体那一路的竞争。
  *
  * <p>
- * 命中按形状的包围盒算。整格形状时包围盒就是形状本身，与 vanilla 逐值相同；非整格或凹形形状会略微宽松。
+ * 命中按形状本身算：先取形状各轴的最小与最大坐标做粗筛，再对命中的块逐盒精修，所以半砖的空处不会命中，凹形也
+ * 不会比真实形状宽松。粗筛用的是形状自己的包围盒，不假设形状落在块内；空形状先跳过，因为空形状的 {@code min} 是
+ * {@code +Infinity}、{@code max} 是 {@code -Infinity}，直接喂进裁剪会变成无限盒。段级粗筛仍按段立方，形状越出所在段时那一筛会把
+ * 整段跳过，这条假设由生产者遵守。
  *
  * <p>
  * 纯函数，无状态。
@@ -42,16 +48,22 @@ public final class SimulationPick {
     /**
      * 取视线命中的那一块，没有命中返回 null。
      *
-     * @param eye   眼睛的世界坐标
-     * @param view  单位视线向量
-     * @param reach 距离上限，判据是严格小于
+     * <p>
+     * 形状来源与 vanilla 的 {@code ClipContext.OUTLINE} 一致：块上有轮廓覆盖就用它，否则走
+     * {@code state.getShape}。getter 由 {@code simulation} 构造，形状可能查邻块，所以要能跨段。
+     *
+     * @param simulation 模拟层，用于构造跨段的取数入口
+     * @param eye        眼睛的世界坐标
+     * @param view       单位视线向量
+     * @param reach      距离上限，判据是严格小于
      */
-    public static Hit pick(Simulation.Snapshot snapshot, Vec3 eye, Vec3 view, double reach) {
+    public static Hit pick(Simulation.Snapshot snapshot, Simulation simulation, Vec3 eye, Vec3 view, double reach) {
         Hit best = null;
         double bestT = reach;
         if (reach <= 0.0) {
             return null;
         }
+        BlockPos.MutableBlockPos localPos = new BlockPos.MutableBlockPos();
         for (Simulation.SnapSection section : snapshot.sections()) {
             double baseX = Simulation.delta(section.originX(), eye.x());
             double baseY = Simulation.delta(section.originY(), eye.y());
@@ -62,6 +74,7 @@ public final class SimulationPick {
                 continue;
             }
             SimulationSection live = section.section();
+            SectionGetter getter = new SectionGetter(live, simulation);
             int occupied = live.occupiedCount();
             for (int i = 0; i < occupied; i++) {
                 int index = live.occupiedIndex(i);
@@ -72,16 +85,39 @@ public final class SimulationPick {
                 if (block == null) {
                     continue;
                 }
-                double minX = baseX + localX;
-                double minY = baseY + localY;
-                double minZ = baseZ + localZ;
-                double t = enter(view, minX, minY, minZ, minX + 1.0, minY + 1.0, minZ + 1.0);
-                if (Double.isNaN(t) || t >= bestT) {
+                localPos.set(localX, localY, localZ);
+                VoxelShape shape = block.outlineShape();
+                if (shape == null) {
+                    shape = block.state().getShape(getter, localPos);
+                }
+                if (shape.isEmpty()) {
+                    continue;
+                }
+                double ox = baseX + localX;
+                double oy = baseY + localY;
+                double oz = baseZ + localZ;
+                double coarse = enter(view,
+                        ox + shape.min(Direction.Axis.X), oy + shape.min(Direction.Axis.Y),
+                        oz + shape.min(Direction.Axis.Z),
+                        ox + shape.max(Direction.Axis.X), oy + shape.max(Direction.Axis.Y),
+                        oz + shape.max(Direction.Axis.Z));
+                if (Double.isNaN(coarse) || coarse >= bestT) {
+                    continue;
+                }
+                double t = Double.POSITIVE_INFINITY;
+                for (AABB box : shape.toAabbs()) {
+                    double hit = enter(view, ox + box.minX, oy + box.minY, oz + box.minZ,
+                            ox + box.maxX, oy + box.maxY, oz + box.maxZ);
+                    if (!Double.isNaN(hit) && hit < t) {
+                        t = hit;
+                    }
+                }
+                if (t >= bestT) {
                     continue;
                 }
                 bestT = t;
                 best = new Hit(section.originX(), section.originY(), section.originZ(),
-                        localX, localY, localZ, block.shape());
+                        localX, localY, localZ, shape);
             }
         }
         return best;

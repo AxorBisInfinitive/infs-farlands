@@ -4,15 +4,12 @@ import java.util.List;
 
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.systems.RenderPass;
-import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.vertex.VertexFormat;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 
 import com.inf.farlands.client.render.simulation.SimulationPipelines;
 import com.inf.farlands.client.render.simulation.SimulationRenderPass;
 
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayerGroup;
 import net.minecraft.client.renderer.chunk.ChunkSectionsToRender;
 
@@ -31,6 +28,11 @@ import org.spongepowered.asm.mixin.injection.At;
  * <p>
  * 借用的是整趟 pass：颜色与深度目标、默认 uniform、Sampler0 的方块图集与 Sampler2 的 lightmap 都已由宿主绑好，
  * 这里只改管线、画我们那一批、再把管线改回实参给的值。
+ *
+ * <p>
+ * 索引缓冲用我们自己的，不由宿主那条共享顺序缓冲提供。宿主在 {@code renderGroup} 里先取共享缓冲的引用与类型、
+ * 后使用；若我们在这中间请求扩容，宿主持有的就是已关闭的旧对象。自有之后不碰共享缓冲，draw 的默认索引参数
+ * 传 null，每个 draw 自带缓冲与类型。
  *
  * <p>
  * 去重不比较管线：实参在调试线框模式下会是 {@code WIREFRAME}，比不了。改用一个位，在 {@code TRANSLUCENT} 那一支
@@ -59,9 +61,8 @@ public class ChunkSectionsToRenderMixin {
         if (batch == null || batch.indexCount() == 0) {
             return;
         }
-        RenderSystem.AutoStorageIndexBuffer sequential = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS);
         pass.setPipeline(SimulationPipelines.SIMULATION_TERRAIN);
-        pass.drawMultipleIndexed(batch.draws(), sequential.getBuffer(batch.indexCount()), sequential.type(),
+        pass.drawMultipleIndexed(batch.draws(), null, null,
                 List.of("SimSection"), batch.infos());
         pass.setPipeline(pipeline);
     }

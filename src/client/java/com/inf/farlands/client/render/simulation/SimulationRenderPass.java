@@ -4,11 +4,14 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.buffers.Std140Builder;
 import com.mojang.blaze3d.buffers.Std140SizeCalculator;
 import com.mojang.blaze3d.systems.RenderPass;
+import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.GpuTextureView;
+import com.mojang.blaze3d.vertex.VertexFormat;
 
 import com.inf.farlands.client.simulation.Simulation;
 import com.inf.farlands.client.simulation.SimulationHolder;
@@ -16,12 +19,12 @@ import com.inf.farlands.client.simulation.SimulationHolder;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.DynamicUniformStorage;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
-import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 import org.joml.Matrix4f;
 import org.joml.Matrix4fc;
+import org.lwjgl.system.MemoryUtil;
 
 /**
  * 每帧把可见的模拟段组织成一批 draw。
@@ -39,6 +42,11 @@ import org.joml.Matrix4fc;
  * <p>
  * 存储实例惰性建：它的构造器第一句要 {@code RenderSystem.getDevice()}，类初始化时机不受控，不能在静态字段
  * 初始化器里建。{@link #clear()} 之后实例作废，下一次 {@code prepare} 重建。
+ *
+ * <p>
+ * 索引缓冲是自有的，不借 {@code RenderSystem} 的共享顺序缓冲。共享那条由宿主在 {@code renderGroup} 里先取引用、
+ * 后使用，我们若在中间请求扩容，宿主持有的是已关闭的旧对象；自有之后这条时序窗口不存在。缓冲内容就是四边形的
+ * 顺序索引，长度按本帧最大单 draw，类型按顶点数在 SHORT 与 INT 之间选。
  */
 public final class SimulationRenderPass {
 
@@ -84,6 +92,11 @@ public final class SimulationRenderPass {
     /** 本帧准备好的批次，没有可见段时为 null。 */
     private Batch batch;
 
+    /** 自有的索引缓冲，内容是 0 起的四边形顺序索引。容量按索引数记。 */
+    private GpuBuffer indexBuffer;
+    private VertexFormat.IndexType indexType;
+    private int indexCapacity;
+
     private SimulationRenderPass() {
     }
 
@@ -108,8 +121,9 @@ public final class SimulationRenderPass {
         List<Simulation.SnapSection> visible = new ArrayList<>(sections.size());
         List<SimulationGeometry.Entry> buffers = new ArrayList<>(sections.size());
         int indices = 0;
+        int maxDrawIndices = 0;
         for (Simulation.SnapSection section : sections) {
-            long columnKey = ChunkPos.pack((int) section.sectionX(), (int) section.sectionZ());
+            Simulation.SectionKey columnKey = section.key();
             SimulationGeometry.Entry entry = SimulationGeometry.instance().get(columnKey);
             if (entry == null || entry.vertexCount() <= 0) {
                 continue;
@@ -119,7 +133,11 @@ public final class SimulationRenderPass {
                     section.originX() + 16.0, section.originY() + 16.0, section.originZ() + 16.0))) {
                 continue;
             }
-            indices += entry.vertexCount() / 4 * 6;
+            int drawIndices = entry.vertexCount() / 4 * 6;
+            indices += drawIndices;
+            if (drawIndices > maxDrawIndices) {
+                maxDrawIndices = drawIndices;
+            }
             visible.add(section);
             buffers.add(entry);
         }
@@ -127,6 +145,7 @@ public final class SimulationRenderPass {
         if (count == 0) {
             return;
         }
+        this.farlands$ensureIndices(maxDrawIndices);
         int atlasWidth = atlas.getWidth(0);
         int atlasHeight = atlas.getHeight(0);
         Matrix4f view = new Matrix4f(camera.viewRotationMatrix);
@@ -144,7 +163,7 @@ public final class SimulationRenderPass {
             SimulationGeometry.Entry entry = buffers.get(i);
             int slot = i;
             int drawIndices = entry.vertexCount() / 4 * 6;
-            draws.add(new RenderPass.Draw<>(0, entry.buffer(), null, null, 0, drawIndices, 0,
+            draws.add(new RenderPass.Draw<>(0, entry.buffer(), this.indexBuffer, this.indexType, 0, drawIndices, 0,
                     (all, uploader) -> uploader.upload("SimSection", all[slot])));
         }
         this.batch = new Batch(draws, slices, indices);
@@ -171,9 +190,60 @@ public final class SimulationRenderPass {
     /** 释放本类持有的显存。关服或换世界时调，之后实例作废，下一次 {@code prepare} 重建。 */
     public void clear() {
         this.batch = null;
+        if (this.indexBuffer != null) {
+            GpuBuffer buffer = this.indexBuffer;
+            this.indexBuffer = null;
+            this.indexType = null;
+            this.indexCapacity = 0;
+            RenderSystem.queueFencedTask(buffer::close);
+        }
         if (this.uniforms != null) {
             this.uniforms.close();
             this.uniforms = null;
+        }
+    }
+
+    /**
+     * 保证自有索引缓冲能装下本帧最大的一条 draw。
+     *
+     * <p>
+     * 类型按顶点数选，判据是 {@code IndexType.least}：顶点数不超过 65535 用 SHORT，否则 INT。用索引数去比会早
+     * 一档切宽，用 SHORT 装超限的缓冲会在驱动层静默截断。长度取 6 的整数倍，与四边形模式的步长对齐；不足时
+     * 按请求量翻倍再对齐，减少大段出现时反复重建。
+     */
+    private void farlands$ensureIndices(int neededIndices) {
+        if (neededIndices <= 0 || neededIndices <= this.indexCapacity) {
+            return;
+        }
+        int target = ((Math.max(neededIndices, this.indexCapacity * 2) + 5) / 6) * 6;
+        int vertexCount = target / 6 * 4;
+        VertexFormat.IndexType type = VertexFormat.IndexType.least(vertexCount);
+        ByteBuffer data = MemoryUtil.memAlloc(target * type.bytes);
+        GpuBuffer created;
+        try {
+            int quads = target / 6;
+            for (int quad = 0; quad < quads; quad++) {
+                int base = quad * 4;
+                if (type == VertexFormat.IndexType.INT) {
+                    data.putInt(base).putInt(base + 1).putInt(base + 2)
+                            .putInt(base + 2).putInt(base + 3).putInt(base);
+                } else {
+                    data.putShort((short) base).putShort((short) (base + 1)).putShort((short) (base + 2))
+                            .putShort((short) (base + 2)).putShort((short) (base + 3)).putShort((short) base);
+                }
+            }
+            data.flip();
+            created = RenderSystem.getDevice().createBuffer(() -> "farlands simulation indices",
+                    GpuBuffer.USAGE_INDEX, data);
+        } finally {
+            MemoryUtil.memFree(data);
+        }
+        GpuBuffer previous = this.indexBuffer;
+        this.indexBuffer = created;
+        this.indexType = type;
+        this.indexCapacity = target;
+        if (previous != null) {
+            RenderSystem.queueFencedTask(previous::close);
         }
     }
 

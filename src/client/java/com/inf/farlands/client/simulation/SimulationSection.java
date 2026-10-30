@@ -1,8 +1,6 @@
 package com.inf.farlands.client.simulation;
 
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.List;
 
 import com.inf.farlands.util.world.WorldBounds;
 
@@ -14,7 +12,6 @@ import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.chunk.PalettedContainerFactory;
 import net.minecraft.world.level.chunk.PalettedContainerRO;
 import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.shapes.VoxelShape;
 
 /**
  * 一段 16 立方的模拟方块，坐标为段坐标，三轴都是 long。
@@ -65,6 +62,12 @@ public final class SimulationSection {
     private int count;
 
     private boolean dirty;
+
+    /** 脏范围的段内局部坐标，供重烘与邻列失效用。干净时 min 大于 max。 */
+    private int dirtyMinX = Integer.MAX_VALUE;
+    private int dirtyMaxX = Integer.MIN_VALUE;
+    private int dirtyMinZ = Integer.MAX_VALUE;
+    private int dirtyMaxZ = Integer.MIN_VALUE;
 
     /** 最近一次重建出来的快照段，空段为 null。 */
     private Simulation.SnapSection snap;
@@ -119,11 +122,19 @@ public final class SimulationSection {
         return this.biomes.get(quartX, quartY, quartZ);
     }
 
-    /** 写一格群系。重建容器后整体换引用，读者不会看到中间态。 */
+    /**
+     * 写一格群系。拷一份容器、改一格再整体换引用，读者不会看到中间态。
+     *
+     * <p>
+     * 拷用 {@code copy()} 而不是 {@code recreate()}：后者按 palette 的第 0 项新建同质容器，会把其余 63 格
+     * 重置回那一项，单格写因此退化成整段重置。
+     */
     public void setBiome(int quartX, int quartY, int quartZ, Holder<Biome> biome) {
-        PalettedContainer<Holder<Biome>> next = this.biomes.recreate();
+        PalettedContainer<Holder<Biome>> next = this.biomes.copy();
         next.getAndSetUnchecked(quartX, quartY, quartZ, biome);
         this.biomes = next;
+        this.farlands$markDirty(quartX * 4, quartZ * 4);
+        this.farlands$markDirty(quartX * 4 + 3, quartZ * 4 + 3);
     }
 
     /** 填满整段的 quart 网格，一次换引用。 */
@@ -137,6 +148,8 @@ public final class SimulationSection {
             }
         }
         this.biomes = next;
+        this.farlands$markDirty(0, 0);
+        this.farlands$markDirty(SimulationSection.SIZE - 1, SimulationSection.SIZE - 1);
     }
 
     /** 该格两通道打包后的光，默认 0 即全黑。位段与 {@code LightCoordsUtil.pack} 同。 */
@@ -153,12 +166,15 @@ public final class SimulationSection {
     public void setLight(int localX, int localY, int localZ, int block, int sky) {
         this.blockLight.set(localX, localY, localZ, block);
         this.skyLight.set(localX, localY, localZ, sky);
+        this.farlands$markDirty(localX, localZ);
     }
 
     /** 整层同值。 */
     public void fillLight(int block, int sky) {
         this.blockLight.fill(block);
         this.skyLight.fill(sky);
+        this.farlands$markDirty(0, 0);
+        this.farlands$markDirty(SimulationSection.SIZE - 1, SimulationSection.SIZE - 1);
     }
 
     /** 该段是否参与模拟。可玩界内的段为假。 */
@@ -188,7 +204,7 @@ public final class SimulationSection {
             this.farlands$vacate(index);
         }
         this.slots[index] = block;
-        this.dirty = true;
+        this.farlands$markDirty(localX, localZ);
     }
 
     /** 清一格。 */
@@ -219,7 +235,8 @@ public final class SimulationSection {
         Arrays.fill(this.slots, null);
         this.count = 0;
         this.occupiedCount = 0;
-        this.dirty = true;
+        this.farlands$markDirty(0, 0);
+        this.farlands$markDirty(SimulationSection.SIZE - 1, SimulationSection.SIZE - 1);
     }
 
     private void farlands$occupy(int index) {
@@ -239,11 +256,39 @@ public final class SimulationSection {
         }
     }
 
-    /** 取走脏标记。 */
-    boolean takeDirty() {
-        boolean was = this.dirty;
+    /** 取走脏标记与它的局部范围；干净时返回 null。 */
+    public Dirty takeDirty() {
+        if (!this.dirty) {
+            return null;
+        }
         this.dirty = false;
-        return was;
+        Dirty range = new Dirty(this.dirtyMinX, this.dirtyMaxX, this.dirtyMinZ, this.dirtyMaxZ);
+        this.dirtyMinX = Integer.MAX_VALUE;
+        this.dirtyMaxX = Integer.MIN_VALUE;
+        this.dirtyMinZ = Integer.MAX_VALUE;
+        this.dirtyMaxZ = Integer.MIN_VALUE;
+        return range;
+    }
+
+    /** 一次脏标记覆盖的段内局部范围。 */
+    public record Dirty(int minX, int maxX, int minZ, int maxZ) {
+    }
+
+    /** 记一次脏，并把它覆盖的局部坐标并进范围。 */
+    private void farlands$markDirty(int localX, int localZ) {
+        if (localX < this.dirtyMinX) {
+            this.dirtyMinX = localX;
+        }
+        if (localX > this.dirtyMaxX) {
+            this.dirtyMaxX = localX;
+        }
+        if (localZ < this.dirtyMinZ) {
+            this.dirtyMinZ = localZ;
+        }
+        if (localZ > this.dirtyMaxZ) {
+            this.dirtyMaxZ = localZ;
+        }
+        this.dirty = true;
     }
 
     Simulation.SnapSection snap() {
@@ -257,49 +302,54 @@ public final class SimulationSection {
      * 不再为每个非空块造一条记录：渲染读显存里的段几何，碰撞与拾取按 {@link #occupiedIndex} 现取，所以快照只需
      * 一段引用与包围盒。逐块对象的分配因此从提交路径上去掉。
      */
+    /**
+     * 重建快照段：段局部的格并集包围盒，以及指向本段的引用。
+     *
+     * <p>
+     * 包围盒取已占用格的并集，不取形状的并集：形状按用途派生，可能依赖邻块状态，本方法没有 getter；而格并集对
+     * 「形状落在格内」的任何形状都是超集，作为粗筛合法。逐块对象仍不分配。
+     */
     void rebuild() {
         if (this.count == 0) {
             this.snap = null;
             return;
         }
-        double minX = Double.POSITIVE_INFINITY;
-        double minY = Double.POSITIVE_INFINITY;
-        double minZ = Double.POSITIVE_INFINITY;
-        double maxX = Double.NEGATIVE_INFINITY;
-        double maxY = Double.NEGATIVE_INFINITY;
-        double maxZ = Double.NEGATIVE_INFINITY;
+        int minX = Integer.MAX_VALUE;
+        int minY = Integer.MAX_VALUE;
+        int minZ = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE;
+        int maxY = Integer.MIN_VALUE;
+        int maxZ = Integer.MIN_VALUE;
         for (int i = 0; i < this.occupiedCount; i++) {
             int index = this.occupied[i];
-            SimulationBlock block = this.slots[index];
-            if (block == null) {
+            if (this.slots[index] == null) {
                 continue;
             }
             int localX = (index >> 8) & 15;
             int localY = (index >> 4) & 15;
             int localZ = index & 15;
-            VoxelShape shape = block.shape();
-            AABB bounds = shape.bounds().move(localX, localY, localZ);
-            if (bounds.minX < minX) {
-                minX = bounds.minX;
+            if (localX < minX) {
+                minX = localX;
             }
-            if (bounds.minY < minY) {
-                minY = bounds.minY;
+            if (localY < minY) {
+                minY = localY;
             }
-            if (bounds.minZ < minZ) {
-                minZ = bounds.minZ;
+            if (localZ < minZ) {
+                minZ = localZ;
             }
-            if (bounds.maxX > maxX) {
-                maxX = bounds.maxX;
+            if (localX > maxX) {
+                maxX = localX;
             }
-            if (bounds.maxY > maxY) {
-                maxY = bounds.maxY;
+            if (localY > maxY) {
+                maxY = localY;
             }
-            if (bounds.maxZ > maxZ) {
-                maxZ = bounds.maxZ;
+            if (localZ > maxZ) {
+                maxZ = localZ;
             }
         }
         this.snap = new Simulation.SnapSection(this.sectionX, this.sectionY, this.sectionZ,
-                new AABB(minX, minY, minZ, maxX, maxY, maxZ), this);
+                new Simulation.SectionKey(this.sectionX, this.sectionY, this.sectionZ),
+                new AABB(minX, minY, minZ, maxX + 1.0, maxY + 1.0, maxZ + 1.0), this);
     }
 
     private static int farlands$index(int localX, int localY, int localZ) {

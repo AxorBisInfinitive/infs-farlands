@@ -121,17 +121,22 @@ public abstract class FrustumMixin implements AnchoredFrustum {
      * 把相机后退到那个立方完全落进视锥。后退量记在 {@code back} 里，作用在偏移上，退出时一次写回。
      *
      * <p>
-     * 立方的两个角点按偏移算，即相对锚点的坐标。这要求 {@code cubeSize} 整除锚点的对齐单位 8，唯一调用点
-     * {@code LevelRenderer.offsetFrustum} 传的就是 8。
+     * 六个端点是「对齐到 {@code cubeSize} 的格点，减去循环开始时的相机」，即相机相对量；循环里再叠加
+     * {@code v * back} 这一项平移。减相机不能省：循环结束后相机是 {@code cam0 - v * back}，所以循环最后测的
+     * 盒，与之后 {@code cubeInFrustum} 对同一个盒算的是同一个表达式。少了它，循环测的是被平移了
+     * {@code cam0} 的盒，会在真实盒仍露在视锥外时退出。
+     *
+     * <p>
+     * 这要求 {@code cubeSize} 整除锚点的对齐单位 8，唯一调用点 {@code LevelRenderer.offsetFrustum} 传的就是 8。
      */
     @Inject(method = "offsetToFullyIncludeCameraCube", at = @At("HEAD"), cancellable = true)
     private void farlands$offsetToFullyIncludeCube(int cubeSize, CallbackInfoReturnable<Frustum> cir) {
-        double minX = Math.floor(this.camX / cubeSize) * cubeSize;
-        double minY = Math.floor(this.camY / cubeSize) * cubeSize;
-        double minZ = Math.floor(this.camZ / cubeSize) * cubeSize;
-        double maxX = Math.ceil(this.camX / cubeSize) * cubeSize;
-        double maxY = Math.ceil(this.camY / cubeSize) * cubeSize;
-        double maxZ = Math.ceil(this.camZ / cubeSize) * cubeSize;
+        double minX = Math.floor(this.camX / cubeSize) * cubeSize - this.camX;
+        double minY = Math.floor(this.camY / cubeSize) * cubeSize - this.camY;
+        double minZ = Math.floor(this.camZ / cubeSize) * cubeSize - this.camZ;
+        double maxX = Math.ceil(this.camX / cubeSize) * cubeSize - this.camX;
+        double maxY = Math.ceil(this.camY / cubeSize) * cubeSize - this.camY;
+        double maxZ = Math.ceil(this.camZ / cubeSize) * cubeSize - this.camZ;
         double back = 0.0;
         while (true) {
             int result = this.intersection.intersectAab(
