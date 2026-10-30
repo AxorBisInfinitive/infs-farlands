@@ -42,6 +42,16 @@ public final class WorldBounds {
     }
 
     /**
+     * 三轴是否都在可玩界内，任一轴界外即为假。与 {@link #inBlockXZ} 同族，只是把第三轴也收进来。
+     *
+     * <p>
+     * 判界的调用点一律用它，不要各自写三行 "或"。同一个语义在三处各写一遍，改一处就漏两处。
+     */
+    public static boolean inBlock(long x, long y, long z) {
+        return inBlock(x) && inBlock(y) && inBlock(z);
+    }
+
+    /**
      * 方块坐标是否在可表示范围内，即 int 全域。比可玩界两端各宽 16 格。
      */
     public static boolean inBlockAbsolute(long v) {

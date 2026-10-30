@@ -32,9 +32,7 @@ public class TeleportCommandMixin {
 
     @Redirect(method = "performTeleport", at = @At(value = "INVOKE", target = "Lnet/minecraft/core/BlockPos;containing(DDD)Lnet/minecraft/core/BlockPos;"))
     private static BlockPos farlands$spawnablePos(double x, double y, double z) {
-        if (!WorldBounds.inBlock((long) Math.floor(x))
-                || !WorldBounds.inBlock((long) Math.floor(y))
-                || !WorldBounds.inBlock((long) Math.floor(z))) {
+        if (!WorldBounds.inBlock((long) Math.floor(x), (long) Math.floor(y), (long) Math.floor(z))) {
             return BlockPos.ZERO;
         }
         return BlockPos.containing(x, y, z);

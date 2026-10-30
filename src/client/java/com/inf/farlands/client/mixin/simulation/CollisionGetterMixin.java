@@ -14,9 +14,12 @@ import com.inf.farlands.client.simulation.SimulationSection;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.CollisionGetter;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.shapes.BooleanOp;
 import net.minecraft.world.phys.shapes.CollisionContext;
@@ -44,17 +47,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * 同进程的服务端。
  *
  * <p>
- * 闸门之后，处理体只在客户端线程、只对那个 ClientLevel 运行，段容器的无锁读写因此成立。
+ * 遍历照抄 vanilla {@code BlockCollisions}：查询盒每轴外扩 1 格、容差 {@code 1.0E-7}；角格跳过，面格只测
+ * {@code hasLargeCollisionShape()} 的方块，边格只测 {@code MOVING_PISTON}。每格取
+ * {@code state.getCollisionShape}，整块走 {@code Shapes.block()} 的盒判交快路径，其余用
+ * {@code Shapes.joinIsNotEmpty} 精确判交。不再有格并集一类的粗筛，判定不依赖任何形状范围假设。
  *
  * <p>
- * 形状来源与 vanilla 同：块上有覆盖就用它，否则走 {@code state.getCollisionShape}，与
- * {@code BlockCollisions} 的入口一致；上下文是 {@link SimulatedCollisionContext}，把实体脚部折到段内局部
- * 坐标，否则 {@code isAbove} 在 {@code 2^40} 处恒真。空形状跳过，判交用 {@code Shapes.joinIsNotEmpty}，与
- * vanilla 一样只把真正接触的形状并入。
- *
- * <p>
- * 粗筛两级：段立方与查询盒判交，再用快照里的格并集包围盒判交。两者都是「形状落在格内」这一不变式下的超集，
- * 所以任何一级都不会误剪。
+ * 格坐标是 long，`Cursor3D` 与 `BlockPos` 都装不下，所以类型计数与三轴循环在这里就地展开，公式与
+ * {@code Cursor3D.getNextType} 相同。段与它的 getter、上下文只在跨段时重建，等同 vanilla 的 chunk 级缓存。
  */
 @Mixin(CollisionGetter.class)
 public interface CollisionGetterMixin {
@@ -69,58 +69,83 @@ public interface CollisionGetterMixin {
         if (simulation.level() != this) {
             return;
         }
-        Simulation.Snapshot snapshot = simulation.snapshot();
-        List<Simulation.SnapSection> sections = snapshot.sections();
-        if (sections.isEmpty()) {
+        if (simulation.snapshot().sections().isEmpty()) {
             return;
         }
+        long x0 = Mth.lfloor(box.minX - 1.0E-7) - 1L;
+        long x1 = Mth.lfloor(box.maxX + 1.0E-7) + 1L;
+        long y0 = Mth.lfloor(box.minY - 1.0E-7) - 1L;
+        long y1 = Mth.lfloor(box.maxY + 1.0E-7) + 1L;
+        long z0 = Mth.lfloor(box.minZ - 1.0E-7) - 1L;
+        long z1 = Mth.lfloor(box.maxZ + 1.0E-7) + 1L;
+        VoxelShape entityShape = Shapes.create(box);
         List<VoxelShape> hits = null;
         BlockPos.MutableBlockPos localPos = new BlockPos.MutableBlockPos();
-        for (Simulation.SnapSection section : sections) {
-            double originX = (double) section.originX();
-            double originY = (double) section.originY();
-            double originZ = (double) section.originZ();
-            AABB sectionBox = new AABB(originX, originY, originZ,
-                    originX + SimulationSection.SIZE, originY + SimulationSection.SIZE,
-                    originZ + SimulationSection.SIZE);
-            if (!box.intersects(sectionBox)) {
-                continue;
-            }
-            AABB local = box.move(-originX, -originY, -originZ);
-            if (!local.intersects(section.localBounds())) {
-                continue;
-            }
-            VoxelShape entityShape = Shapes.create(local);
-            SimulationSection live = section.section();
-            SectionGetter getter = new SectionGetter(live, simulation);
-            CollisionContext context = source == null ? CollisionContext.empty()
-                    : new SimulatedCollisionContext(source, section.originY());
-            int occupied = live.occupiedCount();
-            for (int i = 0; i < occupied; i++) {
-                int index = live.occupiedIndex(i);
-                int localX = (index >> 8) & 15;
-                int localY = (index >> 4) & 15;
-                int localZ = index & 15;
-                SimulationBlock block = live.blockAt(localX, localY, localZ);
-                if (block == null) {
-                    continue;
+        boolean hasSection = false;
+        long sectionX = 0L;
+        long sectionY = 0L;
+        long sectionZ = 0L;
+        SimulationSection section = null;
+        SectionGetter getter = null;
+        CollisionContext context = null;
+        for (long x = x0; x <= x1; x++) {
+            for (long y = y0; y <= y1; y++) {
+                for (long z = z0; z <= z1; z++) {
+                    int type = (x == x0 || x == x1 ? 1 : 0) + (y == y0 || y == y1 ? 1 : 0)
+                            + (z == z0 || z == z1 ? 1 : 0);
+                    if (type == 3) {
+                        continue;
+                    }
+                    long sx = Math.floorDiv(x, (long) SimulationSection.SIZE);
+                    long sy = Math.floorDiv(y, (long) SimulationSection.SIZE);
+                    long sz = Math.floorDiv(z, (long) SimulationSection.SIZE);
+                    if (!hasSection || sx != sectionX || sy != sectionY || sz != sectionZ) {
+                        hasSection = true;
+                        sectionX = sx;
+                        sectionY = sy;
+                        sectionZ = sz;
+                        section = simulation.sectionOrNull(sx, sy, sz);
+                        getter = section == null ? null : new SectionGetter(section, simulation);
+                        context = section == null ? null
+                                : source == null ? CollisionContext.empty()
+                                        : new SimulatedCollisionContext(source, sy * SimulationSection.SIZE);
+                    }
+                    if (section == null) {
+                        continue;
+                    }
+                    int localX = (int) (x - sx * SimulationSection.SIZE);
+                    int localY = (int) (y - sy * SimulationSection.SIZE);
+                    int localZ = (int) (z - sz * SimulationSection.SIZE);
+                    SimulationBlock block = section.blockAt(localX, localY, localZ);
+                    if (block == null) {
+                        continue;
+                    }
+                    BlockState state = block.state();
+                    if (type == 1 && !state.hasLargeCollisionShape()) {
+                        continue;
+                    }
+                    if (type == 2 && !state.is(Blocks.MOVING_PISTON)) {
+                        continue;
+                    }
+                    localPos.set(localX, localY, localZ);
+                    VoxelShape shape = block.collisionShape();
+                    if (shape == null) {
+                        shape = state.getCollisionShape(getter, localPos, context);
+                    }
+                    VoxelShape moved = shape.move((double) x, (double) y, (double) z);
+                    if (shape == Shapes.block()) {
+                        if (!box.intersects((double) x, (double) y, (double) z,
+                                (double) x + 1.0, (double) y + 1.0, (double) z + 1.0)) {
+                            continue;
+                        }
+                    } else if (moved.isEmpty() || !Shapes.joinIsNotEmpty(moved, entityShape, BooleanOp.AND)) {
+                        continue;
+                    }
+                    if (hits == null) {
+                        hits = new ArrayList<>();
+                    }
+                    hits.add(moved);
                 }
-                localPos.set(localX, localY, localZ);
-                VoxelShape shape = block.collisionShape();
-                if (shape == null) {
-                    shape = block.state().getCollisionShape(getter, localPos, context);
-                }
-                if (shape.isEmpty()) {
-                    continue;
-                }
-                VoxelShape atLocal = shape.move(localX, localY, localZ);
-                if (!Shapes.joinIsNotEmpty(atLocal, entityShape, BooleanOp.AND)) {
-                    continue;
-                }
-                if (hits == null) {
-                    hits = new ArrayList<>();
-                }
-                hits.add(shape.move(originX + localX, originY + localY, originZ + localZ));
             }
         }
         if (hits == null) {

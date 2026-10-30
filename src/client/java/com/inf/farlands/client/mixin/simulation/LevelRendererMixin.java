@@ -61,7 +61,7 @@ public class LevelRendererMixin {
      * <p>
      * 触发点：资源重载成功分支、{@code ambientOcclusion}、{@code cutoutLeaves}、{@code improvedTransparency}、
      * 群系混合半径、有效渲染距离变化，以及 {@code setLevel}。这些都改已烘入顶点或落在模型与图集上的东西，
-     * 所以清模型部件缓存、释放全部段几何、把已绑定的列放回待烘。
+     * 所以清模型部件缓存、释放全部段几何、把全部段放回待烘。
      *
      * <p>
      * {@code setLevel} 那一次要跳过：此时 {@code Simulation.setLayer} 还没跑，缓存与列都属于旧关卡，
@@ -76,7 +76,7 @@ public class LevelRendererMixin {
         }
         SimulationMesher.clearParts();
         SimulationGeometry.instance().clear();
-        simulation.requeueAllBound();
+        simulation.requeueAllSections();
     }
 
     /**
@@ -136,7 +136,6 @@ public class LevelRendererMixin {
         }
         Simulation simulation = ((SimulationHolder) minecraft).simulation();
         this.farlands$outline = SimulationPick.pick(
-                simulation.snapshot(),
                 simulation,
                 entity.getEyePosition(this.farlands$partialTicks),
                 entity.getViewVector(this.farlands$partialTicks),

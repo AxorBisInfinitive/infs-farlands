@@ -11,7 +11,6 @@ import net.minecraft.world.level.chunk.DataLayer;
 import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.chunk.PalettedContainerFactory;
 import net.minecraft.world.level.chunk.PalettedContainerRO;
-import net.minecraft.world.phys.AABB;
 
 /**
  * 一段 16 立方的模拟方块，坐标为段坐标，三轴都是 long。
@@ -296,60 +295,19 @@ public final class SimulationSection {
     }
 
     /**
-     * 重建快照段：段局部包围盒，以及指向本段的引用。
+     * 重建快照段：只带本段的引用与键，不再算包围盒。
      *
      * <p>
-     * 不再为每个非空块造一条记录：渲染读显存里的段几何，碰撞与拾取按 {@link #occupiedIndex} 现取，所以快照只需
-     * 一段引用与包围盒。逐块对象的分配因此从提交路径上去掉。
-     */
-    /**
-     * 重建快照段：段局部的格并集包围盒，以及指向本段的引用。
-     *
-     * <p>
-     * 包围盒取已占用格的并集，不取形状的并集：形状按用途派生，可能依赖邻块状态，本方法没有 getter；而格并集对
-     * 「形状落在格内」的任何形状都是超集，作为粗筛合法。逐块对象仍不分配。
+     * 包围盒曾经是已占用格的并集，被碰撞与拾取当粗筛用。那套粗筛依赖「形状落在格内」，而派生形状不满足它，
+     * 现在两处消费者都改成按格遍历、逐格取真实形状，不再需要这个超集。逐块对象仍不分配。
      */
     void rebuild() {
         if (this.count == 0) {
             this.snap = null;
             return;
         }
-        int minX = Integer.MAX_VALUE;
-        int minY = Integer.MAX_VALUE;
-        int minZ = Integer.MAX_VALUE;
-        int maxX = Integer.MIN_VALUE;
-        int maxY = Integer.MIN_VALUE;
-        int maxZ = Integer.MIN_VALUE;
-        for (int i = 0; i < this.occupiedCount; i++) {
-            int index = this.occupied[i];
-            if (this.slots[index] == null) {
-                continue;
-            }
-            int localX = (index >> 8) & 15;
-            int localY = (index >> 4) & 15;
-            int localZ = index & 15;
-            if (localX < minX) {
-                minX = localX;
-            }
-            if (localY < minY) {
-                minY = localY;
-            }
-            if (localZ < minZ) {
-                minZ = localZ;
-            }
-            if (localX > maxX) {
-                maxX = localX;
-            }
-            if (localY > maxY) {
-                maxY = localY;
-            }
-            if (localZ > maxZ) {
-                maxZ = localZ;
-            }
-        }
         this.snap = new Simulation.SnapSection(this.sectionX, this.sectionY, this.sectionZ,
-                new Simulation.SectionKey(this.sectionX, this.sectionY, this.sectionZ),
-                new AABB(minX, minY, minZ, maxX + 1.0, maxY + 1.0, maxZ + 1.0), this);
+                new Simulation.SectionKey(this.sectionX, this.sectionY, this.sectionZ), this);
     }
 
     private static int farlands$index(int localX, int localY, int localZ) {

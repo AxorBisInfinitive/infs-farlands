@@ -28,6 +28,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * 全部放行：超快移动判据、{@code moved wrongly} 的位移阈值、以及新碰撞检测。
  *
  * <p>
+ * 界外按三轴判：任一轴在可玩界之外即为界外。判据收在 {@code WorldBounds.inBlock(long, long, long)}，与传送命令那条
+ * 共用；只判 Y 会在「Y 界内、X 或 Z 界外」的模拟层上让四处放行全部失效。
+ *
+ * <p>
  * 落地只走这一条：判据放行之后位置由 {@code absSnapTo} 采用客户端报来的目标，{@code onGround} 取客户端
  * 报文里的标记，服务端不重新计算。
  *
@@ -49,19 +53,19 @@ public class ServerGamePacketListenerImplMixin {
     @Shadow
     private int aboveGroundTickCount;
 
-    /** 超快移动判据在可玩界之外不启用。 */
+    /** 超快移动判据在可玩界之外不启用。调用点在 {@code player.move} 之前，取的是移动前的位置。 */
     @Inject(method = "shouldCheckPlayerMovement", at = @At("RETURN"), cancellable = true)
     private void farlands$trustOutsideBounds(boolean isFallFlying, CallbackInfoReturnable<Boolean> cir) {
-        if (farlands$outsideBounds(this.player.getY())) {
+        if (farlands$outsideBounds(this.player.getX(), this.player.getY(), this.player.getZ())) {
             cir.setReturnValue(false);
         }
     }
 
-    /** 新碰撞检测在可玩界之外一律判成没有新碰撞。 */
+    /** 新碰撞检测在可玩界之外一律判成没有新碰撞。取的是报文里的目标位置。 */
     @Inject(method = "isEntityCollidingWithAnythingNew", at = @At("RETURN"), cancellable = true)
     private void farlands$noNewCollisionOutsideBounds(LevelReader level, Entity entity, AABB oldAABB,
             double newX, double newY, double newZ, CallbackInfoReturnable<Boolean> cir) {
-        if (farlands$outsideBounds(newY)) {
+        if (farlands$outsideBounds(newX, newY, newZ)) {
             cir.setReturnValue(false);
         }
     }
@@ -74,13 +78,18 @@ public class ServerGamePacketListenerImplMixin {
      */
     @ModifyConstant(method = "handleMovePlayer", constant = @Constant(doubleValue = 0.0625))
     private double farlands$trustMovedWrongly(double original) {
-        return farlands$outsideBounds(this.player.getY()) ? Double.POSITIVE_INFINITY : original;
+        return farlands$outsideBounds(this.player.getX(), this.player.getY(), this.player.getZ())
+                ? Double.POSITIVE_INFINITY
+                : original;
     }
 
-    /** 该 y 是否在可玩方块界之外。 */
+    /**
+     * 该位置是否在可玩方块界之外。任一轴界外即为界外，与 {@code SimulationSection.eligible} 的段级三轴判据同族，
+     * 量纲不同。
+     */
     @Unique
-    private static boolean farlands$outsideBounds(double y) {
-        return !WorldBounds.inBlock((long) Math.floor(y));
+    private static boolean farlands$outsideBounds(double x, double y, double z) {
+        return !WorldBounds.inBlock((long) Math.floor(x), (long) Math.floor(y), (long) Math.floor(z));
     }
 
     /**
@@ -96,7 +105,7 @@ public class ServerGamePacketListenerImplMixin {
      */
     @Inject(method = "handleMovePlayer(Lnet/minecraft/network/protocol/game/ServerboundMovePlayerPacket;)V", at = @At("RETURN"))
     private void farlands$resetFloatingOutsideBounds(ServerboundMovePlayerPacket packet, CallbackInfo ci) {
-        if (farlands$outsideBounds(this.player.getY())) {
+        if (farlands$outsideBounds(this.player.getX(), this.player.getY(), this.player.getZ())) {
             this.clientIsFloating = false;
             this.aboveGroundTickCount = 0;
         }

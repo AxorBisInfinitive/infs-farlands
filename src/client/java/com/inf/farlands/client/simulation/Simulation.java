@@ -17,7 +17,6 @@ import net.minecraft.world.level.CardinalLighting;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Biomes;
 import net.minecraft.world.level.chunk.PalettedContainerFactory;
-import net.minecraft.world.phys.AABB;
 
 /**
  * 客户端的模拟方块层：生产者每 tick 写块，提交之后由渲染与碰撞两处统一消费，与服务端无关。
@@ -61,10 +60,15 @@ public final class Simulation {
      */
     private ClientLevel clientLevel;
 
-    /** 已绑定的列，键是三轴段坐标。 */
+    /**
+     * 自动方阵管理的列，键是三轴段坐标。
+     *
+     * <p>
+     * 它只是方阵的绑定记录，不是渲染的前置条件：渲染集合是 {@code sections}。别再把两者当成一件事。
+     */
     private final Set<SectionKey> boundColumns = new HashSet<>();
 
-    /** 已绑定但几何尚未烘的列。每 tick 按到玩家的距离取最近的一批。 */
+    /** 几何尚未烘的段。每 tick 按到玩家的距离取最近的一批。 */
     private final Set<SectionKey> pending = new HashSet<>();
 
     /** 每 tick 烘几段几何，把建立成本摊开。取最近的那几列。 */
@@ -111,13 +115,26 @@ public final class Simulation {
         this.farlands$requeueNeighbors(key);
     }
 
-    /** 一列离开方阵：摘段并记待释放的几何。释放由调用方批量做。 */
+    /** 一列离开方阵：摘段。显存由调用方批量释放，一趟一条 fence。 */
     private void farlands$unbind(SectionKey key) {
         if (!this.boundColumns.remove(key)) {
             return;
         }
+        this.farlands$detach(key);
+    }
+
+    /**
+     * 摘段但不碰显存：从 {@code sections} 与待烘集合摘掉，并把邻列放回待烘。
+     *
+     * <p>
+     * 分开的理由是释放的批次：解绑成百上千列时逐列建 fence 会把主线程按在 GPU 上，所以那条路径收集键后调
+     * {@link SimulationGeometry#releaseAll}。单列删除走 {@link #removeSection}，它在本方法之后补一次释放。
+     */
+    private void farlands$detach(SectionKey key) {
+        if (this.sections.remove(key) != null) {
+            this.structureChanged = true;
+        }
         this.pending.remove(key);
-        this.removeSection(key);
         this.farlands$requeueNeighbors(key);
     }
 
@@ -129,7 +146,7 @@ public final class Simulation {
      * {@code farlands$requeueGeometry} 的扩散，这条只补绑定与解绑；不补的话，邻段解绑后边界那一面会缺。
      *
      * <p>
-     * 只放回已绑定的同层列：对角不需要，剔除只沿六向。
+     * 只放回存在的同层段：对角不需要，剔除只沿六向。
      */
     private void farlands$requeueNeighbors(SectionKey key) {
         for (int dx = -1; dx <= 1; dx++) {
@@ -138,7 +155,7 @@ public final class Simulation {
                     continue;
                 }
                 SectionKey neighbor = new SectionKey(key.x() + dx, key.y(), key.z() + dz);
-                if (this.boundColumns.contains(neighbor)) {
+                if (this.sections.containsKey(neighbor)) {
                     this.pending.add(neighbor);
                 }
             }
@@ -260,16 +277,27 @@ public final class Simulation {
         return section;
     }
 
-    /** 取或建一段。可玩界内的段也会返回对象，只是写入被丢弃。 */
+    /**
+     * 取或建一段。可玩界内的段也会返回对象，只是写入被丢弃。
+     *
+     * <p>
+     * 建出的段必须由调用方用 {@link #removeSection} 删除。渲染、碰撞、拾取都按 {@code sections} 判存在，所以建了
+     * 不删会一直参与三路取数，直到 {@link #clear} 或换层。
+     */
     public SimulationSection section(long sectionX, long sectionY, long sectionZ) {
         return this.section(new SectionKey(sectionX, sectionY, sectionZ));
     }
 
-    /** 摘掉一段。键已在手上时用这一支。 */
+    /**
+     * 摘掉一段。键已在手上时用这一支。
+     *
+     * <p>
+     * 段的生命周期归调用方：谁建谁删，本类不做任何按时间或按距离的回收。本方法收口四件：从 {@code sections}
+     * 摘、从待烘集合摘、释放显存、把邻列放回待烘。必须在客户端主线程调，显存释放走 fence 延迟关闭。
+     */
     public void removeSection(SectionKey key) {
-        if (this.sections.remove(key) != null) {
-            this.structureChanged = true;
-        }
+        this.farlands$detach(key);
+        SimulationGeometry.instance().release(key);
     }
 
     /** 摘掉一段。 */
@@ -317,14 +345,14 @@ public final class Simulation {
     }
 
     /**
-     * 把全部已绑定的列放回待烘集合。
+     * 把全部段放回待烘集合。
      *
      * <p>
-     * 资源重载与已烘入顶点的全局选项变化后调，配合清空显存与模型缓存重建。不重跑生产者：列还是已绑定的那
-     * 些，只是几何要重新烘。
+     * 资源重载与已烘入顶点的全局选项变化后调，配合清空显存与模型缓存重建。不重跑生产者：段还是那些，只是几何
+     * 要重新烘。按 {@code sections} 取，所以手动建的段一并重烘。
      */
-    public void requeueAllBound() {
-        this.pending.addAll(this.boundColumns);
+    public void requeueAllSections() {
+        this.pending.addAll(this.sections.keySet());
     }
 
     /**
@@ -366,7 +394,7 @@ public final class Simulation {
      * 2 格，所以 {@code reach} 取两者的大者。只有变更范围贴到段边界时才扩散，段内部写入只重烘本列。
      *
      * <p>
-     * 只放回已绑定的列：未绑定的列没有段，放回去也只会在烘制时被跳过。
+     * 只放回存在的段：未建的段放回去也只会在烘制时被跳过。
      */
     private void farlands$requeueGeometry(SimulationSection section, SimulationSection.Dirty dirty, int reach) {
         long centerX = section.sectionX();
@@ -384,7 +412,7 @@ public final class Simulation {
                     continue;
                 }
                 SectionKey key = new SectionKey(centerX + dx, section.sectionY(), centerZ + dz);
-                if (this.boundColumns.contains(key)) {
+                if (this.sections.containsKey(key)) {
                     this.pending.add(key);
                 }
             }
@@ -429,13 +457,13 @@ public final class Simulation {
     }
 
     /**
-     * 快照里的一段：段坐标系的三轴、段局部包围盒，以及指向段本身的引用。
+     * 快照里的一段：段坐标系的三轴、它的键，以及指向段本身的引用。
      *
      * <p>
      * 引用而不是逐块拷贝：渲染读的是上传好的段几何，碰撞与拾取按 {@code occupiedIndex} 现取。代价是快照从
      * 完全不可变退成「引用不可变」，那两张容器只在客户端主线程写，碰撞与拾取也在主线程调，所以读侧不跨线程。
      */
-    public record SnapSection(long sectionX, long sectionY, long sectionZ, SectionKey key, AABB localBounds,
+    public record SnapSection(long sectionX, long sectionY, long sectionZ, SectionKey key,
             SimulationSection section) {
 
         /** 世界坐标的段原点。 */
