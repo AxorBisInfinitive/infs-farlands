@@ -7,7 +7,9 @@ import java.util.List;
 import com.inf.farlands.util.world.WorldBounds;
 
 import net.minecraft.core.Holder;
+import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.chunk.DataLayer;
 import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.chunk.PalettedContainerFactory;
 import net.minecraft.world.level.chunk.PalettedContainerRO;
@@ -25,6 +27,10 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * <p>
  * 群系是段内 4x4x4 的 quart 网格，与 {@code LevelChunkSection} 同构：三轴是 quart 坐标 0 到 3，写路径是
  * {@code recreate} 后整体换引用，读者不会看到写了一半的容器。默认值建段时传入，模拟之地用 void。
+ *
+ * <p>
+ * 光照是两片 {@code DataLayer}，四 bit 一格、2048 字节一层，与引擎侧那份同构。默认 0 时是同质的未分配层，
+ * 不占数组；它只存不算是既定契约，传播与发包都不经过这里。
  *
  * <p>
  * 写入只在客户端主线程发生；读的一侧是提交之后发布的 {@link Simulation.SnapSection}，本类自身不被渲染
@@ -49,6 +55,10 @@ public final class SimulationSection {
      * 段内 4x4x4 群系网格，三轴是 quart 坐标 0 到 3。写路径换引用，不原地改。
      */
     private volatile PalettedContainerRO<Holder<Biome>> biomes;
+
+    /** 天光与方块光，四 bit 一格。默认 0 时是同质未分配层，不占数组。 */
+    private final DataLayer skyLight = new DataLayer();
+    private final DataLayer blockLight = new DataLayer();
 
     private final SimulationBlock[] slots = new SimulationBlock[SIZE * SIZE * SIZE];
 
@@ -127,6 +137,28 @@ public final class SimulationSection {
             }
         }
         this.biomes = next;
+    }
+
+    /** 该格两通道打包后的光，默认 0 即全黑。位段与 {@code LightCoordsUtil.pack} 同。 */
+    public int getLight(int localX, int localY, int localZ) {
+        return this.blockLight.get(localX, localY, localZ) << 4 | this.skyLight.get(localX, localY, localZ) << 20;
+    }
+
+    /** 单通道的光，0 到 15，供 {@code getBrightness} 使用。 */
+    public int getLight(LightLayer layer, int localX, int localY, int localZ) {
+        return (layer == LightLayer.SKY ? this.skyLight : this.blockLight).get(localX, localY, localZ);
+    }
+
+    /** 写一格的两通道光。值域由 {@code DataLayer.set} 掩到 0 到 15。 */
+    public void setLight(int localX, int localY, int localZ, int block, int sky) {
+        this.blockLight.set(localX, localY, localZ, block);
+        this.skyLight.set(localX, localY, localZ, sky);
+    }
+
+    /** 整层同值。 */
+    public void fillLight(int block, int sky) {
+        this.blockLight.fill(block);
+        this.skyLight.fill(sky);
     }
 
     /** 该段是否参与模拟。可玩界内的段为假。 */

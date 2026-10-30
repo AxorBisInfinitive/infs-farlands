@@ -13,6 +13,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.util.Mth;
+import net.minecraft.world.level.CardinalLighting;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Biomes;
@@ -49,6 +50,9 @@ public final class Simulation {
     private PalettedContainerFactory biomeFactory;
     private Holder<Biome> defaultBiome;
 
+    /** 该维度的方向明暗，与层同一个入口设定。 */
+    private CardinalLighting cardinalLighting = CardinalLighting.DEFAULT;
+
     /** 已绑定的列，键是 {@code ChunkPos.pack}。 */
     private final LongOpenHashSet boundColumns = new LongOpenHashSet();
 
@@ -72,6 +76,7 @@ public final class Simulation {
         this.layer = layer;
         this.biomeFactory = level.palettedContainerFactory();
         this.defaultBiome = level.registryAccess().lookupOrThrow(Registries.BIOME).getOrThrow(Biomes.THE_VOID);
+        this.cardinalLighting = level.cardinalLighting();
         this.boundColumns.clear();
         this.pending.clear();
         this.sections.clear();
@@ -258,6 +263,11 @@ public final class Simulation {
     /** 该 level 的默认群系，缺邻段时群系混合回落到它。 */
     public Holder<Biome> defaultBiome() {
         return this.defaultBiome;
+    }
+
+    /** 该维度的方向明暗，着色时按面取。 */
+    public CardinalLighting cardinalLighting() {
+        return this.cardinalLighting;
     }
 
     /** 只查不建。该列没有模拟段时返回 null。 */
