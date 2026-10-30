@@ -211,7 +211,7 @@ public final class Simulation {
             if (section == null || section.count() == 0) {
                 continue;
             }
-            SimulationMesher.Mesh mesh = SimulationMesher.build(section);
+            SimulationMesher.Mesh mesh = SimulationMesher.build(section, this);
             if (mesh != null) {
                 SimulationGeometry.instance().upload(key, mesh);
             }
@@ -253,6 +253,16 @@ public final class Simulation {
     /** 当前快照，任意线程可读。 */
     public Snapshot snapshot() {
         return this.snapshot;
+    }
+
+    /** 该 level 的默认群系，缺邻段时群系混合回落到它。 */
+    public Holder<Biome> defaultBiome() {
+        return this.defaultBiome;
+    }
+
+    /** 只查不建。该列没有模拟段时返回 null。 */
+    public SimulationSection sectionOrNull(long sectionX, long sectionY, long sectionZ) {
+        return this.sections.get(new SectionKey(sectionX, sectionY, sectionZ));
     }
 
     /**
