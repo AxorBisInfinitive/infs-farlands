@@ -42,6 +42,13 @@ public final class WorldBounds {
     }
 
     /**
+     * 方块坐标是否在可表示范围内，即 int 全域。比可玩界两端各宽 16 格。
+     */
+    public static boolean inBlockAbsolute(long v) {
+        return v >= ~FarlandsConstant.MAX_BLOCK && v <= FarlandsConstant.MAX_BLOCK;
+    }
+
+    /**
      * 段号是否在可玩段范围内。判据与 inChunk 同值，量纲不同：本方法吃段号 sy，
      * inChunk 吃区块 xz。
      */
