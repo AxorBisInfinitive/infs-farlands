@@ -10,8 +10,13 @@ import com.inf.farlands.client.render.simulation.SimulationGeometry;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.Holder;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.biome.Biomes;
+import net.minecraft.world.level.chunk.PalettedContainerFactory;
 import net.minecraft.world.phys.AABB;
 
 /**
@@ -40,6 +45,10 @@ public final class Simulation {
     /** 当前图层定义。为空表示没有自动模拟的层。 */
     private SimulationLayer layer;
 
+    /** 建段用的群系容器工厂与默认群系，与层同一个入口设定，见 {@link #setLayer}。 */
+    private PalettedContainerFactory biomeFactory;
+    private Holder<Biome> defaultBiome;
+
     /** 已绑定的列，键是 {@code ChunkPos.pack}。 */
     private final LongOpenHashSet boundColumns = new LongOpenHashSet();
 
@@ -53,10 +62,16 @@ public final class Simulation {
      * 换层或退世界时调。层为空即关闭自动模拟。
      *
      * <p>
+     * 段的群系容器要从该 level 的工厂建，默认群系取 void，所以两样与层同源、在同一处设定：三件一起换，
+     * 不会出现层是新世界的而工厂是旧世界的。
+     *
+     * <p>
      * 段容器与显存一并清空：换层之后旧层的段没有意义，几何也不再被任何 draw 引用。
      */
-    public void setLayer(SimulationLayer layer) {
+    public void setLayer(SimulationLayer layer, ClientLevel level) {
         this.layer = layer;
+        this.biomeFactory = level.palettedContainerFactory();
+        this.defaultBiome = level.registryAccess().lookupOrThrow(Registries.BIOME).getOrThrow(Biomes.THE_VOID);
         this.boundColumns.clear();
         this.pending.clear();
         this.sections.clear();
@@ -208,7 +223,7 @@ public final class Simulation {
         SectionKey key = new SectionKey(sectionX, sectionY, sectionZ);
         SimulationSection section = this.sections.get(key);
         if (section == null) {
-            section = new SimulationSection(sectionX, sectionY, sectionZ);
+            section = new SimulationSection(sectionX, sectionY, sectionZ, this.biomeFactory, this.defaultBiome);
             this.sections.put(key, section);
             this.structureChanged = true;
         }

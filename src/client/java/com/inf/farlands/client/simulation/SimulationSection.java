@@ -6,6 +6,11 @@ import java.util.List;
 
 import com.inf.farlands.util.world.WorldBounds;
 
+import net.minecraft.core.Holder;
+import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.chunk.PalettedContainer;
+import net.minecraft.world.level.chunk.PalettedContainerFactory;
+import net.minecraft.world.level.chunk.PalettedContainerRO;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
@@ -18,6 +23,10 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * 可玩的方块在界内，那些段要继续工作。
  *
  * <p>
+ * 群系是段内 4x4x4 的 quart 网格，与 {@code LevelChunkSection} 同构：三轴是 quart 坐标 0 到 3，写路径是
+ * {@code recreate} 后整体换引用，读者不会看到写了一半的容器。默认值建段时传入，模拟之地用 void。
+ *
+ * <p>
  * 写入只在客户端主线程发生；读的一侧是提交之后发布的 {@link Simulation.SnapSection}，本类自身不被渲染
  * 线程触碰。
  */
@@ -26,12 +35,20 @@ public final class SimulationSection {
     /** 段边长。 */
     public static final int SIZE = 16;
 
+    /** 每轴 quart 格数，即群系网格的边长。 */
+    public static final int QUART = SIZE / 4;
+
     private final long sectionX;
     private final long sectionY;
     private final long sectionZ;
 
     /** 可玩界外为真，界内为假。界内的段静默失效。 */
     private final boolean eligible;
+
+    /**
+     * 段内 4x4x4 群系网格，三轴是 quart 坐标 0 到 3。写路径换引用，不原地改。
+     */
+    private volatile PalettedContainerRO<Holder<Biome>> biomes;
 
     private final SimulationBlock[] slots = new SimulationBlock[SIZE * SIZE * SIZE];
 
@@ -52,12 +69,14 @@ public final class SimulationSection {
 
     private int occupiedCount;
 
-    SimulationSection(long sectionX, long sectionY, long sectionZ) {
+    SimulationSection(long sectionX, long sectionY, long sectionZ, PalettedContainerFactory biomeFactory,
+            Holder<Biome> defaultBiome) {
         this.sectionX = sectionX;
         this.sectionY = sectionY;
         this.sectionZ = sectionZ;
         this.eligible = !(farlands$playable(sectionX) && farlands$playable(sectionY)
                 && farlands$playable(sectionZ));
+        this.biomes = new PalettedContainer<>(defaultBiome, biomeFactory.biomeStrategy());
     }
 
     public long sectionX() {
@@ -83,6 +102,31 @@ public final class SimulationSection {
 
     public long originZ() {
         return this.sectionZ * SIZE;
+    }
+
+    /** 该 quart 格的群系，三轴是 0 到 3。与 {@code LevelChunkSection.getNoiseBiome} 同口径。 */
+    public Holder<Biome> getNoiseBiome(int quartX, int quartY, int quartZ) {
+        return this.biomes.get(quartX, quartY, quartZ);
+    }
+
+    /** 写一格群系。重建容器后整体换引用，读者不会看到中间态。 */
+    public void setBiome(int quartX, int quartY, int quartZ, Holder<Biome> biome) {
+        PalettedContainer<Holder<Biome>> next = this.biomes.recreate();
+        next.getAndSetUnchecked(quartX, quartY, quartZ, biome);
+        this.biomes = next;
+    }
+
+    /** 填满整段的 quart 网格，一次换引用。 */
+    public void fillBiomes(Holder<Biome> biome) {
+        PalettedContainer<Holder<Biome>> next = this.biomes.recreate();
+        for (int x = 0; x < QUART; x++) {
+            for (int y = 0; y < QUART; y++) {
+                for (int z = 0; z < QUART; z++) {
+                    next.getAndSetUnchecked(x, y, z, biome);
+                }
+            }
+        }
+        this.biomes = next;
     }
 
     /** 该段是否参与模拟。可玩界内的段为假。 */
