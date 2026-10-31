@@ -19,9 +19,10 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  *
  * <p>
  * 坐标换算：格坐标用 long，射线在起始格所在段的局部空间里构造。{@code delta = view * reach} 本身就是 reach
- * 量级的小量，段内起点是「世界减段原点」，所以段长与方向都不经过绝对坐标的相加。绝对坐标下
+ * 量级的小量，段内起点取 {@code eye - origin}，所以段长与方向都不经过绝对坐标的相加。绝对坐标下
  * {@code eye + view * reach} 会按 {@code ulp(eye)} 取整：{@code 2^55} 处 4.5 变成 8，{@code 2^60} 处变成 0。
- * 段与段内起点在跨段时才重算。
+ * 段内起点也不能写 {@code (double) origin} 再相减：{@code 2^60} 上相邻段的两个 long 原点会塌成同一个
+ * double，所以一律用 {@link Simulation#delta} 的负数，先 long 求差再落 double。段与段内起点在跨段时才重算。
  *
  * <p>
  * 纯函数，无状态。
@@ -61,12 +62,9 @@ public final class SimulationPick {
         long startSectionX = Math.floorDiv(Mth.lfloor(eye.x), (long) SimulationSection.SIZE);
         long startSectionY = Math.floorDiv(Mth.lfloor(eye.y), (long) SimulationSection.SIZE);
         long startSectionZ = Math.floorDiv(Mth.lfloor(eye.z), (long) SimulationSection.SIZE);
-        double originX = (double) (startSectionX * SimulationSection.SIZE);
-        double originY = (double) (startSectionY * SimulationSection.SIZE);
-        double originZ = (double) (startSectionZ * SimulationSection.SIZE);
-        double localEyeX = eye.x - originX;
-        double localEyeY = eye.y - originY;
-        double localEyeZ = eye.z - originZ;
+        double localEyeX = -Simulation.delta(startSectionX * SimulationSection.SIZE, eye.x);
+        double localEyeY = -Simulation.delta(startSectionY * SimulationSection.SIZE, eye.y);
+        double localEyeZ = -Simulation.delta(startSectionZ * SimulationSection.SIZE, eye.z);
         double localToX = localEyeX + delta.x;
         double localToY = localEyeY + delta.y;
         double localToZ = localEyeZ + delta.z;
@@ -124,8 +122,8 @@ public final class SimulationPick {
      * 逐格取形状的上下文：缓存当前段、它的 getter 与段内起点终点，跨段时才重建。
      *
      * <p>
-     * 段内起点是「世界减段原点」，终点由起点加 {@code delta} 得到。终点不越过绝对坐标，所以段长始终是
-     * {@code |delta|}，与眼睛所在的量级无关。
+     * 段内起点是「眼睛减段原点」，用 {@link Simulation#delta} 的负数算：先 long 求差再落 double。终点由起点加
+     * {@code delta} 得到，不越过绝对坐标，所以段长始终是 {@code |delta|}，与眼睛所在的量级无关。
      */
     private static final class Cursor {
 
@@ -161,10 +159,10 @@ public final class SimulationPick {
                 this.sectionZ = sz;
                 this.section = this.simulation.sectionOrNull(sx, sy, sz);
                 this.getter = this.section == null ? null : new SectionGetter(this.section, this.simulation);
-                double originX = (double) (sx * SimulationSection.SIZE);
-                double originY = (double) (sy * SimulationSection.SIZE);
-                double originZ = (double) (sz * SimulationSection.SIZE);
-                this.localFrom = new Vec3(this.eye.x - originX, this.eye.y - originY, this.eye.z - originZ);
+                this.localFrom = new Vec3(
+                        -Simulation.delta(sx * SimulationSection.SIZE, this.eye.x),
+                        -Simulation.delta(sy * SimulationSection.SIZE, this.eye.y),
+                        -Simulation.delta(sz * SimulationSection.SIZE, this.eye.z));
                 this.localTo = new Vec3(this.localFrom.x + this.delta.x, this.localFrom.y + this.delta.y,
                         this.localFrom.z + this.delta.z);
             }
