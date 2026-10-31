@@ -18,8 +18,10 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * 形状跳过。判交交给 {@code VoxelShape.clip}，即精确形状裁剪，不假设形状落在格内。
  *
  * <p>
- * 坐标换算：格坐标用 long，{@code VoxelShape.clip} 的入参与 {@code BlockPos} 折算到该格所在段的局部空间。
- * 世界坐标在 {@code BlockPos} 上饱和，所以这一步不能省。段与段内起点在跨段时才重算。
+ * 坐标换算：格坐标用 long，射线在起始格所在段的局部空间里构造。{@code delta = view * reach} 本身就是 reach
+ * 量级的小量，段内起点是「世界减段原点」，所以段长与方向都不经过绝对坐标的相加。绝对坐标下
+ * {@code eye + view * reach} 会按 {@code ulp(eye)} 取整：{@code 2^55} 处 4.5 变成 8，{@code 2^60} 处变成 0。
+ * 段与段内起点在跨段时才重算。
  *
  * <p>
  * 纯函数，无状态。
@@ -55,17 +57,29 @@ public final class SimulationPick {
         if (reach <= 0.0) {
             return null;
         }
-        Vec3 to = eye.add(view.scale(reach));
-        Cursor cursor = new Cursor(simulation, eye, to);
-        double toX = Mth.lerp(NUDGE, to.x, eye.x);
-        double toY = Mth.lerp(NUDGE, to.y, eye.y);
-        double toZ = Mth.lerp(NUDGE, to.z, eye.z);
-        double fromX = Mth.lerp(NUDGE, eye.x, to.x);
-        double fromY = Mth.lerp(NUDGE, eye.y, to.y);
-        double fromZ = Mth.lerp(NUDGE, eye.z, to.z);
-        long currentX = Mth.lfloor(fromX);
-        long currentY = Mth.lfloor(fromY);
-        long currentZ = Mth.lfloor(fromZ);
+        Vec3 delta = view.scale(reach);
+        long startSectionX = Math.floorDiv(Mth.lfloor(eye.x), (long) SimulationSection.SIZE);
+        long startSectionY = Math.floorDiv(Mth.lfloor(eye.y), (long) SimulationSection.SIZE);
+        long startSectionZ = Math.floorDiv(Mth.lfloor(eye.z), (long) SimulationSection.SIZE);
+        double originX = (double) (startSectionX * SimulationSection.SIZE);
+        double originY = (double) (startSectionY * SimulationSection.SIZE);
+        double originZ = (double) (startSectionZ * SimulationSection.SIZE);
+        double localEyeX = eye.x - originX;
+        double localEyeY = eye.y - originY;
+        double localEyeZ = eye.z - originZ;
+        double localToX = localEyeX + delta.x;
+        double localToY = localEyeY + delta.y;
+        double localToZ = localEyeZ + delta.z;
+        Cursor cursor = new Cursor(simulation, eye, delta);
+        double toX = Mth.lerp(NUDGE, localToX, localEyeX);
+        double toY = Mth.lerp(NUDGE, localToY, localEyeY);
+        double toZ = Mth.lerp(NUDGE, localToZ, localEyeZ);
+        double fromX = Mth.lerp(NUDGE, localEyeX, localToX);
+        double fromY = Mth.lerp(NUDGE, localEyeY, localToY);
+        double fromZ = Mth.lerp(NUDGE, localEyeZ, localToZ);
+        long currentX = startSectionX * SimulationSection.SIZE + Mth.lfloor(fromX);
+        long currentY = startSectionY * SimulationSection.SIZE + Mth.lfloor(fromY);
+        long currentZ = startSectionZ * SimulationSection.SIZE + Mth.lfloor(fromZ);
         Hit hit = cursor.at(currentX, currentY, currentZ);
         if (hit != null) {
             return hit;
@@ -110,13 +124,14 @@ public final class SimulationPick {
      * 逐格取形状的上下文：缓存当前段、它的 getter 与段内起点终点，跨段时才重建。
      *
      * <p>
-     * 段内那三组量都是「世界减段原点」，差值是 reach 量级的小数，double 精确。
+     * 段内起点是「世界减段原点」，终点由起点加 {@code delta} 得到。终点不越过绝对坐标，所以段长始终是
+     * {@code |delta|}，与眼睛所在的量级无关。
      */
     private static final class Cursor {
 
         private final Simulation simulation;
         private final Vec3 eye;
-        private final Vec3 to;
+        private final Vec3 delta;
         private final BlockPos.MutableBlockPos localPos = new BlockPos.MutableBlockPos();
 
         private SimulationSection section;
@@ -128,10 +143,10 @@ public final class SimulationPick {
         private Vec3 localFrom;
         private Vec3 localTo;
 
-        Cursor(Simulation simulation, Vec3 eye, Vec3 to) {
+        Cursor(Simulation simulation, Vec3 eye, Vec3 delta) {
             this.simulation = simulation;
             this.eye = eye;
-            this.to = to;
+            this.delta = delta;
         }
 
         /** 该格上的命中；格不属于任何模拟段、为空、形状为空或射线不穿过形状时返回 null。 */
@@ -150,7 +165,8 @@ public final class SimulationPick {
                 double originY = (double) (sy * SimulationSection.SIZE);
                 double originZ = (double) (sz * SimulationSection.SIZE);
                 this.localFrom = new Vec3(this.eye.x - originX, this.eye.y - originY, this.eye.z - originZ);
-                this.localTo = new Vec3(this.to.x - originX, this.to.y - originY, this.to.z - originZ);
+                this.localTo = new Vec3(this.localFrom.x + this.delta.x, this.localFrom.y + this.delta.y,
+                        this.localFrom.z + this.delta.z);
             }
             if (this.section == null) {
                 return null;

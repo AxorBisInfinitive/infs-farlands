@@ -75,7 +75,7 @@ public final class Simulation {
     private static final int BUILD_PER_TICK = 8;
 
     /**
-     * 换层或退世界时调。层为空即关闭自动模拟。
+     * 换层或退世界时调。层为空即没有自动方阵，手动建的段仍会被烘制与提交。
      *
      * <p>
      * 段的群系容器要从该 level 的工厂建，默认群系取 void，所以两样与层同源、在同一处设定：三件一起换，
@@ -139,24 +139,26 @@ public final class Simulation {
     }
 
     /**
-     * 邻列重烘：邻段的存在性也是烘制输入。
+     * 邻段重烘：邻段的存在性也是烘制输入。
      *
      * <p>
-     * 剔除跨段查邻块，光与群系也在段边界外采样，所以一列的绑定或解绑会让邻列的烘制结果变旧。数据变更走
+     * 剔除跨段查邻块，光与群系也在段边界外采样，所以一段的绑定或解绑会让邻段的烘制结果变旧。数据变更走
      * {@code farlands$requeueGeometry} 的扩散，这条只补绑定与解绑；不补的话，邻段解绑后边界那一面会缺。
      *
      * <p>
-     * 只放回存在的同层段：对角不需要，剔除只沿六向。
+     * 只放回存在的六向邻段，对角不需要：剔除与角采样只沿面方向。存在性变化没有脏范围可判，六个面邻段一律带上。
      */
     private void farlands$requeueNeighbors(SectionKey key) {
         for (int dx = -1; dx <= 1; dx++) {
-            for (int dz = -1; dz <= 1; dz++) {
-                if (dx == 0 && dz == 0) {
-                    continue;
-                }
-                SectionKey neighbor = new SectionKey(key.x() + dx, key.y(), key.z() + dz);
-                if (this.sections.containsKey(neighbor)) {
-                    this.pending.add(neighbor);
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    if (dx == 0 && dy == 0 && dz == 0) {
+                        continue;
+                    }
+                    SectionKey neighbor = new SectionKey(key.x() + dx, key.y() + dy, key.z() + dz);
+                    if (this.sections.containsKey(neighbor)) {
+                        this.pending.add(neighbor);
+                    }
                 }
             }
         }
@@ -171,19 +173,17 @@ public final class Simulation {
      */
     public void tickSimulation(ClientLevel level) {
         SimulationLayer current = this.layer;
-        if (current == null) {
-            return;
-        }
         net.minecraft.client.Minecraft minecraft = net.minecraft.client.Minecraft.getInstance();
         net.minecraft.world.entity.player.Player player = minecraft.player;
-        if (player == null) {
-            return;
+        if (current != null && player != null) {
+            int radius = minecraft.options.renderDistance().get();
+            long centerX = Mth.lfloor(player.getX()) >> 4;
+            long centerZ = Mth.lfloor(player.getZ()) >> 4;
+            this.farlands$reconcileSquare(current, centerX, centerZ, radius);
+            this.farlands$buildNearest(centerX, centerZ);
+        } else {
+            this.farlands$buildNearest();
         }
-        int radius = minecraft.options.renderDistance().get();
-        long centerX = Mth.lfloor(player.getX()) >> 4;
-        long centerZ = Mth.lfloor(player.getZ()) >> 4;
-        this.farlands$reconcileSquare(current, centerX, centerZ, radius);
-        this.farlands$buildNearest(centerX, centerZ);
         this.commit();
     }
 
@@ -249,6 +249,33 @@ public final class Simulation {
                 distances[worst] = distance;
             }
         }
+        this.farlands$bake(picked, found);
+    }
+
+    /**
+     * 无玩家基准时的同一批烘制：按 {@code pending} 的迭代顺序取，不排序。
+     *
+     * <p>
+     * 不拿 {@code (0, 0)} 当中心：段号在模拟之地是两亿级，{@code Math.abs(段号 - 0)} 会溢出成负数，把远处的列排到前面。
+     */
+    private void farlands$buildNearest() {
+        if (this.pending.isEmpty()) {
+            return;
+        }
+        int want = Math.min(BUILD_PER_TICK, this.pending.size());
+        SectionKey[] picked = new SectionKey[want];
+        int found = 0;
+        for (SectionKey key : this.pending) {
+            if (found == want) {
+                break;
+            }
+            picked[found++] = key;
+        }
+        this.farlands$bake(picked, found);
+    }
+
+    /** 烘制并上传选中的列。空段与空网格一并释放旧几何。 */
+    private void farlands$bake(SectionKey[] picked, int found) {
         for (int i = 0; i < found; i++) {
             SectionKey key = picked[i];
             this.pending.remove(key);
@@ -387,33 +414,42 @@ public final class Simulation {
     }
 
     /**
-     * 把变脏的列与它可能影响到的邻列放回待烘集合。
+     * 把变脏的段与它可能影响到的邻段放回待烘集合。
      *
      * <p>
-     * 邻列的判据是采样半径：群系混合最远取 {@code biomeBlendRadius} 格，平滑光的角采样与半透明探测最远取
-     * 2 格，所以 {@code reach} 取两者的大者。只有变更范围贴到段边界时才扩散，段内部写入只重烘本列。
+     * 邻段的判据是采样半径：群系混合最远取 {@code biomeBlendRadius} 格，平滑光的角采样与半透明探测最远取
+     * 2 格，所以 {@code reach} 取两者的大者。三轴各自判「变更范围是否贴到段边界」，贴到才带上该方向的邻段，
+     * 段内部写入只重烘本段。
      *
      * <p>
      * 只放回存在的段：未建的段放回去也只会在烘制时被跳过。
      */
     private void farlands$requeueGeometry(SimulationSection section, SimulationSection.Dirty dirty, int reach) {
         long centerX = section.sectionX();
+        long centerY = section.sectionY();
         long centerZ = section.sectionZ();
         boolean west = dirty.minX() < reach;
         boolean east = dirty.maxX() > SimulationSection.SIZE - 1 - reach;
+        boolean down = dirty.minY() < reach;
+        boolean up = dirty.maxY() > SimulationSection.SIZE - 1 - reach;
         boolean north = dirty.minZ() < reach;
         boolean south = dirty.maxZ() > SimulationSection.SIZE - 1 - reach;
         for (int dx = -1; dx <= 1; dx++) {
             if (dx < 0 && !west || dx > 0 && !east) {
                 continue;
             }
-            for (int dz = -1; dz <= 1; dz++) {
-                if (dz < 0 && !north || dz > 0 && !south) {
+            for (int dy = -1; dy <= 1; dy++) {
+                if (dy < 0 && !down || dy > 0 && !up) {
                     continue;
                 }
-                SectionKey key = new SectionKey(centerX + dx, section.sectionY(), centerZ + dz);
-                if (this.sections.containsKey(key)) {
-                    this.pending.add(key);
+                for (int dz = -1; dz <= 1; dz++) {
+                    if (dz < 0 && !north || dz > 0 && !south) {
+                        continue;
+                    }
+                    SectionKey key = new SectionKey(centerX + dx, centerY + dy, centerZ + dz);
+                    if (this.sections.containsKey(key)) {
+                        this.pending.add(key);
+                    }
                 }
             }
         }

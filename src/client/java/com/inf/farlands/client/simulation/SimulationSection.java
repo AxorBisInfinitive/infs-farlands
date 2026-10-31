@@ -65,6 +65,8 @@ public final class SimulationSection {
     /** 脏范围的段内局部坐标，供重烘与邻列失效用。干净时 min 大于 max。 */
     private int dirtyMinX = Integer.MAX_VALUE;
     private int dirtyMaxX = Integer.MIN_VALUE;
+    private int dirtyMinY = Integer.MAX_VALUE;
+    private int dirtyMaxY = Integer.MIN_VALUE;
     private int dirtyMinZ = Integer.MAX_VALUE;
     private int dirtyMaxZ = Integer.MIN_VALUE;
 
@@ -132,8 +134,8 @@ public final class SimulationSection {
         PalettedContainer<Holder<Biome>> next = this.biomes.copy();
         next.getAndSetUnchecked(quartX, quartY, quartZ, biome);
         this.biomes = next;
-        this.farlands$markDirty(quartX * 4, quartZ * 4);
-        this.farlands$markDirty(quartX * 4 + 3, quartZ * 4 + 3);
+        this.farlands$markDirty(quartX * 4, quartY * 4, quartZ * 4);
+        this.farlands$markDirty(quartX * 4 + 3, quartY * 4 + 3, quartZ * 4 + 3);
     }
 
     /** 填满整段的 quart 网格，一次换引用。 */
@@ -147,8 +149,9 @@ public final class SimulationSection {
             }
         }
         this.biomes = next;
-        this.farlands$markDirty(0, 0);
-        this.farlands$markDirty(SimulationSection.SIZE - 1, SimulationSection.SIZE - 1);
+        this.farlands$markDirty(0, 0, 0);
+        this.farlands$markDirty(SimulationSection.SIZE - 1, SimulationSection.SIZE - 1,
+                SimulationSection.SIZE - 1);
     }
 
     /** 该格两通道打包后的光，默认 0 即全黑。位段与 {@code LightCoordsUtil.pack} 同。 */
@@ -165,15 +168,16 @@ public final class SimulationSection {
     public void setLight(int localX, int localY, int localZ, int block, int sky) {
         this.blockLight.set(localX, localY, localZ, block);
         this.skyLight.set(localX, localY, localZ, sky);
-        this.farlands$markDirty(localX, localZ);
+        this.farlands$markDirty(localX, localY, localZ);
     }
 
     /** 整层同值。 */
     public void fillLight(int block, int sky) {
         this.blockLight.fill(block);
         this.skyLight.fill(sky);
-        this.farlands$markDirty(0, 0);
-        this.farlands$markDirty(SimulationSection.SIZE - 1, SimulationSection.SIZE - 1);
+        this.farlands$markDirty(0, 0, 0);
+        this.farlands$markDirty(SimulationSection.SIZE - 1, SimulationSection.SIZE - 1,
+                SimulationSection.SIZE - 1);
     }
 
     /** 该段是否参与模拟。可玩界内的段为假。 */
@@ -203,7 +207,7 @@ public final class SimulationSection {
             this.farlands$vacate(index);
         }
         this.slots[index] = block;
-        this.farlands$markDirty(localX, localZ);
+        this.farlands$markDirty(localX, localY, localZ);
     }
 
     /** 清一格。 */
@@ -234,8 +238,9 @@ public final class SimulationSection {
         Arrays.fill(this.slots, null);
         this.count = 0;
         this.occupiedCount = 0;
-        this.farlands$markDirty(0, 0);
-        this.farlands$markDirty(SimulationSection.SIZE - 1, SimulationSection.SIZE - 1);
+        this.farlands$markDirty(0, 0, 0);
+        this.farlands$markDirty(SimulationSection.SIZE - 1, SimulationSection.SIZE - 1,
+                SimulationSection.SIZE - 1);
     }
 
     private void farlands$occupy(int index) {
@@ -261,25 +266,34 @@ public final class SimulationSection {
             return null;
         }
         this.dirty = false;
-        Dirty range = new Dirty(this.dirtyMinX, this.dirtyMaxX, this.dirtyMinZ, this.dirtyMaxZ);
+        Dirty range = new Dirty(this.dirtyMinX, this.dirtyMaxX, this.dirtyMinY, this.dirtyMaxY,
+                this.dirtyMinZ, this.dirtyMaxZ);
         this.dirtyMinX = Integer.MAX_VALUE;
         this.dirtyMaxX = Integer.MIN_VALUE;
+        this.dirtyMinY = Integer.MAX_VALUE;
+        this.dirtyMaxY = Integer.MIN_VALUE;
         this.dirtyMinZ = Integer.MAX_VALUE;
         this.dirtyMaxZ = Integer.MIN_VALUE;
         return range;
     }
 
-    /** 一次脏标记覆盖的段内局部范围。 */
-    public record Dirty(int minX, int maxX, int minZ, int maxZ) {
+    /** 一次脏标记覆盖的段内局部范围。六个分量各自独立，三轴同形。 */
+    public record Dirty(int minX, int maxX, int minY, int maxY, int minZ, int maxZ) {
     }
 
-    /** 记一次脏，并把它覆盖的局部坐标并进范围。 */
-    private void farlands$markDirty(int localX, int localZ) {
+    /** 记一次脏，并把它覆盖的局部坐标并进范围。三轴同形，逐轴取最小与最大。 */
+    private void farlands$markDirty(int localX, int localY, int localZ) {
         if (localX < this.dirtyMinX) {
             this.dirtyMinX = localX;
         }
         if (localX > this.dirtyMaxX) {
             this.dirtyMaxX = localX;
+        }
+        if (localY < this.dirtyMinY) {
+            this.dirtyMinY = localY;
+        }
+        if (localY > this.dirtyMaxY) {
+            this.dirtyMaxY = localY;
         }
         if (localZ < this.dirtyMinZ) {
             this.dirtyMinZ = localZ;

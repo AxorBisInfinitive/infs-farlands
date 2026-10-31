@@ -24,7 +24,7 @@ import net.minecraft.world.level.material.Fluids;
  *
  * <p>
  * 不读世界坐标：模拟之地的坐标在 {@code BlockPos} 上已饱和。局部坐标落在 0 到 15，越出本段的采样点按
- * {@code floorDiv} 求列、查邻段，折回段内后交给容器。缺邻段按空气、光 0、群系取该 level 的默认值。
+ * {@code floorDiv} 求格、查邻段，折回段内后交给容器。缺邻段按空气、光 0、群系取该 level 的默认值。
  *
  * <p>
  * 三个消费者共用：烘几何时的剔除、光与群系采样，碰撞与拾取时的方块状态与形状派生。`at` 只服务需要「当前块」
@@ -79,14 +79,15 @@ public final class SectionGetter implements BlockAndTintGetter {
         return tintIndex < this.colorCount ? this.colors[tintIndex] : -1;
     }
 
-    /** 段内局部坐标解析到段；同段直接返回本段，缺列返回 null。 */
-    private SimulationSection sectionFor(int sampleX, int sampleZ) {
+    /** 段内局部坐标解析到段；同段直接返回本段，缺段返回 null。三轴同形。 */
+    private SimulationSection sectionFor(int sampleX, int sampleY, int sampleZ) {
         int cellX = Math.floorDiv(sampleX, SimulationSection.SIZE);
+        int cellY = Math.floorDiv(sampleY, SimulationSection.SIZE);
         int cellZ = Math.floorDiv(sampleZ, SimulationSection.SIZE);
-        if (cellX == 0 && cellZ == 0) {
+        if (cellX == 0 && cellY == 0 && cellZ == 0) {
             return this.section;
         }
-        return this.simulation.sectionOrNull(this.section.sectionX() + cellX, this.section.sectionY(),
+        return this.simulation.sectionOrNull(this.section.sectionX() + cellX, this.section.sectionY() + cellY,
                 this.section.sectionZ() + cellZ);
     }
 
@@ -132,7 +133,7 @@ public final class SectionGetter implements BlockAndTintGetter {
      * 半径最大 7，段边长 16，所以最多跨一列；折回段内后的局部坐标仍在 0 到 15。
      */
     private Holder<Biome> biomeAt(int sampleX, int sampleZ) {
-        SimulationSection target = sectionFor(sampleX, sampleZ);
+        SimulationSection target = sectionFor(sampleX, this.localY, sampleZ);
         if (target == null) {
             return this.simulation.defaultBiome();
         }
@@ -141,29 +142,21 @@ public final class SectionGetter implements BlockAndTintGetter {
 
     @Override
     public int getBrightness(LightLayer layer, BlockPos pos) {
-        int localY = pos.getY();
-        if (localY < 0 || localY >= SimulationSection.SIZE) {
-            return 0;
-        }
-        SimulationSection target = sectionFor(pos.getX(), pos.getZ());
+        SimulationSection target = sectionFor(pos.getX(), pos.getY(), pos.getZ());
         if (target == null) {
             return 0;
         }
-        return target.getLight(layer, fold(pos.getX()), localY, fold(pos.getZ()));
+        return target.getLight(layer, fold(pos.getX()), fold(pos.getY()), fold(pos.getZ()));
     }
 
     /** 按段内局部坐标取块状态。缺段与空格按空气。 */
     @Override
     public BlockState getBlockState(BlockPos pos) {
-        int localY = pos.getY();
-        if (localY < 0 || localY >= SimulationSection.SIZE) {
-            return Blocks.AIR.defaultBlockState();
-        }
-        SimulationSection target = sectionFor(pos.getX(), pos.getZ());
+        SimulationSection target = sectionFor(pos.getX(), pos.getY(), pos.getZ());
         if (target == null) {
             return Blocks.AIR.defaultBlockState();
         }
-        SimulationBlock block = target.blockAt(fold(pos.getX()), localY, fold(pos.getZ()));
+        SimulationBlock block = target.blockAt(fold(pos.getX()), fold(pos.getY()), fold(pos.getZ()));
         return block == null ? Blocks.AIR.defaultBlockState() : block.state();
     }
 
