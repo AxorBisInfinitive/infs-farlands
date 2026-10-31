@@ -8,8 +8,8 @@ import net.minecraft.world.level.block.Blocks;
  * 模拟层的定义：一个固定的段高度，加一个绑定那一刻跑一次的生产者。
  *
  * <p>
- * 段高度用段号，不是方块号。方块 {@code 2^40} 落在段 {@code 2^36} 的 {@code local y = 0}，这也是当前层用的
- * 位置。层高于可玩段界，所以 {@code SimulationSection} 的 {@code eligible} 为真，写入不会被丢弃。
+ * 段高度用段号，不是方块号。段 {@code 2^56} 对应方块 {@code y = 2^60}，这也是当前层用的位置。层高于可玩段界，
+ * 所以 {@code SimulationSection} 的 {@code eligible} 为真，写入不会被丢弃。
  *
  * <p>
  * 生产者只在列被绑定时跑一次，对应原版「段被加载即编译一次」的节奏。
@@ -43,15 +43,15 @@ public final class SimulationLayer {
     }
 
     /**
-     * 测试层：方块 {@code y = 2^40} 那一层，沿 x 走一条正弦高度场，从段底填到曲面。
+     * 测试层：段 {@code 2^56} 那一层，即方块 {@code y = 2^60}，沿 x 走一条正弦高度场，从段底填到曲面。
      *
      * <p>
      * 方法名沿用 grassPlane，内容已换成正弦，仅供测试。高度只随世界 x 变化，z 方向同高。相位用整数取模
-     * 算：worldX 在 2^40 量级，直接对 double 取 sin 会在参数归约上丢精度。基线与幅度之和落在 0 到 14，
+     * 算：worldX 可到十亿级以上，直接对 double 取 sin 会在参数归约上丢精度。基线与幅度之和落在 0 到 14，
      * 不越出本段，其他段仍为空。
      */
     public static SimulationLayer grassPlane() {
-        return new SimulationLayer(1L << 36, section -> {
+        return new SimulationLayer(1L << 56, section -> {
             SimulationBlock block = SimulationBlock.full(Blocks.GRASS_BLOCK.defaultBlockState());
             long baseX = section.sectionX() * SimulationSection.SIZE;
             for (int x = 0; x < SimulationSection.SIZE; x++) {

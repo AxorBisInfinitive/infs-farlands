@@ -13,13 +13,14 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.vertex.VertexFormat;
 
+import com.inf.farlands.client.render.AnchoredFrustum;
 import com.inf.farlands.client.simulation.Simulation;
 import com.inf.farlands.client.simulation.SimulationHolder;
+import com.inf.farlands.client.simulation.SimulationSection;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.DynamicUniformStorage;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
-import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 import org.joml.Matrix4f;
@@ -128,10 +129,15 @@ public final class SimulationRenderPass {
             if (entry == null || entry.vertexCount() <= 0) {
                 continue;
             }
-            if (camera.initialized && !camera.cullFrustum.isVisible(new AABB(
-                    section.originX(), section.originY(), section.originZ(),
-                    section.originX() + 16.0, section.originY() + 16.0, section.originZ() + 16.0))) {
-                continue;
+            if (camera.initialized && camera.cullFrustum instanceof AnchoredFrustum frustum) {
+                double originX = Simulation.delta(section.originX(), cameraPos.x());
+                double originY = Simulation.delta(section.originY(), cameraPos.y());
+                double originZ = Simulation.delta(section.originZ(), cameraPos.z());
+                if (!frustum.farlands$isVisibleRelative(originX, originY, originZ,
+                        originX + SimulationSection.SIZE, originY + SimulationSection.SIZE,
+                        originZ + SimulationSection.SIZE)) {
+                    continue;
+                }
             }
             int drawIndices = entry.vertexCount() / 4 * 6;
             indices += drawIndices;

@@ -194,6 +194,14 @@ public abstract class FrustumMixin implements AnchoredFrustum {
                 (double) bb.maxX() + 1.0, (double) bb.maxY() + 1.0, (double) bb.maxZ() + 1.0));
     }
 
+    @Override
+    public boolean farlands$isVisibleRelative(double minX, double minY, double minZ,
+            double maxX, double maxY, double maxZ) {
+        int result = this.intersection.intersectAab((float) minX, (float) minY, (float) minZ,
+                (float) maxX, (float) maxY, (float) maxZ);
+        return result == FrustumIntersection.INSIDE || result == FrustumIntersection.INTERSECT;
+    }
+
     /**
      * {@code BoundingBox} 端点的加一改在 double 里做。
      *
