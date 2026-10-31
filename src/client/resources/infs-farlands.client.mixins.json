@@ -68,7 +68,12 @@
     "simulation.LevelRendererMixin",
     "simulation.MinecraftMixin",
     "simulation.ChunkSectionsToRenderMixin",
-    "simulation.ClientLevelMixin"
+    "simulation.ClientLevelMixin",
+    "position.CameraPositionMixin",
+    "position.LevelRendererPositionMixin",
+    "position.EntityRendererPositionMixin",
+    "position.GuardianRendererPositionMixin",
+    "position.AvatarRendererPositionMixin"
   ],
   "injectors": {
     "defaultRequire": 1
