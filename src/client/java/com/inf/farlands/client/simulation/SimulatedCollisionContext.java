@@ -24,7 +24,17 @@ import net.minecraft.world.phys.shapes.EntityCollisionContext;
 public final class SimulatedCollisionContext extends EntityCollisionContext {
 
     public SimulatedCollisionContext(Entity source, long sectionOriginY) {
-        super(source.isDescending(), false, source.getY() - (double) sectionOriginY,
+        this(source, source.getY() - (double) sectionOriginY);
+    }
+
+    /**
+     * 帧内版本：{@code entityBottom} 已经折算成段内局部量，不再减段原点。
+     *
+     * <p>
+     * 帧的锚点非零时 {@code source.getY()} 是 double 投影，在 int64 上误差可达 1024，不能再用它减段原点。
+     */
+    public SimulatedCollisionContext(Entity source, double entityBottom) {
+        super(source.isDescending(), false, entityBottom,
                 source instanceof LivingEntity living ? living.getMainHandItem() : ItemStack.EMPTY,
                 false, source);
     }

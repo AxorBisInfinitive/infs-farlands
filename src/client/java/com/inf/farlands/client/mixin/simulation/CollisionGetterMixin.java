@@ -11,6 +11,8 @@ import com.inf.farlands.client.simulation.Simulation;
 import com.inf.farlands.client.simulation.SimulationBlock;
 import com.inf.farlands.client.simulation.SimulationHolder;
 import com.inf.farlands.client.simulation.SimulationSection;
+import com.inf.farlands.util.pos.ExactCollisionSource;
+import com.inf.farlands.util.pos.ExactPosition;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
@@ -57,20 +59,50 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * {@code Cursor3D.getNextType} 相同。段与它的 getter、上下文只在跨段时重建，等同 vanilla 的 chunk 级缓存。
  */
 @Mixin(CollisionGetter.class)
-public interface CollisionGetterMixin {
+public interface CollisionGetterMixin extends ExactCollisionSource {
 
+    /**
+     * 普通路径：vanilla 的方块碰撞照跑，模拟层的形状并进去。
+     *
+     * <p>
+     * 帧的锚点非零时不走这条路，那时由 {@code Entity.collectColliders} 直接调
+     * {@link #farlands$frameCollisions}：查询盒已经是局部盒，vanilla 那条按世界坐标枚举的路径不适用。
+     */
     @Inject(method = "getBlockCollisions", at = @At("RETURN"), cancellable = true)
     private void farlands$simulationCollision(Entity source, AABB box,
             CallbackInfoReturnable<Iterable<VoxelShape>> cir) {
-        if (!((Object) this instanceof Level level && level.isClientSide())) {
+        List<VoxelShape> frameHits = this.farlands$frameCollisions(source, box);
+        if (frameHits.isEmpty()) {
             return;
+        }
+        cir.setReturnValue(Iterables.concat(cir.getReturnValue(), frameHits));
+    }
+
+    /** 模拟块的碰撞形状，坐标与入参盒同帧。 */
+    @Override
+    default List<VoxelShape> farlands$frameCollisions(Entity source, AABB box) {
+        if (!((Object) this instanceof Level level && level.isClientSide())) {
+            return List.of();
         }
         Simulation simulation = ((SimulationHolder) Minecraft.getInstance()).simulation();
         if (simulation.level() != this) {
-            return;
+            return List.of();
         }
         if (simulation.snapshot().sections().isEmpty()) {
-            return;
+            return List.of();
+        }
+        // 帧：锚点非零时 box 已经是局部盒，段号要加回锚点；锚点为零时局部即世界，与改动前逐位相同。
+        long ax = 0L;
+        long ay = 0L;
+        long az = 0L;
+        boolean framed = false;
+        double localBottomY = 0.0;
+        if (source instanceof ExactPosition exact) {
+            ax = exact.farlands$anchor(ExactPosition.POS_X);
+            ay = exact.farlands$anchor(ExactPosition.POS_Y);
+            az = exact.farlands$anchor(ExactPosition.POS_Z);
+            framed = ax != 0L || ay != 0L || az != 0L;
+            localBottomY = exact.farlands$local(ExactPosition.POS_Y);
         }
         long x0 = Mth.lfloor(box.minX - 1.0E-7) - 1L;
         long x1 = Mth.lfloor(box.maxX + 1.0E-7) + 1L;
@@ -96,9 +128,9 @@ public interface CollisionGetterMixin {
                     if (type == 3) {
                         continue;
                     }
-                    long sx = Math.floorDiv(x, (long) SimulationSection.SIZE);
-                    long sy = Math.floorDiv(y, (long) SimulationSection.SIZE);
-                    long sz = Math.floorDiv(z, (long) SimulationSection.SIZE);
+                    long sx = Math.floorDiv(ax + x, (long) SimulationSection.SIZE);
+                    long sy = Math.floorDiv(ay + y, (long) SimulationSection.SIZE);
+                    long sz = Math.floorDiv(az + z, (long) SimulationSection.SIZE);
                     if (!hasSection || sx != sectionX || sy != sectionY || sz != sectionZ) {
                         hasSection = true;
                         sectionX = sx;
@@ -108,14 +140,17 @@ public interface CollisionGetterMixin {
                         getter = section == null ? null : new SectionGetter(section, simulation);
                         context = section == null ? null
                                 : source == null ? CollisionContext.empty()
-                                        : new SimulatedCollisionContext(source, sy * SimulationSection.SIZE);
+                                        : framed ? new SimulatedCollisionContext(source,
+                                                localBottomY - (double) (sy * SimulationSection.SIZE - ay))
+                                                : new SimulatedCollisionContext(source,
+                                                        sy * SimulationSection.SIZE);
                     }
                     if (section == null) {
                         continue;
                     }
-                    int localX = (int) (x - sx * SimulationSection.SIZE);
-                    int localY = (int) (y - sy * SimulationSection.SIZE);
-                    int localZ = (int) (z - sz * SimulationSection.SIZE);
+                    int localX = (int) (ax + x - sx * SimulationSection.SIZE);
+                    int localY = (int) (ay + y - sy * SimulationSection.SIZE);
+                    int localZ = (int) (az + z - sz * SimulationSection.SIZE);
                     SimulationBlock block = section.blockAt(localX, localY, localZ);
                     if (block == null) {
                         continue;
@@ -149,10 +184,10 @@ public interface CollisionGetterMixin {
             }
         }
         if (hits == null) {
-            return;
+            return List.of();
         }
         VoxelShape merged = hits.size() == 1 ? hits.get(0)
                 : Shapes.or(hits.get(0), hits.subList(1, hits.size()).toArray(new VoxelShape[0]));
-        cir.setReturnValue(Iterables.concat(cir.getReturnValue(), List.of(merged)));
+        return List.of(merged);
     }
 }

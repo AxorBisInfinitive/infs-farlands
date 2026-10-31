@@ -37,4 +37,20 @@ public interface ExactPosition {
 
     /** 九槽 256 位存储，首次调用时建数组。槽位常量见上。 */
     Binary256[] farlands$exactSlots();
+
+    /**
+     * 帧锚点，三轴 long。位置等于锚点加槽位里的局部偏移，局部偏移恒在 {@code [0, 1)}。
+     *
+     * <p>
+     * 物理在帧里做：锚点承担量级，局部偏移承担精度。读者是碰撞查询，它按锚点定位段，再把世界坐标化成局部坐标。
+     */
+    long farlands$anchor(int axis);
+
+    /**
+     * 帧内偏移。锚点非零时落在 {@code [0, 1)}；锚点为零时它就是位置本身，量级不超过 1e12。
+     *
+     * <p>
+     * 物理与碰撞查询用。锚点为零这一段里「局部等于世界」，vanilla 的形状与本帧的形状同源。
+     */
+    double farlands$local(int axis);
 }
