@@ -464,11 +464,17 @@ public abstract class EntityPositionMixin implements ExactPosition {
         this.farlands$frameReady = true;
     }
 
-    /** 阈值内取零，阈值外取精确下取整。{@code toLong} 截断向零，负数带小数时补一。 */
+    /** 精确下取整。{@code toLong} 截断向零，负数带小数时补一。阈值与锚点都不参与。 */
+    @Unique
+    private static long farlands$exactFloor(Binary256 value) {
+        long truncated = value.toLong();
+        return value.signBit() && !value.equals(Binary256.of(truncated)) ? truncated - 1L : truncated;
+    }
+
+    /** 阈值内取零，阈值外取精确下取整。 */
     @Unique
     private static long farlands$anchorOf(Binary256 value) {
-        long truncated = value.toLong();
-        long floor = value.signBit() && !value.equals(Binary256.of(truncated)) ? truncated - 1L : truncated;
+        long floor = farlands$exactFloor(value);
         return floor > -farlands$FRAME_LIMIT && floor < farlands$FRAME_LIMIT ? 0L : floor;
     }
 
@@ -488,6 +494,19 @@ public abstract class EntityPositionMixin implements ExactPosition {
     public AABB farlands$localBox() {
         this.farlands$syncFrame();
         return this.makeBoundingBox(new Vec3(this.farlands$localX, this.farlands$localY, this.farlands$localZ));
+    }
+
+    /** 该轴自上一 tick 以来是否跨过方块格。两端各取精确下取整再比。 */
+    @Override
+    public boolean farlands$crossedCell(int axis) {
+        this.farlands$syncFrame();
+        Binary256[] slots = this.farlands$exactSlots();
+        Binary256 old = slots[axis == POS_X ? OLD_XO : axis == POS_Y ? OLD_YO : OLD_ZO];
+        Binary256 current = slots[axis == POS_X ? POS_X : axis == POS_Y ? POS_Y : POS_Z];
+        if (old == null || current == null) {
+            return false;
+        }
+        return farlands$exactFloor(old) != farlands$exactFloor(current);
     }
 
     /**

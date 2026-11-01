@@ -8,6 +8,7 @@ import net.minecraft.world.entity.item.ItemEntity;
 import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.Redirect;
 
 /**
@@ -47,5 +48,20 @@ public abstract class ItemEntityPositionMixin {
     @Redirect(method = "tick()V", at = @At(value = "FIELD", target = "Lnet/minecraft/world/entity/item/ItemEntity;zo:D", opcode = Opcodes.GETFIELD))
     private double farlands$getZo(ItemEntity self) {
         return ExactDoubles.read((ExactPosition) self, ExactPosition.OLD_ZO, self.zo);
+    }
+
+    /**
+     * 合并检查的节流判据从「两个投影的格子号是否不同」改成帧内跨格判定。
+     *
+     * <p>
+     * 原式是三次 `Mth.floor(xo) != Mth.floor(getX())`，两端都是量化过的 double，`5e18` 处多半相等，
+     * 于是掉落物的合并总是按 40 tick 的慢档跑。`moved` 是该方法槽位 2 的 boolean。
+     */
+    @ModifyVariable(method = "tick()V", at = @At("STORE"), index = 2)
+    private boolean farlands$moved(boolean value) {
+        ExactPosition holder = (ExactPosition) (Object) this;
+        return holder.farlands$crossedCell(ExactPosition.POS_X)
+                || holder.farlands$crossedCell(ExactPosition.POS_Y)
+                || holder.farlands$crossedCell(ExactPosition.POS_Z);
     }
 }

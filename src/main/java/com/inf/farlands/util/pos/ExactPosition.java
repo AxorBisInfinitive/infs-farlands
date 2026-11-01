@@ -82,4 +82,13 @@ public interface ExactPosition {
      * 碰撞探测都恒判「无碰撞」。凡是要拿盒去探碰撞的地方，都改用这一个。
      */
     AABB farlands$localBox();
+
+    /**
+     * 自上一 tick 以来，该轴的方块格号是否变过。
+     *
+     * <p>
+     * 判据是两端各自的精确下取整是否相等，与位移大小无关。不能用 {@link #farlands$frameDelta} 顶替：
+     * 位移非零不等于跨格。也不能用 {@link #farlands$anchor}：锚点在 1e12 以下恒为 0，比不出格子。
+     */
+    boolean farlands$crossedCell(int axis);
 }
