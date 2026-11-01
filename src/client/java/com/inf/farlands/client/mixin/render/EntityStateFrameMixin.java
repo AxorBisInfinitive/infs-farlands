@@ -1,7 +1,6 @@
 package com.inf.farlands.client.mixin.render;
 
 import com.inf.farlands.client.render.ExactRenderOrigin;
-import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.util.pos.ExactPosition;
 
 import net.minecraft.client.renderer.entity.EntityRenderer;
@@ -17,8 +16,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * 在实体渲染状态抽取完成时记下它的帧。
  *
  * <p>
- * 挂在基类方法的返回处：子类的覆写都会调回这里，一帧每个状态各填一次。栅值取 {@code 2^53}，三轴都不够大时
- * 不填，消费点因此逐位退回原式。
+ * 挂在基类方法的返回处：子类的覆写都会调回这里，一帧每个状态各填一次。无条件填，不判量级：帧未启用时锚点为 0、
+ * 局部量就是那个 double，{@code FrameMath.offset} 因此退化成原版那一次减法，精度是渐变的，没有两套公式。
  *
  * <p>
  * 局部量用 {@code lerpLocal} 而不是 {@code local}：状态的 {@code x/y/z} 是部分刻插值后的位置，帧要与它同源，
@@ -31,11 +30,6 @@ public class EntityStateFrameMixin {
     private void farlands$captureOrigin(Entity entity, EntityRenderState state, float partialTicks, CallbackInfo ci) {
         ExactRenderOrigin origin = (ExactRenderOrigin) state;
         if (!(entity instanceof ExactPosition holder)) {
-            origin.farlands$clearOrigin();
-            return;
-        }
-        double limit = FrameMath.threshold();
-        if (Math.abs(state.x) < limit && Math.abs(state.y) < limit && Math.abs(state.z) < limit) {
             origin.farlands$clearOrigin();
             return;
         }

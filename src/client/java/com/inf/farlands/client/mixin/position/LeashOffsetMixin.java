@@ -30,7 +30,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * 那个偏移 vanilla 已经写好，直接读。
  *
  * <p>
- * 逐条独立：某一条的锚点守卫不过时跳过它，保留 vanilla 当帧刚写的世界值，不影响其余各条。
+ * 逐条独立：某一条拿不到精确位置时跳过它，保留 vanilla 当帧刚写的世界值，不影响其余各条。
  */
 @Mixin(EntityRenderer.class)
 public class LeashOffsetMixin {
@@ -48,19 +48,12 @@ public class LeashOffsetMixin {
         if (!(roper instanceof ExactPosition roperHolder)) {
             return;
         }
-        if (!FrameMath.wide(entity.getX(), entity.getY(), entity.getZ())
-                && !FrameMath.wide(roper.getX(), roper.getY(), roper.getZ())) {
-            return;
-        }
         long entityX = holder.farlands$anchor(ExactPosition.POS_X);
         long entityY = holder.farlands$anchor(ExactPosition.POS_Y);
         long entityZ = holder.farlands$anchor(ExactPosition.POS_Z);
         long roperX = roperHolder.farlands$anchor(ExactPosition.POS_X);
         long roperY = roperHolder.farlands$anchor(ExactPosition.POS_Y);
         long roperZ = roperHolder.farlands$anchor(ExactPosition.POS_Z);
-        if (!FrameMath.safe(roperX, roperY, roperZ, entityX, entityY, entityZ)) {
-            return;
-        }
         boolean quad = roper.supportQuadLeashAsHolder() && leashable.supportQuadLeash();
         Vec3[] roperOffsets = quad ? roper.getQuadLeashHolderOffsets() : null;
         float roperYRot = quad

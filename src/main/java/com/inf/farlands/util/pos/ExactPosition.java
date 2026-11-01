@@ -84,6 +84,27 @@ public interface ExactPosition {
     AABB farlands$localBox();
 
     /**
+     * 该轴的精确下取整，方块格号。
+     *
+     * <p>
+     * 与 {@link #farlands$anchor} 的区别只有一条：它不带「0 表示帧未启用」那个约定。帧未启用时它就是那个
+     * double 的下取整，帧启用时它是槽位的精确下取整。所以绝对值场景用它，差值场景用锚点与局部量。
+     *
+     * <p>
+     * 两个典型的绝对值场景是调试屏显示的坐标与模拟层方阵的中心：那两处要的是真值本身，不是与另一个位置作差。
+     */
+    long farlands$cellCoord(int axis);
+
+    /**
+     * 该轴的 256 位值。
+     *
+     * <p>
+     * 槽位未写过时按位置字段的 double 建一个，调用方不必判空。特殊值原样返回，NaN 与无穷的十进制写法由
+     * {@code Binary256} 自己给，调用方不必单独甄别。
+     */
+    Binary256 farlands$exactValue(int axis);
+
+    /**
      * 自上一 tick 以来，该轴的方块格号是否变过。
      *
      * <p>

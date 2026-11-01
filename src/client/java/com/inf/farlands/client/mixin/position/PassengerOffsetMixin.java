@@ -22,7 +22,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  *
  * <p>
  * 只判空与非空，不复刻「是不是矿车乘客」那一串条件：{@code passengerOffset} 只有那一处写点，非矿车乘客本来就是
- * 空。阈值与其他各项同取 {@code 2^53}。
+ * 空。这里是全仓唯一保留 {@code 2^53} 判据的地方之一，理由见下：它不是精度阈值。
  * </p>
  */
 @Mixin(EntityRenderer.class)
@@ -34,7 +34,11 @@ public class PassengerOffsetMixin {
         if (state.passengerOffset == null) {
             return;
         }
-        if (!FrameMath.wide(entity.getX(), entity.getY(), entity.getZ())) {
+        // 这一处不是精度阈值，是数据源能力：被减数是跨网络上线的 MinecartStep.position，两端都是 ulp 的整数倍。
+        // 2^53 以下是原版有定义的区间，插值必须保；之上没有定义，插值徒留 0 或 ±ulp 的假位移。
+        double limit = FrameMath.threshold();
+        if (Math.abs(entity.getX()) < limit && Math.abs(entity.getY()) < limit
+                && Math.abs(entity.getZ()) < limit) {
             return;
         }
         state.passengerOffset = null;

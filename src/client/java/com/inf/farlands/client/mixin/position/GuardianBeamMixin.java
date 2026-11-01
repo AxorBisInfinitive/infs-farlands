@@ -26,10 +26,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  *
  * <p>
  * 必须全或无：{@code eyePosition} 同时参与两对差值，只平移其中两个会让一处绝对量与世界量混算，比原来的量化
- * 更差。所以只要有一对的锚点守卫不过，三处全部保留 vanilla 的世界值。
+ * 更差。所以只要有一对拿不到精确点，三处全部保留 vanilla 的世界值。
  *
  * <p>
- * 一个字段为空表示 vanilla 这一帧没有那个点，按空处理，不参与守卫也不写。
+ * 不判量级：锚点为 0 时写法与 vanilla 同值，精度是渐变的。一个字段为空表示 vanilla 这一帧没有那个点，按空处理，
+ * 不参与平移也不写。
  */
 @Mixin(GuardianRenderer.class)
 public class GuardianBeamMixin {
@@ -38,9 +39,6 @@ public class GuardianBeamMixin {
     private void farlands$shiftPoints(Guardian entity, GuardianRenderState state, float partialTicks,
             CallbackInfo ci) {
         if (!(entity instanceof ExactPosition guardian)) {
-            return;
-        }
-        if (!FrameMath.wide(entity.getX(), entity.getY(), entity.getZ())) {
             return;
         }
         LivingEntity attackTarget = entity.getActiveAttackTarget();
@@ -57,22 +55,6 @@ public class GuardianBeamMixin {
         long guardianX = guardian.farlands$anchor(ExactPosition.POS_X);
         long guardianY = guardian.farlands$anchor(ExactPosition.POS_Y);
         long guardianZ = guardian.farlands$anchor(ExactPosition.POS_Z);
-        if (hasAttack) {
-            ExactPosition target = (ExactPosition) attackTarget;
-            if (!FrameMath.safe(target.farlands$anchor(ExactPosition.POS_X),
-                    target.farlands$anchor(ExactPosition.POS_Y),
-                    target.farlands$anchor(ExactPosition.POS_Z), guardianX, guardianY, guardianZ)) {
-                return;
-            }
-        }
-        if (hasLook) {
-            ExactPosition look = (ExactPosition) lookAtEntity;
-            if (!FrameMath.safe(look.farlands$anchor(ExactPosition.POS_X),
-                    look.farlands$anchor(ExactPosition.POS_Y),
-                    look.farlands$anchor(ExactPosition.POS_Z), guardianX, guardianY, guardianZ)) {
-                return;
-            }
-        }
         state.eyePosition = new Vec3(
                 guardian.farlands$lerpLocal(ExactPosition.POS_X, partialTicks),
                 guardian.farlands$lerpLocal(ExactPosition.POS_Y, partialTicks) + (double) entity.getEyeHeight(),

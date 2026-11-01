@@ -24,7 +24,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * 只需在抽取的返回处重算一次，消费端不动。
  *
  * <p>
- * 三轴都低于 {@code 2^53} 时直接返回，保留 vanilla 的原值，逐位不变。水晶的竖直偏移
+ * 不判量级：两端各取锚点与局部量，{@code FrameMath.offset} 在锚点为 0 时退化成原版那一次减法，所以原版有定义
+ * 的坐标范围内逐位相同，之上只有精度的渐变。水晶的竖直偏移
  * {@code EndCrystalRenderer.getY} 是纯函数，照原样加在 y 上。
  */
 @Mixin(EnderDragonRenderer.class)
@@ -38,19 +39,12 @@ public class DragonBeamMixin {
                 || !(crystal instanceof ExactPosition beamTarget)) {
             return;
         }
-        if (!FrameMath.wide(entity.getX(), entity.getY(), entity.getZ())
-                && !FrameMath.wide(crystal.getX(), crystal.getY(), crystal.getZ())) {
-            return;
-        }
         long dragonX = dragon.farlands$anchor(ExactPosition.POS_X);
         long dragonY = dragon.farlands$anchor(ExactPosition.POS_Y);
         long dragonZ = dragon.farlands$anchor(ExactPosition.POS_Z);
         long crystalX = beamTarget.farlands$anchor(ExactPosition.POS_X);
         long crystalY = beamTarget.farlands$anchor(ExactPosition.POS_Y);
         long crystalZ = beamTarget.farlands$anchor(ExactPosition.POS_Z);
-        if (!FrameMath.safe(crystalX, crystalY, crystalZ, dragonX, dragonY, dragonZ)) {
-            return;
-        }
         double dx = FrameMath.offset(crystalX, beamTarget.farlands$lerpLocal(ExactPosition.POS_X, partialTicks),
                 dragonX, dragon.farlands$lerpLocal(ExactPosition.POS_X, partialTicks));
         double dy = FrameMath.offset(crystalY, beamTarget.farlands$lerpLocal(ExactPosition.POS_Y, partialTicks),

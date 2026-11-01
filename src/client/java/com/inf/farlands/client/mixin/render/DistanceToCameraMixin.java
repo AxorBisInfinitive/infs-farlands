@@ -38,21 +38,12 @@ public class DistanceToCameraMixin {
         if (!(this.camera instanceof ExactCameraOrigin cameraOrigin) || !cameraOrigin.farlands$cameraValid()) {
             return original;
         }
-        double limit = FrameMath.threshold();
-        if (Math.abs(entity.getX()) < limit && Math.abs(entity.getY()) < limit
-                && Math.abs(entity.getZ()) < limit) {
-            return original;
-        }
         long originX = holder.farlands$anchor(ExactPosition.POS_X);
         long originY = holder.farlands$anchor(ExactPosition.POS_Y);
         long originZ = holder.farlands$anchor(ExactPosition.POS_Z);
         long cameraX = cameraOrigin.farlands$cameraAnchor(ExactPosition.POS_X);
         long cameraY = cameraOrigin.farlands$cameraAnchor(ExactPosition.POS_Y);
         long cameraZ = cameraOrigin.farlands$cameraAnchor(ExactPosition.POS_Z);
-        if (!FrameMath.safeDelta(originX, cameraX) || !FrameMath.safeDelta(originY, cameraY)
-                || !FrameMath.safeDelta(originZ, cameraZ)) {
-            return original;
-        }
         double dx = FrameMath.offset(originX, holder.farlands$local(ExactPosition.POS_X), cameraX,
                 cameraOrigin.farlands$cameraLocal(ExactPosition.POS_X));
         double dy = FrameMath.offset(originY, holder.farlands$local(ExactPosition.POS_Y), cameraY,

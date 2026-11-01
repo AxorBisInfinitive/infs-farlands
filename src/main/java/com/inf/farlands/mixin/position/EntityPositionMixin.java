@@ -509,6 +509,30 @@ public abstract class EntityPositionMixin implements ExactPosition {
         return farlands$exactFloor(old) != farlands$exactFloor(current);
     }
 
+    /** 该轴的精确下取整。槽位在就用槽位，不在就用位置字段的下取整。 */
+    @Override
+    public long farlands$cellCoord(int axis) {
+        int slot = axis == POS_X ? POS_X : axis == POS_Y ? POS_Y : POS_Z;
+        Binary256 value = this.farlands$exactSlots()[slot];
+        if (value != null) {
+            return farlands$exactFloor(value);
+        }
+        double fallback = axis == POS_X ? this.position.x : axis == POS_Y ? this.position.y : this.position.z;
+        return Mth.lfloor(fallback);
+    }
+
+    /** 该轴的 256 位值。槽位未写过时按位置字段建一个，此后槽位一直有值。 */
+    @Override
+    public Binary256 farlands$exactValue(int axis) {
+        int slot = axis == POS_X ? POS_X : axis == POS_Y ? POS_Y : POS_Z;
+        Binary256 value = this.farlands$exactSlots()[slot];
+        if (value != null) {
+            return value;
+        }
+        double fallback = axis == POS_X ? this.position.x : axis == POS_Y ? this.position.y : this.position.z;
+        return Binary256.of(fallback);
+    }
+
     /**
      * 在帧里加一段位移并写回。
      *

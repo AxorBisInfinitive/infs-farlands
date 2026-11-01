@@ -1,50 +1,47 @@
 package com.inf.farlands.client.render;
 
 /**
- * 帧表示的两个工具：两锚点之差是否安全，以及帧差是多少。
+ * 帧差：两个位置各拆成「锚点 long 与局部 double」，差值只在同源的两段上做一次。
  *
  * <p>
- * 锚点是 long，两个锚点之差在异号时可以达到两倍量级，越过 long。所以先判号，再判量级；同号时
- * {@code |a - b|} 不超过 {@code max(|a|,|b|)}，减法本身安全。
+ * 存在的理由是 double 的表示能力：{@code 2^53} 以上一个 ulp 就超过一格，两个世界量级的位置相减得到的是
+ * ulp 网格上的数，不是它们的真实差。锚点承担量级，局部量承担精度，两项分别算再相加即可。
  *
  * <p>
- * 渲染侧启用帧的量级阈值是 {@code 2^53}：double 在该量级以上表示不了一格，插值结果只能落在 ulp 网格上。
- * 低于它时调用方一律走原式，逐位不变。
+ * 锚点为 0 时，也就是帧未启用时，局部量就是那个 double 本身，于是本方法退化成两个局部量相减，即原版那一次减法。
+ * 所以调用方不需要判量级：精度是渐变的，不存在两套公式。
+ *
+ * <p>
+ * 锚点差在 long 上算。两个锚点异号时差可到两倍量级，越过 long，那时真实距离已远超任何可见范围，退回 double
+ * 相减即可，结果只影响屏幕外的物体。
  */
 public final class FrameMath {
 
-    /** {@code 2^53}：double 的整数位宽，超过它一格就表示不了。 */
+    /** {@code 2^53}：double 在该量级上的 ulp 恰为 2，再往上表示不了一格。 */
     private static final long LIMIT = 1L << 53;
 
     private FrameMath() {
     }
 
-    /** 渲染侧阈值，坐标为double时与 {@link #LIMIT} 同值。 */
+    /**
+     * 一格不再可表示的量级刻度。
+     *
+     * <p>
+     * 只给两处网络插值的开关用：跨网络的位置是 double，超过这个刻度就被舍到 ulp 网格上，插值偏移失去意义。
+     * 其余帧差调用点不需要它，因为 {@link #offset} 的精度是渐变的。
+     */
     public static double threshold() {
         return (double) LIMIT;
     }
 
-    /** 两锚点之差是否能落进 long：只有异号时才可能越界。 */
-    public static boolean safeDelta(long a, long b) {
-        if ((a < 0L) == (b < 0L)) {
-            return true;
-        }
-        return a >= -LIMIT && a <= LIMIT && b >= -LIMIT && b <= LIMIT;
-    }
-
-    /** 三轴里是否有任一轴已到渲染侧需要帧的量级。 */
-    public static boolean wide(double x, double y, double z) {
-        double limit = threshold();
-        return Math.abs(x) >= limit || Math.abs(y) >= limit || Math.abs(z) >= limit;
-    }
-
-    /** 两组锚点在三个轴上都能安全相减。 */
-    public static boolean safe(long ax, long ay, long az, long bx, long by, long bz) {
-        return safeDelta(ax, bx) && safeDelta(ay, by) && safeDelta(az, bz);
-    }
-
-    /** 帧差：锚点差加局部差。调用前必须先过 {@link #safeDelta}。 */
+    /** 帧差：锚点差加局部差。锚点为 0 时等于两个局部量相减。 */
     public static double offset(long aAnchor, double aLocal, long bAnchor, double bLocal) {
-        return (double) (aAnchor - bAnchor) + (aLocal - bLocal);
+        long diff;
+        try {
+            diff = Math.subtractExact(aAnchor, bAnchor);
+        } catch (ArithmeticException overflowed) {
+            return (double) aAnchor - (double) bAnchor + (aLocal - bLocal);
+        }
+        return (double) diff + (aLocal - bLocal);
     }
 }

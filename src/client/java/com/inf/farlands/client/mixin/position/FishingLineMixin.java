@@ -44,21 +44,13 @@ public class FishingLineMixin {
                 || !(owner instanceof ExactPosition hand)) {
             return;
         }
-        if (!FrameMath.wide(entity.getX(), entity.getY(), entity.getZ())
-                && !FrameMath.wide(owner.getX(), owner.getY(), owner.getZ())) {
-            return;
-        }
         long handX = hand.farlands$anchor(ExactPosition.POS_X);
         long handY = hand.farlands$anchor(ExactPosition.POS_Y);
         long handZ = hand.farlands$anchor(ExactPosition.POS_Z);
         long hookX = hook.farlands$anchor(ExactPosition.POS_X);
         long hookY = hook.farlands$anchor(ExactPosition.POS_Y);
         long hookZ = hook.farlands$anchor(ExactPosition.POS_Z);
-        if (!FrameMath.safe(handX, handY, handZ, hookX, hookY, hookZ)) {
-            return;
-        }
-        Vec3 offset = this.farlands$handOffset(owner, partialTicks);
-        double handLocalX = hand.farlands$lerpLocal(ExactPosition.POS_X, partialTicks) + offset.x;
+        Vec3 offset = this.farlands$handOffset(owner, partialTicks);        double handLocalX = hand.farlands$lerpLocal(ExactPosition.POS_X, partialTicks) + offset.x;
         double handLocalY = hand.farlands$lerpLocal(ExactPosition.POS_Y, partialTicks)
                 + (double) owner.getEyeHeight() + offset.y;
         double handLocalZ = hand.farlands$lerpLocal(ExactPosition.POS_Z, partialTicks) + offset.z;

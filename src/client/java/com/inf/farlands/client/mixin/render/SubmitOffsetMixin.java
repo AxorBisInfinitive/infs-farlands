@@ -48,15 +48,12 @@ public class SubmitOffsetMixin {
             long cameraX = cameraState.farlands$stateAnchor(ExactPosition.POS_X);
             long cameraY = cameraState.farlands$stateAnchor(ExactPosition.POS_Y);
             long cameraZ = cameraState.farlands$stateAnchor(ExactPosition.POS_Z);
-            if (FrameMath.safeDelta(originX, cameraX) && FrameMath.safeDelta(originY, cameraY)
-                    && FrameMath.safeDelta(originZ, cameraZ)) {
-                x = FrameMath.offset(originX, origin.farlands$originLocal(ExactPosition.POS_X), cameraX,
-                        cameraState.farlands$stateLocal(ExactPosition.POS_X));
-                y = FrameMath.offset(originY, origin.farlands$originLocal(ExactPosition.POS_Y), cameraY,
-                        cameraState.farlands$stateLocal(ExactPosition.POS_Y));
-                z = FrameMath.offset(originZ, origin.farlands$originLocal(ExactPosition.POS_Z), cameraZ,
-                        cameraState.farlands$stateLocal(ExactPosition.POS_Z));
-            }
+            x = FrameMath.offset(originX, origin.farlands$originLocal(ExactPosition.POS_X), cameraX,
+                    cameraState.farlands$stateLocal(ExactPosition.POS_X));
+            y = FrameMath.offset(originY, origin.farlands$originLocal(ExactPosition.POS_Y), cameraY,
+                    cameraState.farlands$stateLocal(ExactPosition.POS_Y));
+            z = FrameMath.offset(originZ, origin.farlands$originLocal(ExactPosition.POS_Z), cameraZ,
+                    cameraState.farlands$stateLocal(ExactPosition.POS_Z));
         }
         dispatcher.submit(state, camera, x, y, z, poseStack, collector);
     }
