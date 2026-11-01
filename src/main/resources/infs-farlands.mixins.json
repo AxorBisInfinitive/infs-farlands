@@ -161,6 +161,7 @@
     "position.BodyRotationControlPositionMixin",
     "position.OldMinecartBehaviorPositionMixin",
     "position.PowderSnowBlockPositionMixin",
+    "position.PlayerPositionMixin",
     "compat.chunky.FabricWorldMixin"
   ],
   "injectors": {

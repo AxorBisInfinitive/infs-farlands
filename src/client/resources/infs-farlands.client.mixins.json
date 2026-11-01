@@ -73,7 +73,8 @@
     "position.LevelRendererPositionMixin",
     "position.EntityRendererPositionMixin",
     "position.GuardianRendererPositionMixin",
-    "position.AvatarRendererPositionMixin"
+    "position.AvatarRendererPositionMixin",
+    "position.LocalPlayerPositionMixin"
   ],
   "injectors": {
     "defaultRequire": 1

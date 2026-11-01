@@ -192,13 +192,41 @@ public abstract class EntityPositionMixin implements ExactPosition {
         return oldRelative + (double) partial * (newLocal - oldRelative);
     }
 
-    /** 把这次的三个入参记进位置槽位。取头部，正文里那处早退不影响等价性。 */
+    /**
+     * 旧位置到当前的位移，帧内相减。
+     *
+     * <p>
+     * 与 {@link #farlands$lerpLocal} 同源，只是不乘权重。旧位置没记过时返回 0，等价于「这一 tick 没动」。
+     */
+    @Override
+    public double farlands$frameDelta(int axis) {
+        this.farlands$syncFrame();
+        Binary256[] slots = this.farlands$exactSlots();
+        Binary256 old = slots[axis == POS_X ? OLD_XO : axis == POS_Y ? OLD_YO : OLD_ZO];
+        if (old == null) {
+            return 0.0;
+        }
+        long newAnchor = farlands$anchor(axis);
+        double newLocal = farlands$local(axis);
+        long oldAnchor = farlands$anchorOf(old);
+        double oldLocal = farlands$localOf(old, oldAnchor);
+        return (double) (newAnchor - oldAnchor) + (newLocal - oldLocal);
+    }
+
+    /**
+     * 把这次的三个入参记进位置槽位。
+     *
+     * <p>
+     * 逐轴幂等：入参与当前槽位的 double 投影相等时保留槽位。`reapplyPosition`、`snapTo(getX(), ...)`、
+     * `teleportSetPosition` 这几条会把投影原样回填，若无条件按入参重写，256 位值就被投影替换，
+     * {@code 5e18} 处一次回填最多跳 512 格。
+     */
     @Inject(method = "setPosRaw(DDD)V", at = @At("HEAD"))
     private void farlands$storePosition(double x, double y, double z, CallbackInfo ci) {
         Binary256[] slots = this.farlands$exactSlots();
-        slots[POS_X] = Binary256.of(x);
-        slots[POS_Y] = Binary256.of(y);
-        slots[POS_Z] = Binary256.of(z);
+        slots[POS_X] = farlands$keepIfProjection(slots[POS_X], x);
+        slots[POS_Y] = farlands$keepIfProjection(slots[POS_Y], y);
+        slots[POS_Z] = farlands$keepIfProjection(slots[POS_Z], z);
         this.farlands$frameReady = false;
     }
 
@@ -447,6 +475,19 @@ public abstract class EntityPositionMixin implements ExactPosition {
     @Unique
     private static double farlands$localOf(Binary256 value, long anchor) {
         return anchor == 0L ? value.toDouble() : value.subtract(Binary256.of(anchor)).toDouble();
+    }
+
+    /** 入参等于当前槽位的 double 投影时保留槽位，否则按入参写。写侧幂等靠这一句。 */
+    @Unique
+    private static Binary256 farlands$keepIfProjection(Binary256 current, double value) {
+        return current != null && current.toDouble() == value ? current : Binary256.of(value);
+    }
+
+    /** 当前帧下的局部包围盒，碰撞探测用。 */
+    @Override
+    public AABB farlands$localBox() {
+        this.farlands$syncFrame();
+        return this.makeBoundingBox(new Vec3(this.farlands$localX, this.farlands$localY, this.farlands$localZ));
     }
 
     /**

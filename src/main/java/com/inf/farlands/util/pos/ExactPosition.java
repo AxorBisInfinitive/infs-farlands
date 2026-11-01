@@ -2,6 +2,8 @@ package com.inf.farlands.util.pos;
 
 import com.inf.long2.binaries.Binary256;
 
+import net.minecraft.world.phys.AABB;
+
 /**
  * 实体坐标的 256 位存储面，由 {@code mixin.position.EntityPositionMixin} 注入到 Entity 实现。
  *
@@ -62,4 +64,22 @@ public interface ExactPosition {
      * 返回值不保证落在 {@code [0, 1)}，调用方允许它为负。
      */
     double farlands$lerpLocal(int axis, float partial);
+
+    /**
+     * 旧位置到当前位置的位移，帧内相减，单位格。
+     *
+     * <p>
+     * 两个世界量级的 double 直接相减会在 {@code 5e18} 处被 ulp 吞成 0 或 1024；这里先各自求锚点与局部量，
+     * 锚点差用 long 算，局部差用小数算。旧位置没记过时返回 0。
+     */
+    double farlands$frameDelta(int axis);
+
+    /**
+     * 当前帧下的局部包围盒。坐标是帧内的，可直接喂给帧内碰撞源。
+     *
+     * <p>
+     * {@code getBoundingBox()} 返回的是世界量级的盒，{@code 5e18} 处六个端点会塌成一个点，任何基于它的
+     * 碰撞探测都恒判「无碰撞」。凡是要拿盒去探碰撞的地方，都改用这一个。
+     */
+    AABB farlands$localBox();
 }
