@@ -2,6 +2,7 @@ package com.inf.farlands.client.mixin.debug;
 
 import java.util.Map;
 
+import com.inf.farlands.client.debug.PositionUnitsDebugEntry;
 import com.inf.farlands.client.debug.SystemsDebugEntry;
 
 import net.minecraft.client.gui.components.debug.DebugScreenEntries;
@@ -33,7 +34,8 @@ public class DebugScreenEntriesMixin {
     private static Map<Identifier, DebugScreenEntry> ENTRIES_BY_ID;
 
     @Inject(method = "<clinit>", at = @At("RETURN"))
-    private static void farlands$registerSystemsEntry(CallbackInfo ci) {
+    private static void farlands$registerEntries(CallbackInfo ci) {
         ENTRIES_BY_ID.put(SystemsDebugEntry.ID, new SystemsDebugEntry());
+        ENTRIES_BY_ID.put(PositionUnitsDebugEntry.ID, new PositionUnitsDebugEntry());
     }
 }
