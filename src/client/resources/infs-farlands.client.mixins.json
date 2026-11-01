@@ -74,7 +74,12 @@
     "position.EntityRendererPositionMixin",
     "position.GuardianRendererPositionMixin",
     "position.AvatarRendererPositionMixin",
-    "position.LocalPlayerPositionMixin"
+    "position.LocalPlayerPositionMixin",
+    "render.CameraRenderStateMixin",
+    "render.EntityRenderStateMixin",
+    "render.EntityStateFrameMixin",
+    "render.SubmitOffsetMixin",
+    "render.DistanceToCameraMixin"
   ],
   "injectors": {
     "defaultRequire": 1

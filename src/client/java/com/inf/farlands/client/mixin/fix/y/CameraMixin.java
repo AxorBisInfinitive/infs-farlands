@@ -4,10 +4,12 @@ import java.util.Arrays;
 import java.util.List;
 
 import com.inf.farlands.client.render.ExactCameraOrigin;
+import com.inf.farlands.client.render.ExactCameraState;
 import com.inf.farlands.util.pos.ExactPosition;
 
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.core.BlockPos;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.util.Mth;
@@ -189,6 +191,26 @@ public abstract class CameraMixin implements ExactCameraOrigin {
         this.farlands$cameraLocalY = localY - (double) stepY;
         this.farlands$cameraLocalZ = localZ - (double) stepZ;
         this.farlands$cameraValid = true;
+    }
+
+    /**
+     * 把这一帧的帧抄进渲染状态，供拿不到 Camera 实例的消费点使用。
+     *
+     * <p>
+     * 不在这里清除 {@code farlands$cameraValid}：同一帧里它还要给模拟层的剔除与段 UBO 用。逐帧复位已经在
+     * {@code alignWithEntity} 的头部做了，而这一帧的 {@code update} 到 {@code extractRenderState} 到渲染 pass 是
+     * 同一条调用链，中间不会插入第二次 {@code update}。
+     */
+    @Inject(method = "extractRenderState(Lnet/minecraft/client/renderer/state/level/CameraRenderState;F)V", at = @At("RETURN"))
+    private void farlands$copyCameraState(CameraRenderState state, float partialTicks, CallbackInfo ci) {
+        ExactCameraState target = (ExactCameraState) state;
+        if (!this.farlands$cameraValid) {
+            target.farlands$clearState();
+            return;
+        }
+        target.farlands$setState(this.farlands$cameraAnchorX, this.farlands$cameraAnchorY,
+                this.farlands$cameraAnchorZ, this.farlands$cameraLocalX, this.farlands$cameraLocalY,
+                this.farlands$cameraLocalZ);
     }
 
     @Overwrite
