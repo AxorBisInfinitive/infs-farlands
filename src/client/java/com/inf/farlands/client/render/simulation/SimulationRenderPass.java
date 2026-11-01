@@ -14,6 +14,7 @@ import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.vertex.VertexFormat;
 
 import com.inf.farlands.client.render.AnchoredFrustum;
+import com.inf.farlands.client.render.ExactCameraOrigin;
 import com.inf.farlands.client.simulation.Simulation;
 import com.inf.farlands.client.simulation.SimulationHolder;
 import com.inf.farlands.client.simulation.SimulationSection;
@@ -21,6 +22,7 @@ import com.inf.farlands.client.simulation.SimulationSection;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.DynamicUniformStorage;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
+import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 
 import org.joml.Matrix4f;
@@ -108,7 +110,7 @@ public final class SimulationRenderPass {
      * 必须在没有打开 pass 的时候调。{@code writeUniforms} 内部要 {@code mapBuffer}，pass 打开期间会直接抛
      * {@code Close the existing render pass before performing additional commands}。
      */
-    public void prepare(GpuTextureView atlas, CameraRenderState camera) {
+    public void prepare(GpuTextureView atlas, CameraRenderState camera, ExactCameraOrigin origin) {
         this.batch = null;
         if (atlas == null) {
             return;
@@ -118,7 +120,29 @@ public final class SimulationRenderPass {
         if (sections.isEmpty()) {
             return;
         }
-        Vec3 cameraPos = camera.pos;
+        long camAnchorX;
+        long camAnchorY;
+        long camAnchorZ;
+        double camLocalX;
+        double camLocalY;
+        double camLocalZ;
+        if (origin != null && origin.farlands$cameraValid()) {
+            camAnchorX = origin.farlands$cameraAnchor(0);
+            camAnchorY = origin.farlands$cameraAnchor(1);
+            camAnchorZ = origin.farlands$cameraAnchor(2);
+            camLocalX = origin.farlands$cameraLocal(0);
+            camLocalY = origin.farlands$cameraLocal(1);
+            camLocalZ = origin.farlands$cameraLocal(2);
+        } else {
+            // 退路：把相机的 double 位置拆成锚点加局部量，两项依次相减，与直接减相机逐位相同。
+            Vec3 cameraPos = camera.pos;
+            camAnchorX = Mth.lfloor(cameraPos.x);
+            camAnchorY = Mth.lfloor(cameraPos.y);
+            camAnchorZ = Mth.lfloor(cameraPos.z);
+            camLocalX = cameraPos.x - (double) camAnchorX;
+            camLocalY = cameraPos.y - (double) camAnchorY;
+            camLocalZ = cameraPos.z - (double) camAnchorZ;
+        }
         List<Simulation.SnapSection> visible = new ArrayList<>(sections.size());
         List<SimulationGeometry.Entry> buffers = new ArrayList<>(sections.size());
         int indices = 0;
@@ -130,9 +154,9 @@ public final class SimulationRenderPass {
                 continue;
             }
             if (camera.initialized && camera.cullFrustum instanceof AnchoredFrustum frustum) {
-                double originX = Simulation.delta(section.originX(), cameraPos.x());
-                double originY = Simulation.delta(section.originY(), cameraPos.y());
-                double originZ = Simulation.delta(section.originZ(), cameraPos.z());
+                double originX = (double) (section.originX() - camAnchorX) - camLocalX;
+                double originY = (double) (section.originY() - camAnchorY) - camLocalY;
+                double originZ = (double) (section.originZ() - camAnchorZ) - camLocalZ;
                 if (!frustum.farlands$isVisibleRelative(originX, originY, originZ,
                         originX + SimulationSection.SIZE, originY + SimulationSection.SIZE,
                         originZ + SimulationSection.SIZE)) {
@@ -159,9 +183,9 @@ public final class SimulationRenderPass {
         for (int i = 0; i < count; i++) {
             Simulation.SnapSection section = visible.get(i);
             infos[i] = new SectionInfo(view, 1.0F, atlasWidth, atlasHeight,
-                    (float) Simulation.delta(section.originX(), cameraPos.x()),
-                    (float) Simulation.delta(section.originY(), cameraPos.y()),
-                    (float) Simulation.delta(section.originZ(), cameraPos.z()));
+                    (float) ((double) (section.originX() - camAnchorX) - camLocalX),
+                    (float) ((double) (section.originY() - camAnchorY) - camLocalY),
+                    (float) ((double) (section.originZ() - camAnchorZ) - camLocalZ));
         }
         GpuBufferSlice[] slices = this.farlands$storage().writeUniforms(infos);
         List<RenderPass.Draw<GpuBufferSlice[]>> draws = new ArrayList<>(count);

@@ -2,12 +2,14 @@ package com.inf.farlands.client.mixin.simulation;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 
+import com.inf.farlands.client.render.ExactCameraOrigin;
 import com.inf.farlands.client.render.simulation.SimulationGeometry;
 import com.inf.farlands.client.render.simulation.SimulationRenderPass;
 import com.inf.farlands.client.simulation.Simulation;
 import com.inf.farlands.client.simulation.SimulationHolder;
 import com.inf.farlands.client.simulation.SimulationMesher;
 import com.inf.farlands.client.simulation.SimulationPick;
+import com.inf.farlands.util.pos.ExactPosition;
 
 import net.minecraft.client.Camera;
 import net.minecraft.client.DeltaTracker;
@@ -18,6 +20,7 @@ import net.minecraft.client.renderer.ShapeRenderer;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.state.level.LevelRenderState;
 import net.minecraft.util.ARGB;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -54,6 +57,35 @@ public class LevelRendererMixin {
     /** 本帧算好的选择框命中，渲染期取用一次即清。 */
     @Unique
     private SimulationPick.Hit farlands$outline;
+
+    /** 本帧的相机帧表示。{@code farlands$cameraValid} 为假时退回相机自己的 double 位置。 */
+    @Unique
+    private boolean farlands$cameraValid;
+
+    @Unique
+    private long farlands$cameraAnchorX;
+
+    @Unique
+    private long farlands$cameraAnchorY;
+
+    @Unique
+    private long farlands$cameraAnchorZ;
+
+    @Unique
+    private double farlands$cameraLocalX;
+
+    @Unique
+    private double farlands$cameraLocalY;
+
+    @Unique
+    private double farlands$cameraLocalZ;
+
+    /** 退路：把相机位置拆成锚点加局部量，算式与原先的两项展开相同。 */
+    @Unique
+    private static double farlands$cameraRelative(long world, double camera) {
+        long anchor = Mth.lfloor(camera);
+        return (double) (world - anchor) - (camera - (double) anchor);
+    }
 
     /**
      * 全局重建时作废模拟层的已烘结果。
@@ -105,9 +137,21 @@ public class LevelRendererMixin {
     private void farlands$prepareSimulation(DeltaTracker deltaTracker, Camera camera, float deltaPartialTick,
             CallbackInfo ci) {
         LevelRenderState state = Minecraft.getInstance().gameRenderer.getGameRenderState().levelRenderState;
+        ExactCameraOrigin origin = camera instanceof ExactCameraOrigin candidate && candidate.farlands$cameraValid()
+                ? candidate
+                : null;
+        this.farlands$cameraValid = origin != null;
+        if (origin != null) {
+            this.farlands$cameraAnchorX = origin.farlands$cameraAnchor(ExactPosition.POS_X);
+            this.farlands$cameraAnchorY = origin.farlands$cameraAnchor(ExactPosition.POS_Y);
+            this.farlands$cameraAnchorZ = origin.farlands$cameraAnchor(ExactPosition.POS_Z);
+            this.farlands$cameraLocalX = origin.farlands$cameraLocal(ExactPosition.POS_X);
+            this.farlands$cameraLocalY = origin.farlands$cameraLocal(ExactPosition.POS_Y);
+            this.farlands$cameraLocalZ = origin.farlands$cameraLocal(ExactPosition.POS_Z);
+        }
         SimulationRenderPass.INSTANCE.prepare(
                 state.chunkSectionsToRender == null ? null : state.chunkSectionsToRender.textureView(),
-                state.cameraRenderState);
+                state.cameraRenderState, origin);
     }
 
     /**
@@ -137,7 +181,8 @@ public class LevelRendererMixin {
         Simulation simulation = ((SimulationHolder) minecraft).simulation();
         this.farlands$outline = SimulationPick.pick(
                 simulation,
-                entity.getEyePosition(this.farlands$partialTicks),
+                entity,
+                this.farlands$partialTicks,
                 entity.getViewVector(this.farlands$partialTicks),
                 minecraft.player.blockInteractionRange());
     }
@@ -165,9 +210,18 @@ public class LevelRendererMixin {
             return;
         }
         Vec3 camera = state.cameraRenderState.pos;
-        double x = Simulation.delta(hit.originX() + hit.localX(), camera.x());
-        double y = Simulation.delta(hit.originY() + hit.localY(), camera.y());
-        double z = Simulation.delta(hit.originZ() + hit.localZ(), camera.z());
+        double x;
+        double y;
+        double z;
+        if (this.farlands$cameraValid) {
+            x = (double) (hit.originX() + hit.localX() - this.farlands$cameraAnchorX) - this.farlands$cameraLocalX;
+            y = (double) (hit.originY() + hit.localY() - this.farlands$cameraAnchorY) - this.farlands$cameraLocalY;
+            z = (double) (hit.originZ() + hit.localZ() - this.farlands$cameraAnchorZ) - this.farlands$cameraLocalZ;
+        } else {
+            x = farlands$cameraRelative(hit.originX() + hit.localX(), camera.x);
+            y = farlands$cameraRelative(hit.originY() + hit.localY(), camera.y);
+            z = farlands$cameraRelative(hit.originZ() + hit.localZ(), camera.z);
+        }
         Minecraft minecraft = Minecraft.getInstance();
         ShapeRenderer.renderShape(poseStack, bufferSource.getBuffer(RenderTypes.lines()), hit.shape(), x, y, z,
                 ARGB.black(102), minecraft.gameRenderer.getGameRenderState().windowRenderState.appropriateLineWidth);

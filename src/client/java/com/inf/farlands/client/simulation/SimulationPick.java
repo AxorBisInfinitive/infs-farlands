@@ -1,7 +1,10 @@
 package com.inf.farlands.client.simulation;
 
+import com.inf.farlands.util.pos.ExactPosition;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
@@ -18,11 +21,9 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * 形状跳过。判交交给 {@code VoxelShape.clip}，即精确形状裁剪，不假设形状落在格内。
  *
  * <p>
- * 坐标换算：格坐标用 long，射线在起始格所在段的局部空间里构造。{@code delta = view * reach} 本身就是 reach
- * 量级的小量，段内起点取 {@code eye - origin}，所以段长与方向都不经过绝对坐标的相加。绝对坐标下
- * {@code eye + view * reach} 会按 {@code ulp(eye)} 取整：{@code 2^55} 处 4.5 变成 8，{@code 2^60} 处变成 0。
- * 段内起点也不能写 {@code (double) origin} 再相减：{@code 2^60} 上相邻段的两个 long 原点会塌成同一个
- * double，所以一律用 {@link Simulation#delta} 的负数，先 long 求差再落 double。段与段内起点在跨段时才重算。
+ * 眼睛不取 {@code Vec3}：世界量级的 double 在 {@code 5e18} 处 ulp 是 1024，{@code eye + view * reach} 里的 reach
+ * 会被整块吞掉。这里从实体的帧拿「锚点 long 加局部 double」，段内起点按
+ * {@code 局部 - (段原点 - 锚点)} 算，reach 量级的位移因此一路精确。
  *
  * <p>
  * 纯函数，无状态。
@@ -36,8 +37,7 @@ public final class SimulationPick {
      * 一次命中。
      *
      * <p>
-     * 段原点与块内局部坐标分开给：画框那一侧要用 {@link Simulation#delta} 把原点换成相机相对量，局部坐标
-     * 则是形状的平移量。
+     * 段原点与块内局部坐标分开给：画框那一侧要用相机帧把原点折成相机相对量，局部坐标则是形状的平移量。
      */
     public record Hit(long originX, long originY, long originZ, int localX, int localY, int localZ,
             VoxelShape shape) {
@@ -50,25 +50,43 @@ public final class SimulationPick {
      * 取视线命中的那一块，没有命中返回 null。
      *
      * @param simulation 模拟层，用于构造跨段的取数入口
-     * @param eye        眼睛的世界坐标
+     * @param entity     眼睛所属实体，帧与眼高都向它要
+     * @param partial    部分刻，与原点插值同源
      * @param view       单位视线向量
      * @param reach      视线长度
      */
-    public static Hit pick(Simulation simulation, Vec3 eye, Vec3 view, double reach) {
+    public static Hit pick(Simulation simulation, Entity entity, float partial, Vec3 view, double reach) {
         if (reach <= 0.0) {
             return null;
         }
+        ExactPosition holder = (ExactPosition) entity;
+        long eyeAnchorX = holder.farlands$anchor(ExactPosition.POS_X);
+        long eyeAnchorY = holder.farlands$anchor(ExactPosition.POS_Y);
+        long eyeAnchorZ = holder.farlands$anchor(ExactPosition.POS_Z);
+        double eyeLocalX = holder.farlands$lerpLocal(ExactPosition.POS_X, partial);
+        double eyeLocalY = holder.farlands$lerpLocal(ExactPosition.POS_Y, partial) + (double) entity.getEyeHeight();
+        double eyeLocalZ = holder.farlands$lerpLocal(ExactPosition.POS_Z, partial);
+        long stepX = (long) Math.floor(eyeLocalX);
+        long stepY = (long) Math.floor(eyeLocalY);
+        long stepZ = (long) Math.floor(eyeLocalZ);
+        eyeAnchorX += stepX;
+        eyeAnchorY += stepY;
+        eyeAnchorZ += stepZ;
+        eyeLocalX -= (double) stepX;
+        eyeLocalY -= (double) stepY;
+        eyeLocalZ -= (double) stepZ;
         Vec3 delta = view.scale(reach);
-        long startSectionX = Math.floorDiv(Mth.lfloor(eye.x), (long) SimulationSection.SIZE);
-        long startSectionY = Math.floorDiv(Mth.lfloor(eye.y), (long) SimulationSection.SIZE);
-        long startSectionZ = Math.floorDiv(Mth.lfloor(eye.z), (long) SimulationSection.SIZE);
-        double localEyeX = -Simulation.delta(startSectionX * SimulationSection.SIZE, eye.x);
-        double localEyeY = -Simulation.delta(startSectionY * SimulationSection.SIZE, eye.y);
-        double localEyeZ = -Simulation.delta(startSectionZ * SimulationSection.SIZE, eye.z);
+        long startSectionX = Math.floorDiv(eyeAnchorX, (long) SimulationSection.SIZE);
+        long startSectionY = Math.floorDiv(eyeAnchorY, (long) SimulationSection.SIZE);
+        long startSectionZ = Math.floorDiv(eyeAnchorZ, (long) SimulationSection.SIZE);
+        double localEyeX = localIn(startSectionX * SimulationSection.SIZE, eyeAnchorX, eyeLocalX);
+        double localEyeY = localIn(startSectionY * SimulationSection.SIZE, eyeAnchorY, eyeLocalY);
+        double localEyeZ = localIn(startSectionZ * SimulationSection.SIZE, eyeAnchorZ, eyeLocalZ);
         double localToX = localEyeX + delta.x;
         double localToY = localEyeY + delta.y;
         double localToZ = localEyeZ + delta.z;
-        Cursor cursor = new Cursor(simulation, eye, delta);
+        Cursor cursor = new Cursor(simulation, eyeAnchorX, eyeAnchorY, eyeAnchorZ, eyeLocalX, eyeLocalY, eyeLocalZ,
+                delta);
         double toX = Mth.lerp(NUDGE, localToX, localEyeX);
         double toY = Mth.lerp(NUDGE, localToY, localEyeY);
         double toZ = Mth.lerp(NUDGE, localToZ, localEyeZ);
@@ -118,17 +136,23 @@ public final class SimulationPick {
         return null;
     }
 
+    /** 段内坐标：局部量减「段原点相对锚点的位置」，两个量都是小整数加小数，精确。 */
+    private static double localIn(long sectionOrigin, long anchor, double local) {
+        return local - (double) (sectionOrigin - anchor);
+    }
+
     /**
      * 逐格取形状的上下文：缓存当前段、它的 getter 与段内起点终点，跨段时才重建。
-     *
-     * <p>
-     * 段内起点是「眼睛减段原点」，用 {@link Simulation#delta} 的负数算：先 long 求差再落 double。终点由起点加
-     * {@code delta} 得到，不越过绝对坐标，所以段长始终是 {@code |delta|}，与眼睛所在的量级无关。
      */
     private static final class Cursor {
 
         private final Simulation simulation;
-        private final Vec3 eye;
+        private final long eyeAnchorX;
+        private final long eyeAnchorY;
+        private final long eyeAnchorZ;
+        private final double eyeLocalX;
+        private final double eyeLocalY;
+        private final double eyeLocalZ;
         private final Vec3 delta;
         private final BlockPos.MutableBlockPos localPos = new BlockPos.MutableBlockPos();
 
@@ -141,9 +165,15 @@ public final class SimulationPick {
         private Vec3 localFrom;
         private Vec3 localTo;
 
-        Cursor(Simulation simulation, Vec3 eye, Vec3 delta) {
+        Cursor(Simulation simulation, long eyeAnchorX, long eyeAnchorY, long eyeAnchorZ, double eyeLocalX,
+                double eyeLocalY, double eyeLocalZ, Vec3 delta) {
             this.simulation = simulation;
-            this.eye = eye;
+            this.eyeAnchorX = eyeAnchorX;
+            this.eyeAnchorY = eyeAnchorY;
+            this.eyeAnchorZ = eyeAnchorZ;
+            this.eyeLocalX = eyeLocalX;
+            this.eyeLocalY = eyeLocalY;
+            this.eyeLocalZ = eyeLocalZ;
             this.delta = delta;
         }
 
@@ -160,9 +190,9 @@ public final class SimulationPick {
                 this.section = this.simulation.sectionOrNull(sx, sy, sz);
                 this.getter = this.section == null ? null : new SectionGetter(this.section, this.simulation);
                 this.localFrom = new Vec3(
-                        -Simulation.delta(sx * SimulationSection.SIZE, this.eye.x),
-                        -Simulation.delta(sy * SimulationSection.SIZE, this.eye.y),
-                        -Simulation.delta(sz * SimulationSection.SIZE, this.eye.z));
+                        localIn(sx * SimulationSection.SIZE, this.eyeAnchorX, this.eyeLocalX),
+                        localIn(sy * SimulationSection.SIZE, this.eyeAnchorY, this.eyeLocalY),
+                        localIn(sz * SimulationSection.SIZE, this.eyeAnchorZ, this.eyeLocalZ));
                 this.localTo = new Vec3(this.localFrom.x + this.delta.x, this.localFrom.y + this.delta.y,
                         this.localFrom.z + this.delta.z);
             }

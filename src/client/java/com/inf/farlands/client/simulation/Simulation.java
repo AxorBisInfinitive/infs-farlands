@@ -456,18 +456,6 @@ public final class Simulation {
     }
 
     /**
-     * 世界坐标减相机坐标，精度靠 long 保证。
-     *
-     * <p>
-     * 段原点先与相机的整数部分在 long 上相减，得到小整数；小数部分单独补。直接做
-     * {@code (double) origin - camera} 在大坐标上会把两量各自量化，块与块就此糊在一起。
-     */
-    public static double delta(long origin, double camera) {
-        long whole = (long) Math.floor(camera);
-        return (double) (origin - whole) + (whole - camera);
-    }
-
-    /**
      * 段键与列键：三轴 long。列键就是该列那一段的键，所以绑定的列与段用同一个身份。
      *
      * <p>

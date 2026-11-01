@@ -53,4 +53,13 @@ public interface ExactPosition {
      * 物理与碰撞查询用。锚点为零这一段里「局部等于世界」，vanilla 的形状与本帧的形状同源。
      */
     double farlands$local(int axis);
+
+    /**
+     * 上一 tick 到当前在 {@code partial} 刻的插值，返回值相对当前帧锚点。
+     *
+     * <p>
+     * 插值必须在帧里做：两端的世界坐标都是 256 位值，落到 double 之前先相减，差量只有一 tick 的位移。
+     * 返回值不保证落在 {@code [0, 1)}，调用方允许它为负。
+     */
+    double farlands$lerpLocal(int axis, float partial);
 }

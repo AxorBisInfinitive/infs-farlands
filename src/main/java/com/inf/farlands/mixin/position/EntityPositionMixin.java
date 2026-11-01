@@ -169,6 +169,29 @@ public abstract class EntityPositionMixin implements ExactPosition {
         return axis == POS_Y ? this.farlands$localY : this.farlands$localZ;
     }
 
+    /**
+     * 旧位置与当前位置在 {@code partial} 刻的插值，返回相对当前锚点的局部量。
+     *
+     * <p>
+     * 两端都是 256 位值时，先把锚点差与局部差分别算出来再乘权重。若旧位置还没记过，退回当前局部量，
+     * 等价于不插值。
+     */
+    @Override
+    public double farlands$lerpLocal(int axis, float partial) {
+        this.farlands$syncFrame();
+        Binary256[] slots = this.farlands$exactSlots();
+        Binary256 old = slots[axis == POS_X ? OLD_XO : axis == POS_Y ? OLD_YO : OLD_ZO];
+        if (old == null) {
+            return farlands$local(axis);
+        }
+        long newAnchor = farlands$anchor(axis);
+        double newLocal = farlands$local(axis);
+        long oldAnchor = farlands$anchorOf(old);
+        double oldLocal = farlands$localOf(old, oldAnchor);
+        double oldRelative = (double) (oldAnchor - newAnchor) + oldLocal;
+        return oldRelative + (double) partial * (newLocal - oldRelative);
+    }
+
     /** 把这次的三个入参记进位置槽位。取头部，正文里那处早退不影响等价性。 */
     @Inject(method = "setPosRaw(DDD)V", at = @At("HEAD"))
     private void farlands$storePosition(double x, double y, double z, CallbackInfo ci) {
@@ -327,12 +350,19 @@ public abstract class EntityPositionMixin implements ExactPosition {
      */
     @Inject(method = "setOldPos(Lnet/minecraft/world/phys/Vec3;)V", at = @At("HEAD"))
     private void farlands$storeOldPos(Vec3 pos, CallbackInfo ci) {
-        ExactDoubles.write(this, OLD_XO, pos.x);
-        ExactDoubles.write(this, OLD_X, pos.x);
-        ExactDoubles.write(this, OLD_YO, pos.y);
-        ExactDoubles.write(this, OLD_Y, pos.y);
-        ExactDoubles.write(this, OLD_ZO, pos.z);
-        ExactDoubles.write(this, OLD_Z, pos.z);
+        Binary256[] slots = this.farlands$exactSlots();
+        // 入参是当前位置时直接引用精确槽位，插值两端就都精确。入参是别的值时按该 double 记：
+        // setOldPosAndRot 的插值路径与客户端报文路径会给到这种值，语义要跟着入参走。
+        boolean current = pos.x == this.position.x && pos.y == this.position.y && pos.z == this.position.z;
+        Binary256 x = current && slots[POS_X] != null ? slots[POS_X] : Binary256.of(pos.x);
+        Binary256 y = current && slots[POS_Y] != null ? slots[POS_Y] : Binary256.of(pos.y);
+        Binary256 z = current && slots[POS_Z] != null ? slots[POS_Z] : Binary256.of(pos.z);
+        slots[OLD_XO] = x;
+        slots[OLD_X] = x;
+        slots[OLD_YO] = y;
+        slots[OLD_Y] = y;
+        slots[OLD_ZO] = z;
+        slots[OLD_Z] = z;
     }
 
     @Inject(method = "absSnapTo(DDD)V", at = @At("HEAD"))
