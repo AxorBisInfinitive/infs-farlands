@@ -77,13 +77,14 @@ public abstract class EntitySectionStorageMixin<T extends EntityAccess> {
         int minSecZ = SectionPos.posToSectionCoord(bounds.minZ - 2.0);
         int maxSecZ = SectionPos.posToSectionCoord(bounds.maxZ + 2.0);
 
-        for (int sx = minSecX; sx <= maxSecX; sx++) {
-            LongSet keys = sectionsByX.get(sx);
-            if (keys == null) {
+        // 遍历已存在的桶再按范围筛，不按 minSecX 到 maxSecX 枚举。坐标非有限时两个端点会饱和到 int 两端，
+        // 区间宽度是两亿六千八百万，逐桶枚举等于卡死；已存在的桶数只与实体量有关。
+        for (Int2ObjectMap.Entry<LongSet> bucket : this.sectionsByX.int2ObjectEntrySet()) {
+            int sx = bucket.getIntKey();
+            if (sx < minSecX || sx > maxSecX) {
                 continue;
             }
-
-            for (long key : keys) {
+            for (long key : bucket.getValue()) {
                 IntSectionPos pos = IntSectionPos.getSectionPos(key);
                 if (pos.y < minSecY || pos.y > maxSecY || pos.z < minSecZ || pos.z > maxSecZ) {
                     continue;

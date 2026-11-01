@@ -110,4 +110,23 @@ public class ServerGamePacketListenerImplMixin {
             this.aboveGroundTickCount = 0;
         }
     }
+
+    /**
+     * 协议边界不再拒绝非有限数值。
+     *
+     * <p>
+     * 原版 {@code containsInvalidValues} 对三个坐标判 {@code Double.isNaN}、对两个旋转判 {@code Floats.isFinite}，
+     * 判真即断线，玩家那条在 {@code handleMovePlayer}、载具那条在 {@code handleMoveVehicle} 各用一次。非有限数值
+     * 在本 port 是合法值，在入口拒绝它等于让「任何数值都能存在」这句话失效，所以这里恒答「没有非法值」，两处
+     * 调用一起失效。
+     *
+     * <p>
+     * 不按轴也不按量分：三轴坐标与两个旋转一起放行。下游已按同一前提处理，坐标侧的循环有界、视锥有步数上限、
+     * 碰撞跨度有上限；非有限数值在几何上得到「与任何有限区块不相交」的自然结论。
+     */
+    @Inject(method = "containsInvalidValues", at = @At("HEAD"), cancellable = true)
+    private static void farlands$acceptNonFinite(double x, double y, double z, float yRot, float xRot,
+            CallbackInfoReturnable<Boolean> cir) {
+        cir.setReturnValue(false);
+    }
 }

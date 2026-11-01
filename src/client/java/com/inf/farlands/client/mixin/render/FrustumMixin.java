@@ -128,6 +128,11 @@ public abstract class FrustumMixin implements AnchoredFrustum {
      *
      * <p>
      * 这要求 {@code cubeSize} 整除锚点的对齐单位 8，唯一调用点 {@code LevelRenderer.offsetFrustum} 传的就是 8。
+     *
+     * <p>
+     * 后退步数有上限。原版的条件是「测到 INSIDE 为止」，而相机非有限时六个端点是 {@code NaN}，判据永远给不出
+     * INSIDE，循环不会退出，渲染线程就此停在这一行。上限只约束步数，正常相机在个位数步内就退出，结果与不设上限
+     * 逐位相同；真的跑到上限时不动相机，因为此时没有任何步数是对的。
      */
     @Inject(method = "offsetToFullyIncludeCameraCube", at = @At("HEAD"), cancellable = true)
     private void farlands$offsetToFullyIncludeCube(int cubeSize, CallbackInfoReturnable<Frustum> cir) {
@@ -138,7 +143,10 @@ public abstract class FrustumMixin implements AnchoredFrustum {
         double maxY = Math.ceil(this.camY / cubeSize) * cubeSize - this.camY;
         double maxZ = Math.ceil(this.camZ / cubeSize) * cubeSize - this.camZ;
         double back = 0.0;
-        while (true) {
+        boolean inside = false;
+        // 4096 步等于 16384 格后退，是远平面上限的四倍，正常相机在个位数步内就会 INSIDE。
+        // 上限的存在只为终止：相机非有限时端点恒为 NaN，任何步数都到不了 INSIDE。
+        for (int step = 0; step < 4096; step++) {
             int result = this.intersection.intersectAab(
                     (float) (minX + this.viewVector.x * back),
                     (float) (minY + this.viewVector.y * back),
@@ -147,13 +155,16 @@ public abstract class FrustumMixin implements AnchoredFrustum {
                     (float) (maxY + this.viewVector.y * back),
                     (float) (maxZ + this.viewVector.z * back));
             if (result == -2) {
+                inside = true;
                 break;
             }
             back += OFFSET_STEP;
         }
-        this.camX = this.camX - this.viewVector.x * back;
-        this.camY = this.camY - this.viewVector.y * back;
-        this.camZ = this.camZ - this.viewVector.z * back;
+        if (inside) {
+            this.camX = this.camX - this.viewVector.x * back;
+            this.camY = this.camY - this.viewVector.y * back;
+            this.camZ = this.camZ - this.viewVector.z * back;
+        }
         cir.setReturnValue((Frustum) (Object) this);
     }
 

@@ -114,6 +114,8 @@
     "fix.xyz.WorldCoordinateSyntaxMixin",
     "fix.xyz.TeleportSendMixin",
     "fix.xyz.ServerEntityMixin",
+    "fix.xyz.BlockCollisionsMixin",
+    "fix.xyz.BlockPosIterationMixin",
     "fix.y.BlockBlobFeatureMixin",
     "fix.y.TreeFeatureMixin",
     "fix.y.AbstractHugeMushroomFeatureMixin",

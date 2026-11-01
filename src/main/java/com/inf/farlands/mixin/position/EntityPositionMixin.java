@@ -476,11 +476,24 @@ public abstract class EntityPositionMixin implements ExactPosition {
         this.farlands$frameReady = true;
     }
 
-    /** 精确下取整。{@code toLong} 截断向零，负数带小数时补一。阈值与锚点都不参与。 */
+    /**
+     * 精确下取整。{@code toLong} 截断向零，负数带小数时补一。阈值与锚点都不参与。
+     *
+     * <p>
+     * {@code Long.MIN_VALUE} 必须先判：它同时是 {@code -Infinity} 与「小于 long 下界的负有限值」的饱和结果，
+     * 再减一就回绕成 {@code Long.MAX_VALUE}，下取整的方向会被反转，负无穷变成正端。判据是
+     * {@code farlands$exactFloor(v) == Mth.lfloor(v.toDouble())}，对全定义域成立。
+     */
     @Unique
     private static long farlands$exactFloor(Binary256 value) {
         long truncated = value.toLong();
-        return value.signBit() && !value.equals(Binary256.of(truncated)) ? truncated - 1L : truncated;
+        if (!value.signBit()) {
+            return truncated;
+        }
+        if (truncated == Long.MIN_VALUE) {
+            return Long.MIN_VALUE;
+        }
+        return value.equals(Binary256.of(truncated)) ? truncated : truncated - 1L;
     }
 
     /** 阈值内取零，阈值外取精确下取整。 */
@@ -677,5 +690,22 @@ public abstract class EntityPositionMixin implements ExactPosition {
                 serverLevel.getWaypointManager().updatePlayer(player);
             }
         }
+    }
+
+    /**
+     * 存档加载不再拒绝非有限位置与非有限旋转。
+     *
+     * <p>
+     * {@code Entity.load} 里五处 {@code Double.isFinite}：三处查位置、判假抛 {@code Entity has invalid position}；
+     * 两处查旋转、判假抛 {@code Entity has invalid rotation}。非有限数值在本 port 是合法值，存得进就必须读得回，
+     * 否则一次 tp 到非有限坐标就把该玩家的存档变成登不进世界的状态。这里恒答「有限」，五处一起失效。
+     *
+     * <p>
+     * 有限值下返回值与原判据逐一相同，逐位不变。非有限值下加载继续走完：位置写回槽位、包围盒与缓存按
+     * {@code Mth.floor} 的饱和结果落定，旋转按原值读入。
+     */
+    @Redirect(method = "load(Lnet/minecraft/world/level/storage/ValueInput;)V", at = @At(value = "INVOKE", target = "Ljava/lang/Double;isFinite(D)Z"))
+    private static boolean farlands$acceptNonFiniteOnLoad(double value) {
+        return true;
     }
 }
