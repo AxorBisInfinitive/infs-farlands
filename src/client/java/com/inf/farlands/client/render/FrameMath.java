@@ -32,6 +32,17 @@ public final class FrameMath {
         return a >= -LIMIT && a <= LIMIT && b >= -LIMIT && b <= LIMIT;
     }
 
+    /** 三轴里是否有任一轴已到渲染侧需要帧的量级。 */
+    public static boolean wide(double x, double y, double z) {
+        double limit = threshold();
+        return Math.abs(x) >= limit || Math.abs(y) >= limit || Math.abs(z) >= limit;
+    }
+
+    /** 两组锚点在三个轴上都能安全相减。 */
+    public static boolean safe(long ax, long ay, long az, long bx, long by, long bz) {
+        return safeDelta(ax, bx) && safeDelta(ay, by) && safeDelta(az, bz);
+    }
+
     /** 帧差：锚点差加局部差。调用前必须先过 {@link #safeDelta}。 */
     public static double offset(long aAnchor, double aLocal, long bAnchor, double bLocal) {
         return (double) (aAnchor - bAnchor) + (aLocal - bLocal);
