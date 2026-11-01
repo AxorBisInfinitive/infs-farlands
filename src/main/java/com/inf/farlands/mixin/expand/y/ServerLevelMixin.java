@@ -1,6 +1,7 @@
 package com.inf.farlands.mixin.expand.y;
 
 import com.inf.farlands.serialize.ChunkCounters;
+import com.inf.farlands.util.window.PlayerTable;
 import com.inf.farlands.util.window.WindowedChunk;
 import com.inf.farlands.util.world.WorldBounds;
 
@@ -13,7 +14,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.util.Mth;
 import net.minecraft.util.profiling.Profiler;
 import net.minecraft.util.profiling.ProfilerFiller;
 import net.minecraft.world.level.ChunkPos;
@@ -67,12 +67,19 @@ public abstract class ServerLevelMixin {
         profilerfiller.popPush("tickBlocks");
         if (randomTickSpeed > 0) {
             IntSet sectionYs = new IntArraySet();
-            for (ServerPlayer player : this.players) {
+            java.util.List<PlayerTable.Entry> entries = PlayerTable.entries();
+            for (int index = 0; index < entries.size(); index++) {
+                PlayerTable.Entry entry = entries.get(index);
+                if (!entry.inBounds() || !entry.dimension().equals(level.dimension())) {
+                    // 界外玩家没有区块，随机刻的范围为空；漏掉这一条会让饱和段号被当成真实窗口。
+                    continue;
+                }
+                ServerPlayer player = entry.player();
                 if (!player.getChunkTrackingView().contains(chunkpos)) {
                     continue;
                 }
 
-                int centerY = Mth.floorDiv(player.getBlockY(), 16);
+                int centerY = entry.sectionCenterY();
                 for (int sy = centerY - ((WindowedChunk) chunk).windowHalfBelow(); sy <= centerY
                         + ((WindowedChunk) chunk).windowHalfAbove(); sy++) {
                     sectionYs.add(sy);

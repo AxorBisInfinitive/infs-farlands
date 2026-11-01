@@ -3,8 +3,6 @@ package com.inf.farlands.util.window;
 import com.inf.farlands.FarlandsConfig;
 
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.util.Mth;
 import net.minecraft.world.level.Level;
 
 import java.util.ArrayList;
@@ -52,14 +50,20 @@ public final class EntitySectionWindow {
     /**
      * 按维度重建窗口并集，主线程每 tick 一次。
      *
+     * <p>入参是 {@link PlayerTable} 的条目，不是玩家列表：中心取条目里的精确段号，界外条目直接跳过。跳过之后
+     * 该维度若没有别的界内玩家，窗口就空掉，实体冻结、方块写被拒、调度器的竖直面为空，与「那里没有区块」一致。
+     *
      * <p>本 tick 没有玩家的维度要把窗口清掉，否则玩家离开后那条带还留着，该维度会照旧误放行。
      */
-    public static void update(List<ServerPlayer> players) {
+    public static void update(List<PlayerTable.Entry> entries) {
         Map<ResourceKey<Level>, List<int[]>> byDimension = new HashMap<>();
-        for (int i = 0; i < players.size(); i++) {
-            ServerPlayer p = players.get(i);
-            int c = Mth.floorDiv(p.getBlockY(), 16);
-            byDimension.computeIfAbsent(p.level().dimension(), k -> new ArrayList<>())
+        for (int i = 0; i < entries.size(); i++) {
+            PlayerTable.Entry entry = entries.get(i);
+            if (!entry.inBounds()) {
+                continue;
+            }
+            int c = entry.sectionCenterY();
+            byDimension.computeIfAbsent(entry.dimension(), k -> new ArrayList<>())
                     .add(new int[] { c - FarlandsConfig.verticalSimulationDistance,
                             c + FarlandsConfig.verticalSimulationDistance });
         }

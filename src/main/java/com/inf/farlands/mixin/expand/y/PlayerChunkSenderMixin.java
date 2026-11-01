@@ -2,6 +2,7 @@ package com.inf.farlands.mixin.expand.y;
 
 import com.inf.farlands.terrain.pipeline.GenQueue;
 import com.inf.farlands.util.network.ChunkDataSender;
+import com.inf.farlands.util.window.PlayerTable;
 import com.inf.farlands.util.window.WindowSendState;
 import com.inf.farlands.util.window.WindowedChunk;
 
@@ -37,8 +38,14 @@ public class PlayerChunkSenderMixin {
     private static void captureWindow(ServerGamePacketListenerImpl packetListener, ServerLevel level, LevelChunk chunk,
             CallbackInfo ci) {
         ServerPlayer player = packetListener.player;
-        int centerY = Mth.floorDiv(player.getBlockY(), 16);
-        WindowSendState.setWindowMinY(centerY - ((WindowedChunk) chunk).windowHalfBelow());
+        PlayerTable.Entry entry = PlayerTable.entryOf(player);
+        if (entry != null && !entry.inBounds()) {
+            // 界外没有区块：给一个空窗口，sendableSections 的区间判据因此恒假，段包不带任何段。
+            WindowSendState.setWindowMinY(Integer.MAX_VALUE);
+        } else {
+            int centerY = entry != null ? entry.sectionCenterY() : Mth.floorDiv(player.getBlockY(), 16);
+            WindowSendState.setWindowMinY(centerY - ((WindowedChunk) chunk).windowHalfBelow());
+        }
         if (GenQueue.isChunkBusy(chunk) || GenQueue.isBiomeFilling(chunk)) {
             ChunkDataSender.markChunkChanged(chunk);
         }

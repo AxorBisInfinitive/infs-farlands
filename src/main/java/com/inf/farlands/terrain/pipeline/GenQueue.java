@@ -11,7 +11,7 @@ import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.debug.StageMetrics;
 import com.inf.farlands.terrain.terrainFiller.TerrainFiller;
 import com.inf.farlands.util.network.ChunkDataSender;
-import com.inf.farlands.util.window.PlayerSnapshot;
+import com.inf.farlands.util.window.PlayerTable;
 import com.inf.farlands.util.world.WorldBounds;
 
 import java.util.Set;
@@ -271,16 +271,8 @@ public final class GenQueue {
         if (Scheduler.inAnyFace(level, cp)) {
             return true;
         }
-        for (PlayerSnapshot.Entry e : PlayerSnapshot.entries()) {
-            if (!e.dimension().equals(level.dimension())) {
-                continue;
-            }
-            int d = Math.max(Math.abs(cp.x() - e.chunkX()), Math.abs(cp.z() - e.chunkZ()));
-            if (d <= e.viewDistance() + 1) {
-                return true;
-            }
-        }
-        return false;
+        // 表里的界外玩家不参与这一判据：把他们算成「在身边」会让整片放行。
+        return PlayerTable.isHorizontallyNear(level.dimension(), cp.x(), cp.z());
     }
 
     /**

@@ -1,11 +1,11 @@
 package com.inf.farlands.mixin.fix.xyz;
 
 import com.inf.farlands.FarlandsConfig;
+import com.inf.farlands.util.window.PlayerTable;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.QuartPos;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
@@ -69,14 +69,19 @@ public class NaturalSpawnerMixin {
         }
 
         // 窗口带：取离地表最近的玩家窗口，把取点区间夹进去。section 坐标左移 4 位在极值会越过
-        // int 下界，全程用 long 算，夹完再落回 int。
+        // int 下界，全程用 long 算，夹完再落回 int。界外玩家不参与：他们那里没有区块。
         int half = FarlandsConfig.verticalSimulationDistance;
         long bandLo = 0L;
         long bandHi = 0L;
         long bestDist = Long.MAX_VALUE;
         if (level instanceof ServerLevel serverLevel) {
-            for (ServerPlayer player : serverLevel.players()) {
-                int center = Mth.floorDiv(player.getBlockY(), 16);
+            java.util.List<PlayerTable.Entry> entries = PlayerTable.entries();
+            for (int index = 0; index < entries.size(); index++) {
+                PlayerTable.Entry entry = entries.get(index);
+                if (!entry.inBounds() || !entry.dimension().equals(serverLevel.dimension())) {
+                    continue;
+                }
+                int center = entry.sectionCenterY();
                 long rLo = ((long) center - half) << 4;
                 long rHi = (((long) center + half) << 4) + 15L;
                 long d = hi < rLo ? rLo - hi : (hi > rHi ? hi - rHi : 0L);

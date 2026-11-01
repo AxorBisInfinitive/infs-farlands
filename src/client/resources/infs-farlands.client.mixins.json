@@ -24,6 +24,7 @@
     "fix.audio.SnifferSoundInstanceMixin",
     "fix.audio.EntityBoundSoundInstanceMixin",
     "fix.audio.ListenerMixin",
+    "fix.audio.ChannelMixin",
     "fix.audio.SoundEngineMixin",
     "fix.xz.EntityRendererMixin",
     "fix.xz.LevelRendererMixin",

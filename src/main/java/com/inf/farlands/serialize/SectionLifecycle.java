@@ -25,6 +25,7 @@ import com.inf.farlands.terrain.pipeline.Scheduler;
 import com.inf.farlands.terrain.structure.StructureDriver;
 import com.inf.farlands.util.network.ChunkDataSender;
 import com.inf.farlands.util.window.EntitySectionWindow;
+import com.inf.farlands.util.window.PlayerTable;
 import com.inf.farlands.util.window.WindowedChunk;
 import com.inf.farlands.util.world.WorldBounds;
 
@@ -35,8 +36,6 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ChunkHolder;
 import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.util.Mth;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.chunk.ChunkAccess;
@@ -724,8 +723,13 @@ public final class SectionLifecycle {
     private static List<Integer> windowSectionsFromPlayers(ServerLevel level) {
         int half = FarlandsConfig.verticalSimulationDistance;
         TreeSet<Integer> sections = new TreeSet<>();
-        for (ServerPlayer player : level.players()) {
-            int center = Mth.floorDiv(player.getBlockY(), 16);
+        List<PlayerTable.Entry> entries = PlayerTable.entries();
+        for (int i = 0; i < entries.size(); i++) {
+            PlayerTable.Entry entry = entries.get(i);
+            if (!entry.inBounds() || !entry.dimension().equals(level.dimension())) {
+                continue;
+            }
+            int center = entry.sectionCenterY();
             for (int sy = center - half; sy <= center + half; sy++) {
                 sections.add(sy);
             }

@@ -20,7 +20,7 @@ import com.inf.farlands.terrain.debug.StageMetrics;
 import com.inf.farlands.terrain.decorationFiller.DecorationFiller;
 import com.inf.farlands.terrain.structure.StructureDriver;
 import com.inf.farlands.util.window.EntitySectionWindow;
-import com.inf.farlands.util.window.PlayerSnapshot;
+import com.inf.farlands.util.window.PlayerTable;
 import com.inf.farlands.util.world.WorldBounds;
 
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
@@ -574,12 +574,10 @@ public final class Scheduler {
                 continue;
             }
             if (!waited && !GenQueue.isNearPlayer(chunk)) {
-                // 该维度有玩家、窗口表里却没有它的带，说明刷新还没发生：此刻是「还不知道」，不是
-                // 「确实太远」。丢掉等于把活永久丢掉，因为重投与重扫都不在这条路径上。判据取窗口表，
-                // 因为准入的竖直面用它。两条出口都自解：刷新之后按正常路径准入，玩家离开之后判据转假，
-                // 候选按原语义被丢弃。
-                if (!level.players().isEmpty()
-                        && EntitySectionWindow.ranges(level.dimension()).length == 0) {
+                // 判据是「本 tick 刷过这张表没有」。用窗口为空代替会让界外玩家与「还没刷」混同：
+                // 界外玩家不产生窗口，旧写法于是把每一个候选都当成「还不知道」无限重投。
+                // 刷过而没有它，就是确实太远或玩家在界外，一次性移除。
+                if (!PlayerTable.refreshed(level.dimension())) {
                     requeuePersistent(key, candidate);
                     continue;
                 }
@@ -811,11 +809,11 @@ public final class Scheduler {
         CANDIDATES.put(key, candidate);
     }
 
-    /** 距离用快照，避免逐候选遍历玩家。 */
+    /** 距离用驱动玩家表，避免逐候选遍历玩家。 */
     private static long distanceOf(Candidate candidate) {
         LevelChunk chunk = candidate.chunk;
         if (chunk.getLevel() instanceof ServerLevel level) {
-            return PlayerSnapshot.nearestDistance(level.dimension(), chunk.getPos().x(), chunk.getPos().z());
+            return PlayerTable.nearestDistance(level.dimension(), chunk.getPos().x(), chunk.getPos().z());
         }
         return Long.MAX_VALUE;
     }

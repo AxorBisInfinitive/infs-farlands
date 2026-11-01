@@ -10,7 +10,7 @@ import com.inf.farlands.terrain.decorationFiller.DecorationFiller;
 import com.inf.farlands.terrain.surfaceFiller.SurfaceFiller;
 import com.inf.farlands.util.network.ChunkDataSender;
 import com.inf.farlands.util.window.EntitySectionWindow;
-import com.inf.farlands.util.window.PlayerSnapshot;
+import com.inf.farlands.util.window.PlayerTable;
 import com.inf.farlands.util.world.WorldBounds;
 
 import java.util.ArrayList;
@@ -70,11 +70,11 @@ public final class GenTask {
         this.priority = computePriority(this.chunk);
     }
 
-    /** 距该维度最近玩家的距离，读每 tick 的玩家快照。无玩家时返回 0，退化为 FIFO。 */
+    /** 距该维度界内最近玩家的距离，读每 tick 的驱动玩家表。无界内玩家时返回 0，退化为 FIFO。 */
     private static int computePriority(LevelChunk chunk) {
         if (chunk.getLevel() instanceof ServerLevel sl) {
             ChunkPos cp = chunk.getPos();
-            return PlayerSnapshot.nearestDistance(sl.dimension(), cp.x(), cp.z());
+            return PlayerTable.nearestDistance(sl.dimension(), cp.x(), cp.z());
         }
         return 0;
     }
