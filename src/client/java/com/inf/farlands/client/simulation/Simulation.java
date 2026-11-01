@@ -7,7 +7,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.client.render.simulation.SimulationGeometry;
+import com.inf.farlands.util.pos.ExactPosition;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.Holder;
@@ -179,6 +181,13 @@ public final class Simulation {
             int radius = minecraft.options.renderDistance().get();
             long centerX = Mth.lfloor(player.getX()) >> 4;
             long centerZ = Mth.lfloor(player.getZ()) >> 4;
+            // 帧量级上 getX() 只能给出 ulp 的整数倍，2^60 处是 256 格，中心因此只能落在 16 段的格点上，
+            // 方阵边界随之以 16 段为步长跳、最多偏 8 段。锚点是精确下取整的 long，帧启用时直接用它。
+            if (player instanceof ExactPosition exact
+                    && FrameMath.wide(player.getX(), player.getY(), player.getZ())) {
+                centerX = exact.farlands$anchor(ExactPosition.POS_X) >> 4;
+                centerZ = exact.farlands$anchor(ExactPosition.POS_Z) >> 4;
+            }
             this.farlands$reconcileSquare(current, centerX, centerZ, radius);
             this.farlands$buildNearest(centerX, centerZ);
         } else {
