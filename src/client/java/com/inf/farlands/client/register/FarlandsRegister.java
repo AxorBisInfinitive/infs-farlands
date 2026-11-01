@@ -12,6 +12,7 @@ public class FarlandsRegister {
     public static void register() {
         ChunkDataPacketRegister.registerHandler();
         ClampStatePacketRegister.registerHandler();
+        ExactPositionPacketRegister.registerHandler();
         LightUpdatePacketRegister.registerHandler();
         SectionBlocksUpdatePacketRegister.registerHandler();
         SystemsPacketRegister.registerHandler();

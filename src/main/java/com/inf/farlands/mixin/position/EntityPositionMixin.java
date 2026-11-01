@@ -4,9 +4,11 @@ import com.google.common.collect.ImmutableList;
 import com.inf.farlands.util.pos.ExactCollisionSource;
 import com.inf.farlands.util.pos.ExactDoubles;
 import com.inf.farlands.util.pos.ExactPosition;
+import com.inf.farlands.util.pos.ExactTeleport;
 import com.inf.long2.binaries.Binary256;
 
 import java.util.List;
+import java.util.Set;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
@@ -15,6 +17,8 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.MoverType;
+import net.minecraft.world.entity.PositionMoveRotation;
+import net.minecraft.world.entity.Relative;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
@@ -132,6 +136,14 @@ public abstract class EntityPositionMixin implements ExactPosition {
     /** 帧是否与槽位同步。外部写入会换掉槽位，这里随之作废。 */
     @Unique
     private boolean farlands$frameReady;
+
+    /** 本次传送的精确目标，三轴。命令层没放侧通道时为 null。 */
+    @Unique
+    private Binary256[] farlands$teleportExact;
+
+    /** 有精确位置待同步到客户端，发过一次即清。 */
+    @Unique
+    private boolean farlands$exactSyncPending;
 
     /** 本次 {@code move} 的入参，用于 {@code noPhysics} 分支的位置写回。 */
     @Unique
@@ -531,6 +543,73 @@ public abstract class EntityPositionMixin implements ExactPosition {
         }
         double fallback = axis == POS_X ? this.position.x : axis == POS_Y ? this.position.y : this.position.z;
         return Binary256.of(fallback);
+    }
+
+    /** 只写九个槽位，投影与缓存不动。旧位置一组值写两处，与 {@code setOldPos} 同形。 */
+    @Override
+    public void farlands$adoptExact(Binary256 x, Binary256 y, Binary256 z,
+            Binary256 oldX, Binary256 oldY, Binary256 oldZ) {
+        Binary256[] slots = this.farlands$exactSlots();
+        slots[POS_X] = x;
+        slots[POS_Y] = y;
+        slots[POS_Z] = z;
+        slots[OLD_XO] = oldX;
+        slots[OLD_YO] = oldY;
+        slots[OLD_ZO] = oldZ;
+        slots[OLD_X] = oldX;
+        slots[OLD_Y] = oldY;
+        slots[OLD_Z] = oldZ;
+        this.farlands$frameReady = false;
+    }
+
+    @Override
+    public void farlands$markExactSync() {
+        this.farlands$exactSyncPending = true;
+    }
+
+    @Override
+    public boolean farlands$takeExactSync() {
+        boolean pending = this.farlands$exactSyncPending;
+        this.farlands$exactSyncPending = false;
+        return pending;
+    }
+
+    /**
+     * 传送写入前记下精确目标。
+     *
+     * <p>
+     * 只有命令层放下了侧通道才介入。相对轴的语义是「精确当前值加增量」，增量取命令里 `~` 后面那一段；绝对轴直接
+     * 用解析出的精确值。不能沿用 vanilla 的 {@code calculateAbsolute}，那里是 double 相加，结果与槽位的投影
+     * 必然不等，{@code keepIfProjection} 就保不住槽位了。
+     */
+    @Inject(method = "teleportSetPosition(Lnet/minecraft/world/entity/PositionMoveRotation;Lnet/minecraft/world/entity/PositionMoveRotation;Ljava/util/Set;)V", at = @At("HEAD"))
+    private void farlands$captureTeleportExact(PositionMoveRotation current, PositionMoveRotation destination,
+            Set<Relative> relatives, CallbackInfo ci) {
+        Binary256[] pending = ExactTeleport.pending();
+        if (pending == null) {
+            this.farlands$teleportExact = null;
+            return;
+        }
+        Binary256[] target = new Binary256[3];
+        for (int axis = 0; axis < 3; axis++) {
+            Binary256 value = pending[axis];
+            Relative relative = axis == POS_X ? Relative.X : axis == POS_Y ? Relative.Y : Relative.Z;
+            target[axis] = relatives.contains(relative) ? this.farlands$exactValue(axis).add(value) : value;
+        }
+        this.farlands$teleportExact = target;
+    }
+
+    /** 传送写完之后把槽位改回精确值，并留下待同步标记。 */
+    @Inject(method = "teleportSetPosition(Lnet/minecraft/world/entity/PositionMoveRotation;Lnet/minecraft/world/entity/PositionMoveRotation;Ljava/util/Set;)V", at = @At("RETURN"))
+    private void farlands$adoptTeleportExact(PositionMoveRotation current, PositionMoveRotation destination,
+            Set<Relative> relatives, CallbackInfo ci) {
+        Binary256[] target = this.farlands$teleportExact;
+        if (target == null) {
+            return;
+        }
+        this.farlands$teleportExact = null;
+        this.farlands$adoptExact(target[0], target[1], target[2], target[0], target[1], target[2]);
+        this.farlands$exactSyncPending = true;
     }
 
     /**

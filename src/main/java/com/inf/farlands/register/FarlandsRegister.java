@@ -74,6 +74,7 @@ public class FarlandsRegister {
             ChunkDataPacketRegister.registerType();
             ClampStatePacketRegister.registerType();
             ClampTogglePacketRegister.registerType();
+            ExactPositionPacketRegister.registerType();
             LightUpdatePacketRegister.registerType();
             SectionBlocksUpdatePacketRegister.registerType();
             SystemsPacketRegister.registerType();

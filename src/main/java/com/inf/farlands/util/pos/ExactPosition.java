@@ -105,6 +105,22 @@ public interface ExactPosition {
     Binary256 farlands$exactValue(int axis);
 
     /**
+     * 只写九个槽位，不动投影、包围盒与缓存。
+     *
+     * <p>
+     * 给网络侧的精确位置用：vanilla 的包已经把位置、包围盒、方块与区块缓存、旧位置都落好，这里只把 256 位真值
+     * 补回去。旧位置一组值写两处，与 {@code setOldPos} 同形，所以 {@code xo} 与 {@code xOld} 不会分叉。
+     */
+    void farlands$adoptExact(Binary256 x, Binary256 y, Binary256 z,
+            Binary256 oldX, Binary256 oldY, Binary256 oldZ);
+
+    /** 标记该实体这一 tick 有精确位置待同步。 */
+    void farlands$markExactSync();
+
+    /** 取走并清除「有精确位置待同步」的标记。 */
+    boolean farlands$takeExactSync();
+
+    /**
      * 自上一 tick 以来，该轴的方块格号是否变过。
      *
      * <p>

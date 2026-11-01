@@ -1,5 +1,6 @@
 package com.inf.farlands.mixin.fix.xyz;
 
+import com.inf.farlands.util.pos.ExactTeleport;
 import com.inf.farlands.util.world.WorldBounds;
 
 import net.minecraft.core.BlockPos;
@@ -7,7 +8,9 @@ import net.minecraft.server.commands.TeleportCommand;
 
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
  * 传送命令的落点判界改回 double。
@@ -36,5 +39,26 @@ public class TeleportCommandMixin {
             return BlockPos.ZERO;
         }
         return BlockPos.containing(x, y, z);
+    }
+
+    /**
+     * 命令结束时清掉精确目标。
+     *
+     * <p>
+     * 写入点在 {@code teleportSetPosition}，它在 {@code teleportToPos} 的循环里被逐实体调用，所以不能在消费时
+     * 清。清在这里，即一次 `/tp` 的生命周期末尾。
+     *
+     * <p>
+     * 若命令在中途抛异常，这条 RETURN 注入不会执行，精确目标会留到下一次。所以另一条分支的入口也清一次，
+     * 把「失败之后紧跟一条按实体传送」这条最可能的残留路径堵上。
+     */
+    @Inject(method = "teleportToPos(Lnet/minecraft/commands/CommandSourceStack;Ljava/util/Collection;Lnet/minecraft/server/level/ServerLevel;Lnet/minecraft/commands/arguments/coordinates/Coordinates;Lnet/minecraft/commands/arguments/coordinates/Coordinates;Lnet/minecraft/server/commands/LookAt;)I", at = @At("RETURN"))
+    private static void farlands$clearExactTarget(CallbackInfoReturnable<Integer> cir) {
+        ExactTeleport.clear();
+    }
+
+    @Inject(method = "teleportToEntity(Lnet/minecraft/commands/CommandSourceStack;Ljava/util/Collection;Lnet/minecraft/world/entity/Entity;)I", at = @At("HEAD"), cancellable = true)
+    private static void farlands$clearStaleTarget(CallbackInfoReturnable<Integer> cir) {
+        ExactTeleport.clear();
     }
 }
