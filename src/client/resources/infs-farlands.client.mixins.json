@@ -86,7 +86,8 @@
     "render.EntityRenderStateMixin",
     "render.EntityStateFrameMixin",
     "render.SubmitOffsetMixin",
-    "render.DistanceToCameraMixin"
+    "render.DistanceToCameraMixin",
+    "render.ScreenEffectOverlayMixin"
   ],
   "injectors": {
     "defaultRequire": 1
