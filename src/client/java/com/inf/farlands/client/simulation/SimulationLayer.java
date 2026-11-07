@@ -16,7 +16,7 @@ import net.minecraft.world.level.block.Blocks;
  *
  * <p>
  * 枚举窗口的半宽取 {@link FarlandsConfig#verticalSimulationDistance}，与地形窗口同源，窗口内层数随之变。玩家的
- * 竖直位置一变，进出窗口的层由方阵对账解绑与绑定。窗口里一个层都落不进时返回空数组，那一列就没有模拟段，这是窗口
+ * 竖直位置一变，进出窗口的层由圆盘对账解绑与绑定。窗口里一个层都落不进时返回空数组，那一列就没有模拟段，这是窗口
  * 本身的语义。
  *
  * <p>

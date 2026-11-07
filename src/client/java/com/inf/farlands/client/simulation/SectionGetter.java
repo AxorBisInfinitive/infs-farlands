@@ -127,7 +127,7 @@ public final class SectionGetter implements BlockAndTintGetter {
     }
 
     /**
-     * 样本点的群系。样本跨出本段时查邻段，邻段不在方阵里回落到默认群系。
+     * 样本点的群系。样本跨出本段时查邻段，邻段不在圆盘里回落到默认群系。
      *
      * <p>
      * 半径最大 7，段边长 16，所以最多跨一列；折回段内后的局部坐标仍在 0 到 15。

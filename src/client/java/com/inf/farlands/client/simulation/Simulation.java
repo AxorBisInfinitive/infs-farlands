@@ -61,10 +61,10 @@ public final class Simulation {
     private ClientLevel clientLevel;
 
     /**
-     * 自动方阵管理的列，键是三轴段坐标，即「列乘层」。一个列在本 tick 的每一层上各占一个键。
+     * 自动圆盘管理的列，键是三轴段坐标，即「列乘层」。一个列在本 tick 的每一层上各占一个键。
      *
      * <p>
-     * 它只是方阵的绑定记录，不是渲染的前置条件：渲染集合是 {@code sections}。别再把两者当成一件事。
+     * 它只是圆盘的绑定记录，不是渲染的前置条件：渲染集合是 {@code sections}。别再把两者当成一件事。
      */
     private final Set<SectionKey> boundColumns = new HashSet<>();
 
@@ -75,7 +75,7 @@ public final class Simulation {
     private static final int BUILD_PER_TICK = 8;
 
     /**
-     * 换层或退世界时调。层为空即没有自动方阵，手动建的段仍会被烘制与提交。
+     * 换层或退世界时调。层为空即没有自动圆盘，手动建的段仍会被烘制与提交。
      *
      * <p>
      * 段的群系容器要从该 level 的工厂建，默认群系取 void，所以两样与层同源、在同一处设定：三件一起换，
@@ -99,10 +99,10 @@ public final class Simulation {
     }
 
     /**
-     * 一列在给定的层上进入方阵：逐层绑定并各跑一次生产者。
+     * 一列在给定的层上进入圆盘：逐层绑定并各跑一次生产者。
      *
      * <p>
-     * 绑定与客户端有没有这一列的 chunk 无关，判据只有「在不在方阵里」。
+     * 绑定与客户端有没有这一列的 chunk 无关，判据只有「在不在圆盘里」。
      */
     private void farlands$bind(SimulationLayer current, long chunkX, long chunkZ, long[] sectionYs) {
         for (long sectionY : sectionYs) {
@@ -117,7 +117,7 @@ public final class Simulation {
         }
     }
 
-    /** 一列离开方阵：摘段。显存由调用方批量释放，一趟一条 fence。 */
+    /** 一列离开圆盘：摘段。显存由调用方批量释放，一趟一条 fence。 */
     private void farlands$unbind(SectionKey key) {
         if (!this.boundColumns.remove(key)) {
             return;
@@ -167,10 +167,10 @@ public final class Simulation {
     }
 
     /**
-     * 每 tick 一次：按玩家方阵对账绑定、按距离限量烘几何、发布快照。
+     * 每 tick 一次：按玩家圆盘对账绑定、按距离限量烘几何、发布快照。
      *
      * <p>
-     * 半径取客户端渲染距离，不另设上限。绑定与客户端有没有那些 chunk 无关：方阵覆盖到的列一律有段，于是碰撞、
+     * 半径取客户端渲染距离，不另设上限。绑定与客户端有没有那些 chunk 无关：圆盘覆盖到的列一律有段，于是碰撞、
      * 线框与渲染都不依赖 chunk 是否存在。
      */
     public void tickSimulation(ClientLevel level) {
@@ -179,12 +179,12 @@ public final class Simulation {
         net.minecraft.world.entity.player.Player player = minecraft.player;
         if (current != null && player != null) {
             int radius = minecraft.options.renderDistance().get();
-            // 中心取精确格号：getX() 是 double 投影，2^60 处只能给出 256 格的整数倍，方阵边界会以 16 段为步长跳。
+            // 中心取精确格号：getX() 是 double 投影，2^60 处只能给出 256 格的整数倍，圆盘边界会以 16 段为步长跳。
             ExactPosition exact = (ExactPosition) player;
             long centerX = exact.farlands$cellCoord(ExactPosition.POS_X) >> 4;
             long centerY = exact.farlands$cellCoord(ExactPosition.POS_Y) >> 4;
             long centerZ = exact.farlands$cellCoord(ExactPosition.POS_Z) >> 4;
-            this.farlands$reconcileSquare(current, centerX, centerY, centerZ, radius);
+            this.farlands$reconcileDisc(current, centerX, centerY, centerZ, radius);
             this.farlands$buildNearest(centerX, centerZ);
         } else {
             this.farlands$buildNearest();
@@ -193,22 +193,27 @@ public final class Simulation {
     }
 
     /**
-     * 方阵对账：出方阵的解绑并批量释放几何，进方阵的绑定。
+     * 圆盘对账：出圆盘的解绑并批量释放几何，进圆盘的绑定。
      *
      * <p>
-     * 解绑判据有两条：XZ 离中心超过半径，或所在的层不在本 tick 的层列表里。后者管竖直方向的进出，玩家的 Y 一变，
-     * 旧的层就整层离开窗口。
+     * 解绑判据有两条：XZ 与中心的平方距离超过半径平方，或所在的层不在本 tick 的层列表里。后者管竖直方向的进出，
+     * 玩家的 Y 一变，旧的层就整层离开窗口。
+     *
+     * <p>
+     * 覆盖取圆而不是方：同一半径下方形会把四角也绑上，而那几列在等距之外。判据用平方距离，避免开方。
      *
      * <p>
      * 释放走一次 fence：瞬移或视距变化时会有成百上千列同时解绑，逐列建 fence 会把主线程按在 GPU 上。
      */
-    private void farlands$reconcileSquare(SimulationLayer current, long centerX, long centerY, long centerZ,
+    private void farlands$reconcileDisc(SimulationLayer current, long centerX, long centerY, long centerZ,
             int radius) {
         long[] sectionYs = current.sectionsNear(centerY);
+        long radiusSqr = (long) radius * (long) radius;
         List<SectionKey> stale = null;
         for (SectionKey key : this.boundColumns) {
-            if (Math.abs(key.x() - centerX) > radius || Math.abs(key.z() - centerZ) > radius
-                    || !farlands$inLayers(key.y(), sectionYs)) {
+            long dx = key.x() - centerX;
+            long dz = key.z() - centerZ;
+            if (dx * dx + dz * dz > radiusSqr || !farlands$inLayers(key.y(), sectionYs)) {
                 if (stale == null) {
                     stale = new ArrayList<>();
                 }
@@ -223,6 +228,9 @@ public final class Simulation {
         }
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
+                if ((long) dx * dx + (long) dz * dz > radiusSqr) {
+                    continue;
+                }
                 this.farlands$bind(current, centerX + dx, centerZ + dz, sectionYs);
             }
         }
@@ -239,10 +247,11 @@ public final class Simulation {
     }
 
     /**
-     * 从待烘集合里按到中心的切比雪夫距离取最近的一批，烘完上传。
+     * 从待烘集合里按到中心的平方距离取最近的一批，烘完上传。
      *
      * <p>
-     * 先进先出在半径 32 时会让脚下的草等半分钟，按距离取之后近的先出。
+     * 先进先出在半径 32 时会让脚下的草等半分钟，按距离取之后近的先出。距离取平方，与圆盘判据同一把尺，
+     * 不必开方，也不会因为量纲不同把四个斜角排到后面。
      */
     private void farlands$buildNearest(long centerX, long centerZ) {
         if (this.pending.isEmpty()) {
@@ -253,7 +262,9 @@ public final class Simulation {
         long[] distances = new long[want];
         int found = 0;
         for (SectionKey key : this.pending) {
-            long distance = Math.max(Math.abs(key.x() - centerX), Math.abs(key.z() - centerZ));
+            long dx = key.x() - centerX;
+            long dz = key.z() - centerZ;
+            long distance = dx * dx + dz * dz;
             if (found < want) {
                 picked[found] = key;
                 distances[found] = distance;
