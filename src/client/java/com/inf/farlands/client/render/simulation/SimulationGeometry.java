@@ -1,6 +1,5 @@
 package com.inf.farlands.client.render.simulation;
 
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -42,23 +41,24 @@ public final class SimulationGeometry {
         return INSTANCE;
     }
 
-    /** 上传一列的顶点。已有条目先释放。 */
+    /**
+     * 上传一列的顶点。已有条目先释放。
+     *
+     * <p>
+     * 顶点缓冲是直接内存：上传走 {@code glBufferStorage}，它吃的是内存地址，堆缓冲没有地址。上传完由这里释放，
+     * 结果被丢弃的那条路径则由取走结果的一方释放，见 {@code SimulationMesher.release}。
+     */
     public void upload(SectionKey columnKey, SimulationMesher.Mesh mesh) {
         Entry previous = this.entries.remove(columnKey);
         if (previous != null) {
             farlands$release(previous.buffer());
         }
-        int size = mesh.vertices().length;
-        GpuBuffer buffer = RenderSystem.getDevice()
-                .createBuffer(() -> "farlands simulation section",
-                        GpuBuffer.USAGE_VERTEX | GpuBuffer.USAGE_COPY_DST, size);
-        ByteBuffer data = MemoryUtil.memAlloc(size);
+        GpuBuffer buffer;
         try {
-            data.put(mesh.vertices());
-            data.flip();
-            RenderSystem.getDevice().createCommandEncoder().writeToBuffer(buffer.slice(), data);
+            buffer = RenderSystem.getDevice()
+                    .createBuffer(() -> "farlands simulation section", GpuBuffer.USAGE_VERTEX, mesh.vertices());
         } finally {
-            MemoryUtil.memFree(data);
+            MemoryUtil.memFree(mesh.vertices());
         }
         this.entries.put(columnKey, new Entry(buffer, mesh.vertexCount()));
     }

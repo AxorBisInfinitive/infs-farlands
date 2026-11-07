@@ -50,10 +50,28 @@ public class SimulationConfig {
             .build();
     public static final long ssaPersistInterval;
 
+    /** 客户端烘焙模拟段的线程数。 */
+    public static final ConfigEntry<Integer> MESH_WORKER_THREADS = CONFIG.setInt("meshWorkerThreads")
+            .comment("en_us", "Client-side worker threads that mesh simulation sections")
+            .comment("zh_cn", "SimulationSection 客户端烘焙线程数")
+            .range(1, 64)
+            .keyword("auto", SimulationConfig::autoThreads)
+            .commentKeyword("auto", "en_us", "Half of the CPU logical processors, min 1")
+            .commentKeyword("auto", "zh_cn", "CPU 逻辑线程数的一半，最小值为 1")
+            .define("auto")
+            .build();
+    public static final int meshWorkerThreads;
+
+    /** {@code "auto"} 的取值器：CPU 逻辑线程数一半，最小 1。 */
+    private static int autoThreads() {
+        return Math.max(1, Runtime.getRuntime().availableProcessors() / 2);
+    }
+
     static {
         CONFIG.init();
         nanStaticOverlay = NAN_STATIC_OVERLAY.get();
         ssaCacheLimit = SSA_CACHE_LIMIT.get();
         ssaPersistInterval = SSA_PERSIST_INTERVAL.get();
+        meshWorkerThreads = MESH_WORKER_THREADS.get();
     }
 }
