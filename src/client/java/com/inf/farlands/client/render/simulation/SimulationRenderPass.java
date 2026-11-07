@@ -116,10 +116,6 @@ public final class SimulationRenderPass {
             return;
         }
         Simulation simulation = ((SimulationHolder) Minecraft.getInstance()).simulation();
-        List<Simulation.SnapSection> sections = simulation.snapshot().sections();
-        if (sections.isEmpty()) {
-            return;
-        }
         long camAnchorX;
         long camAnchorY;
         long camAnchorZ;
@@ -142,6 +138,12 @@ public final class SimulationRenderPass {
             camLocalX = cameraPos.x - (double) camAnchorX;
             camLocalY = cameraPos.y - (double) camAnchorY;
             camLocalZ = cameraPos.z - (double) camAnchorZ;
+        }
+        // 可见集由遮挡剔除给出，遍历源不再是整张快照：被地形挡住的 Section 在这里就已经不在列表里。
+        List<Simulation.SnapSection> sections = simulation.visibleSections(camAnchorX, camAnchorY, camAnchorZ,
+                camLocalX, camLocalY, camLocalZ);
+        if (sections.isEmpty()) {
+            return;
         }
         List<Simulation.SnapSection> visible = new ArrayList<>(sections.size());
         List<SimulationGeometry.Entry> buffers = new ArrayList<>(sections.size());

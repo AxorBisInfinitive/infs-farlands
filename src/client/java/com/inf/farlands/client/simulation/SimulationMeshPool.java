@@ -27,8 +27,10 @@ import com.inf.farlands.simulation.model.SimulationConfig;
  */
 final class SimulationMeshPool {
 
-    /** 一次完成：快照与它的网格。网格为 null 表示该段没有可画的四边形。 */
-    record Completed(BakeSnapshot snapshot, SimulationMesher.Mesh mesh) {
+    /**
+     * 一次完成：快照与它的烘制结果。结果本身为 null 表示烘制抛了异常，此时网格与掩码都没有。
+     */
+    record Completed(BakeSnapshot snapshot, SimulationMesher.Build build) {
     }
 
     private static final int THREADS = Math.max(1, SimulationConfig.meshWorkerThreads);
@@ -62,20 +64,20 @@ final class SimulationMeshPool {
     }
 
     /**
-     * 提交一段的烘焙。任务体吞掉一切可抛物并照常投回结果，调用方因此只需处理「有网格」与「没有网格」两态。
+     * 提交一段的烘焙。任务体吞掉一切可抛物并照常投回结果，调用方因此只需处理「有结果」与「没有结果」两态。
      */
     static void submit(BakeSnapshot snapshot) {
         IN_FLIGHT.incrementAndGet();
         try {
             POOL.execute(() -> {
-                SimulationMesher.Mesh mesh = null;
+                SimulationMesher.Build build = null;
                 try {
-                    mesh = SimulationMesher.build(snapshot);
+                    build = SimulationMesher.build(snapshot);
                 } catch (Throwable t) {
                     InfsFarlands.LOGGER.error("farlands: simulation mesh failed section={},{},{}",
                             snapshot.key().x(), snapshot.key().y(), snapshot.key().z(), t);
                 }
-                COMPLETED.add(new Completed(snapshot, mesh));
+                COMPLETED.add(new Completed(snapshot, build));
             });
         } catch (RejectedExecutionException e) {
             IN_FLIGHT.decrementAndGet();
@@ -95,7 +97,7 @@ final class SimulationMeshPool {
     static void discardCompleted() {
         Completed done;
         while ((done = take()) != null) {
-            SimulationMesher.release(done.mesh());
+            SimulationMesher.release(done.build());
         }
     }
 }

@@ -69,6 +69,18 @@ public final class Simulation {
      */
     private int generation;
 
+    /** 遮挡剔除的可见集。与段表同线程，只在客户端主线程读写。 */
+    private final SimulationVisibility visibility = new SimulationVisibility();
+
+    /** 可见集需要重算：段的增删、几何上传、掩码变化都置真。 */
+    private boolean visibilityDirty = true;
+
+    /** 客户端 tick 计数，与 {@link #visibilityTick} 一起给几何变化那条路做重算节流。 */
+    private int tickCount;
+
+    /** 上次重算可见集时的 tick。初值取 -1，使第一帧必然重算。 */
+    private int visibilityTick = -1;
+
     /**
      * 每 tick 烘几段几何，取最近的那几段。
      *
@@ -101,6 +113,8 @@ public final class Simulation {
         this.structureChanged = true;
         this.snapshot = Snapshot.EMPTY;
         this.generation++;
+        this.visibility.invalidate();
+        this.visibilityDirty = true;
         SimulationMeshPool.discardCompleted();
         SimulationGeometry.instance().clear();
     }
@@ -126,6 +140,7 @@ public final class Simulation {
             this.farlands$clearTintAround(local);
             this.farlands$requeueNeighbors(local);
             this.structureChanged = true;
+            this.visibilityDirty = true;
             return;
         }
         SimulationSection section = this.section(local);
@@ -133,6 +148,7 @@ public final class Simulation {
         this.farlands$clearTintAround(local);
         this.pending.add(local);
         this.structureChanged = true;
+        this.visibilityDirty = true;
     }
 
     /** 丢掉服务端撤回的一段。 */
@@ -151,6 +167,7 @@ public final class Simulation {
     private void farlands$detach(SectionKey key) {
         if (this.sections.remove(key) != null) {
             this.structureChanged = true;
+            this.visibilityDirty = true;
         }
         this.pending.remove(key);
         this.farlands$requeueNeighbors(key);
@@ -209,6 +226,7 @@ public final class Simulation {
      * 上传占的是显存侧那点时间，不再是整段遮蔽计算。
      */
     public void tickSimulation() {
+        this.tickCount++;
         this.farlands$drainCompleted();
         net.minecraft.world.entity.player.Player player = net.minecraft.client.Minecraft.getInstance().player;
         if (player == null) {
@@ -222,37 +240,50 @@ public final class Simulation {
     }
 
     /**
-     * 取走完成结果：校验代际与版本，通过则上传，否则丢弃。
+     * 取走完成结果：校验代际与版本，通过则写掩码并上传，否则丢弃。
      *
      * <p>
      * 代际不符说明关卡换过，结果没有落点。版本不符说明烘制期间这一段的内容又变了，把键放回待烘等下一轮拿新内容。
      * 段已不在表里说明它被卸载了，几何由卸载那条路径释放过。
+     *
+     * <p>
+     * 掩码在网格之外单独写回：实心 Section 不产四边形，但它的掩码是最强的遮挡输入，不能跟着网格一起丢。
      */
     private void farlands$drainCompleted() {
         SimulationMeshPool.Completed done;
         while ((done = SimulationMeshPool.take()) != null) {
             BakeSnapshot snapshot = done.snapshot();
             SectionKey key = snapshot.key();
+            SimulationMesher.Build build = done.build();
             if (snapshot.generation() != this.generation) {
-                SimulationMesher.release(done.mesh());
+                SimulationMesher.release(build);
                 continue;
             }
             SimulationSection section = this.sections.get(key);
             if (section == null) {
-                SimulationMesher.release(done.mesh());
+                SimulationMesher.release(build);
                 continue;
             }
             if (section.revision() != snapshot.revision()) {
                 // 内容在烘制期间变过：结果作废，tint 缓存也可能被那次烘焙写进了旧值，一并清掉再排回待烘。
-                SimulationMesher.release(done.mesh());
+                SimulationMesher.release(build);
                 section.clearTints();
                 this.pending.add(key);
                 continue;
             }
-            if (done.mesh() == null) {
+            if (build == null) {
+                // 烘制抛了异常：几何作废，掩码退回全开，免得一个残缺的遮挡结论留在可见集里。
+                SimulationGeometry.instance().release(key);
+                section.setVisibility(SimulationVisibility.OPEN);
+                this.visibilityDirty = true;
+                continue;
+            }
+            section.setVisibility(build.visibility());
+            this.visibilityDirty = true;
+            if (build.mesh() == null) {
                 SimulationGeometry.instance().release(key);
             } else {
-                SimulationGeometry.instance().upload(key, done.mesh());
+                SimulationGeometry.instance().upload(key, build.mesh());
             }
         }
     }
@@ -447,7 +478,45 @@ public final class Simulation {
         this.structureChanged = true;
         this.snapshot = Snapshot.EMPTY;
         this.generation++;
+        this.visibility.invalidate();
+        this.visibilityDirty = true;
         SimulationMeshPool.discardCompleted();
+    }
+
+    /**
+     * 本帧要画的 Section 列表：相机所在的 Section 变了就立刻重算，几何变过则每 tick 至多重算一次。
+     *
+     * <p>
+     * 入参是相机帧的锚点与局部量，Section 号与段内偏移都由这里现算：调用方在渲染包里，算完还得原样传回来，
+     * 不如只给帧表示。
+     *
+     * <p>
+     * 节流的必要性在烘制期：一 tick 有几百段上传，每次都重算会把一次窗口填满变成几百次传播。相机跨 Section 不
+     * 节流，那一变必须当帧生效，否则跨边界的那一帧会少画一片。
+     */
+    public List<SnapSection> visibleSections(long cameraAnchorX, long cameraAnchorY, long cameraAnchorZ,
+            double cameraLocalX, double cameraLocalY, double cameraLocalZ) {
+        long blockX = cameraAnchorX + (long) Math.floor(cameraLocalX);
+        long blockY = cameraAnchorY + (long) Math.floor(cameraLocalY);
+        long blockZ = cameraAnchorZ + (long) Math.floor(cameraLocalZ);
+        long sectionX = blockX >> 4;
+        long sectionY = blockY >> 4;
+        long sectionZ = blockZ >> 4;
+        double inSectionX = cameraLocalX - Math.floor(cameraLocalX) + (double) (blockX - (sectionX << 4));
+        double inSectionY = cameraLocalY - Math.floor(cameraLocalY) + (double) (blockY - (sectionY << 4));
+        double inSectionZ = cameraLocalZ - Math.floor(cameraLocalZ) + (double) (blockZ - (sectionZ << 4));
+        boolean moved = !this.visibility.matches(sectionX, sectionY, sectionZ);
+        if (moved || (this.visibilityDirty && this.visibilityTick != this.tickCount)) {
+            this.visibility.rebuild(this, sectionX, sectionY, sectionZ, inSectionX, inSectionY, inSectionZ);
+            this.visibilityDirty = false;
+            this.visibilityTick = this.tickCount;
+        }
+        return this.visibility.sections();
+    }
+
+    /** 段表本体，供 {@link SimulationVisibility} 传播用。同包可见，只在客户端主线程读。 */
+    Map<SectionKey, SimulationSection> sectionMap() {
+        return this.sections;
     }
 
     public int sectionCount() {

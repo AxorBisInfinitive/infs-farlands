@@ -103,6 +103,15 @@ public final class SimulationSection {
     private int revision;
 
     /**
+     * 36 位面可见性掩码，6 面两两可达，供 {@link SimulationVisibility} 的遮挡传播用。缺省 {@link
+     * SimulationVisibility#OPEN}，即全开。
+     *
+     * <p>
+     * 缺省取全开而不是全闭：掩码尚未算出时按开处理只会少剔几段，按闭处理会把真看得见的几何一起删掉。
+     */
+    private long visibility = SimulationVisibility.OPEN;
+
+    /**
      * 每格的 tint 缓存，按 resolver 与「Y 的 quart 带」两级。0 表示未算，tint 恒不透明，所以 0 不会是真值。
      *
      * <p>
@@ -228,6 +237,10 @@ public final class SimulationSection {
      * 失效段直接返回：可玩界内的段不参与模拟，服务端也不该发它们。
      *
      * <p>
+     * 掩码同时退回全开：新内容还没烘出来，上一版掩码属于上一版几何，按它传播会在等烘制的那几 tick 里剔掉本该看
+     * 得见的 Section。
+     *
+     * <p>
      * 模拟方块按 {@code BlockState} 建小表复用：同一状态共用一个实例，既省分配，也因为 {@link #set} 的
      * {@code previous == block} 是引用比较。
      *
@@ -242,6 +255,7 @@ public final class SimulationSection {
         this.slots = null;
         this.count = 0;
         this.occupiedCount = 0;
+        this.visibility = SimulationVisibility.OPEN;
         this.biomes = container.getBiomes();
         this.clearTints();
         this.blockLight = blockLight == null ? new DataLayer() : blockLight;
@@ -281,6 +295,9 @@ public final class SimulationSection {
      *
      * <p>
      * {@code snap} 置空：这一段若是从有方块降成全空，旧快照段必须退出渲染列表，几何由调用方释放。
+     *
+     * <p>
+     * 掩码同时置全开：全空气必然看得穿，留着上一版全闭的掩码会把这一段后面的所有 Section 一起剔掉。
      */
     void applyAir(LevelChunkSection container, DataLayer blockLight, DataLayer skyLight) {
         if (!this.eligible) {
@@ -291,6 +308,7 @@ public final class SimulationSection {
         this.count = 0;
         this.occupiedCount = 0;
         this.snap = null;
+        this.visibility = SimulationVisibility.OPEN;
         this.biomes = container.getBiomes();
         this.clearTints();
         this.blockLight = blockLight == null ? new DataLayer() : blockLight;
@@ -358,6 +376,16 @@ public final class SimulationSection {
     /** 当前内容版本。只在客户端主线程读写。 */
     public int revision() {
         return this.revision;
+    }
+
+    /** 36 位面可见性掩码。见 {@link #visibility}。 */
+    long visibility() {
+        return this.visibility;
+    }
+
+    /** 写入烘制期算出的掩码。 */
+    void setVisibility(long mask) {
+        this.visibility = mask;
     }
 
     /**

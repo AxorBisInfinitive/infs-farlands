@@ -16,6 +16,8 @@ import net.minecraft.client.renderer.block.BlockModelLighter;
 import net.minecraft.client.renderer.block.BlockStateModelSet;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModelPart;
+import net.minecraft.client.renderer.chunk.VisGraph;
+import net.minecraft.client.renderer.chunk.VisibilitySet;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.client.resources.model.geometry.BakedQuad;
 import net.minecraft.core.BlockPos;
@@ -68,8 +70,18 @@ public final class SimulationMesher {
     public record Mesh(ByteBuffer vertices, int vertexCount) {
     }
 
-    /** 烘一段。没有可画的四边形时返回 null。 */
-    public static Mesh build(BakeSnapshot snapshot) {
+    /**
+     * 一段烘制的结果：网格与该段的 36 位面可见性掩码。
+     *
+     * <p>
+     * 掩码不挂在 {@link Mesh} 上，因为网格可以为 null 而掩码必须留下：四面被实心邻段包住的 Section 一个四边形都
+     * 不产，但它恰恰是最强的遮挡体，丢了掩码就会让后面的 Section 白画一片。
+     */
+    public record Build(Mesh mesh, long visibility) {
+    }
+
+    /** 烘一段。没有可画的四边形时网格为 null，掩码照常返回。 */
+    public static Build build(BakeSnapshot snapshot) {
         int occupied = snapshot.occupiedCount();
         int[] occupiedIndexes = snapshot.occupied();
         SimulationSection section = snapshot.section();
@@ -79,6 +91,8 @@ public final class SimulationMesher {
         BlockPos.MutableBlockPos localPos = new BlockPos.MutableBlockPos();
         BlockPos.MutableBlockPos neighbor = new BlockPos.MutableBlockPos();
         boolean ambientOcclusion = snapshot.ambientOcclusion();
+        // 掩码的输入就是循环里已经在手的 BlockState：遮挡体判据照抄原版 SectionCompiler，只看 isSolidRender。
+        VisGraph visGraph = new VisGraph();
         // 光与明暗的查询缓存是线程局部的，键是位置的打包值。本层的孔位是段内局部坐标，两个不同段会给出相同键，
         // 所以它必须与一段的烘制同起同落，绝不能跨段复用。
         BlockModelLighter.enableCaching();
@@ -99,6 +113,9 @@ public final class SimulationMesher {
                 List<BlockStateModelPart> parts = farlands$parts(snapshot.models(), state);
                 getter.at(x, y, z, state);
                 localPos.set(x, y, z);
+                if (state.isSolidRender()) {
+                    visGraph.setOpaque(localPos);
+                }
                 boolean smooth = ambientOcclusion && state.getLightEmission() == 0
                         && !parts.isEmpty() && parts.getFirst().useAmbientOcclusion();
                 for (Direction direction : DIRECTIONS) {
@@ -121,8 +138,9 @@ public final class SimulationMesher {
                     }
                 }
             }
+            long visibility = farlands$visibility(visGraph.resolve());
             if (quads == 0) {
-                return null;
+                return new Build(null, visibility);
             }
             MeshData mesh = builder.buildOrThrow();
             try {
@@ -131,7 +149,7 @@ public final class SimulationMesher {
                 ByteBuffer vertices = MemoryUtil.memAlloc(source.remaining());
                 vertices.put(source.duplicate());
                 vertices.flip();
-                return new Mesh(vertices, quads * 4);
+                return new Build(new Mesh(vertices, quads * 4), visibility);
             } finally {
                 mesh.close();
             }
@@ -194,6 +212,32 @@ public final class SimulationMesher {
         if (mesh != null) {
             MemoryUtil.memFree(mesh.vertices());
         }
+    }
+
+    /** 释放一份烘制结果的顶点缓冲。结果本身可以为 null，见 {@link SimulationMeshPool#discardCompleted}。 */
+    static void release(Build build) {
+        if (build != null) {
+            release(build.mesh());
+        }
+    }
+
+    /**
+     * 把 6 乘 6 的可达矩阵压成 36 位。
+     *
+     * <p>
+     * 位序与原版 {@code VisibilitySet} 的存放顺序一致，下标是 {@code from.ordinal() + to.ordinal() * 6}，
+     * 与 {@link SimulationVisibility} 读掩码时的算式同源。
+     */
+    private static long farlands$visibility(VisibilitySet set) {
+        long mask = 0L;
+        for (Direction from : DIRECTIONS) {
+            for (Direction to : DIRECTIONS) {
+                if (set.visibilityBetween(from, to)) {
+                    mask |= 1L << (from.ordinal() + to.ordinal() * DIRECTIONS.length);
+                }
+            }
+        }
+        return mask;
     }
 
     /** 该方块状态的模型部件表。条目带模型集身份，换了模型集就重建。 */
