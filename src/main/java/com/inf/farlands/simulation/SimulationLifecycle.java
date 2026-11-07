@@ -83,7 +83,13 @@ public final class SimulationLifecycle {
             produce(level, key);
             return;
         }
-        Path path = SimulationIO.filePath(level, key.x(), key.y(), key.z());
+        Path path = SimulationIO.findPath(level, key.x(), key.y(), key.z());
+        if (path == null) {
+            // 槽位查得到就说明映射里有这个区域，这里落空只可能是表在两次调用之间被换掉。
+            LOADING.remove(pending);
+            produce(level, key);
+            return;
+        }
         List<SimulationIO.SlotKey> keys = List
                 .of(new SimulationIO.SlotKey(key.x(), key.y(), key.z(), ref));
         SimulationIO.submitRead(level, path, keys, level.palettedContainerFactory(),
@@ -122,7 +128,7 @@ public final class SimulationLifecycle {
      */
     public static boolean persistSection(ServerLevel level, SimulationSectionKey key, SimulationSectionData data) {
         ResourceKey<Level> dimension = level.dimension();
-        Path path = SimulationIO.filePath(level, key.x(), key.y(), key.z());
+        Path path = SimulationIO.pathForWrite(level, key.x(), key.y(), key.z());
         PalettedContainerFactory factory = level.palettedContainerFactory();
         byte[] entry;
         try {
@@ -189,7 +195,7 @@ public final class SimulationLifecycle {
                 if (!SimulationSectionStage.isTerminal(data.stage())) {
                     continue;
                 }
-                Path path = SimulationIO.filePath(level, key.x(), key.y(), key.z());
+                Path path = SimulationIO.pathForWrite(level, key.x(), key.y(), key.z());
                 byte[] entry;
                 try {
                     entry = SimulationSerializer.encode(data.section, data.blockLight, data.skyLight,
@@ -256,8 +262,9 @@ public final class SimulationLifecycle {
         data.markDirty();
     }
 
-    /** 关服时清掉读回在途集合。段表由 {@code SimulationStore.clearAll} 清。 */
+    /** 关服时清掉读回在途集合与映射表缓存。段表由 {@code SimulationStore.clearAll} 清。 */
     public static void clearWorldState() {
         LOADING.clear();
+        com.inf.farlands.simulation.serialize.SimulationFileIndex.clearWorldState();
     }
 }

@@ -40,8 +40,9 @@ import com.inf.farlands.simulation.model.SimulationConfig;
  * 先完成再 close。
  *
  * <p>
- * 路径是 {@code <维度目录>/ssa/s.<sx>>5>.<sy>>5>.<sz>>5>.ssa}，三段都从段号右移五位得到，与 fsa 从方块
- * 坐标右移九位是同一个 512 方块跨度，只是入参的坐标系不同。
+ * 路径是 {@code <维度目录>/ssa/s.<16 位十六进制>.ssa}。编号不来自坐标，来自同目录的 {@code mapping.json}：
+ * 坐标直接编进文件名会随位宽增长，段号拓到 1024 位时一段就三百多位，路径必然越限。映射表与它的四条不变式见
+ * {@link SimulationFileIndex}。
  *
  * <p>
  * 关服序列由调用方排：{@link #awaitIODrain} 排空 IO 队列，{@link #drainMainThreadTasks} 消费 commit 回调，
@@ -92,7 +93,7 @@ public final class SimulationIO {
     // ---- 路径 ----
 
     @SuppressWarnings("resource")
-    private static Path dimensionDir(ServerLevel level) {
+    static Path dimensionDir(ServerLevel level) {
         try {
             LevelStorageSource.LevelStorageAccess access = (LevelStorageSource.LevelStorageAccess) F_STORAGE_SOURCE
                     .get(level.getServer());
@@ -102,23 +103,37 @@ public final class SimulationIO {
         }
     }
 
-    /** 该段的文件路径。三段都是段号右移五位。 */
-    public static Path filePath(ServerLevel level, long sectionX, long sectionY, long sectionZ) {
-        return dimensionDir(level).resolve(fileName(sectionX, sectionY, sectionZ));
+    /**
+     * 该段的文件路径，只查映射表，不分配。
+     *
+     * <p>
+     * 该区域还没有 ssa 文件时返回 null。读路必须用它：若在这里分配编号，视距探测会给「还没有任何数据的区域」
+     * 建出映射条目，表就会按访问过的区域增长，而不是按有文件的区域。
+     */
+    public static Path findPath(ServerLevel level, long sectionX, long sectionY, long sectionZ) {
+        String id = SimulationFileIndex.of(level).find(regionOf(sectionX, sectionY, sectionZ));
+        return id == null ? null : dimensionDir(level).resolve(fileName(id));
+    }
+
+    /** 该段的文件路径，必要时分配编号并落盘。只在写路调用。 */
+    public static Path pathForWrite(ServerLevel level, long sectionX, long sectionY, long sectionZ) {
+        String id = SimulationFileIndex.of(level).ensure(regionOf(sectionX, sectionY, sectionZ));
+        return dimensionDir(level).resolve(fileName(id));
     }
 
     /**
-     * ssa 文件名 {@code s.<regionX>.<yb>.<regionZ>.ssa}，形参依次是段号 x、y、z。
+     * 段号到区域号的换算，全仓只有这一处。
      *
      * <p>
-     * 三段各右移五位，一个文件因此覆盖 32 个段，即 512 方块。与 fsa 的 {@code SectionIO.fileName} 是同一个
-     * 移位量，区别只在入参：那边收方块坐标，这边收段号。移位在 long 上做，段号超出 int 也能落成文件名。
-     *
-     * <p>
-     * 纯字符串、不依赖 ServerLevel，客户端侧的诊断行也能算出同一个名字。
+     * 一个 ssa 文件覆盖 32 个段，所以区域号是段号右移五位。读、落盘、关服三条路各写一遍就是三次犯错机会。
      */
-    public static String fileName(long sectionX, long sectionY, long sectionZ) {
-        return "s." + (sectionX >> 5) + "." + (sectionY >> 5) + "." + (sectionZ >> 5) + ".ssa";
+    static SimulationFileIndex.Region regionOf(long sectionX, long sectionY, long sectionZ) {
+        return new SimulationFileIndex.Region(sectionX >> 5, sectionY >> 5, sectionZ >> 5);
+    }
+
+    /** ssa 文件名：编号来自映射表，恒 26 个字符。 */
+    public static String fileName(String id) {
+        return "s." + id + ".ssa";
     }
 
     /**
@@ -173,8 +188,8 @@ public final class SimulationIO {
      * 只查偏移表，不读盘，不做 IO，供读回判定用。
      */
     public static SimulationStorage.SlotRef slotAt(ServerLevel level, long sectionX, long sectionY, long sectionZ) {
-        Path path = filePath(level, sectionX, sectionY, sectionZ);
-        if (!Files.exists(path)) {
+        Path path = findPath(level, sectionX, sectionY, sectionZ);
+        if (path == null || !Files.exists(path)) {
             return null;
         }
         SimulationStorage storage = getOrOpen(path);
