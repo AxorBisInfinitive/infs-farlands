@@ -61,7 +61,7 @@ public final class Simulation {
     private ClientLevel clientLevel;
 
     /**
-     * 自动方阵管理的列，键是三轴段坐标。
+     * 自动方阵管理的列，键是三轴段坐标，即「列乘层」。一个列在本 tick 的每一层上各占一个键。
      *
      * <p>
      * 它只是方阵的绑定记录，不是渲染的前置条件：渲染集合是 {@code sections}。别再把两者当成一件事。
@@ -99,20 +99,22 @@ public final class Simulation {
     }
 
     /**
-     * 一列进入方阵：绑定并跑一次生产者。
+     * 一列在给定的层上进入方阵：逐层绑定并各跑一次生产者。
      *
      * <p>
      * 绑定与客户端有没有这一列的 chunk 无关，判据只有「在不在方阵里」。
      */
-    private void farlands$bind(SimulationLayer current, long chunkX, long chunkZ) {
-        SectionKey key = new SectionKey(chunkX, current.sectionY(), chunkZ);
-        if (!this.boundColumns.add(key)) {
-            return;
+    private void farlands$bind(SimulationLayer current, long chunkX, long chunkZ, long[] sectionYs) {
+        for (long sectionY : sectionYs) {
+            SectionKey key = new SectionKey(chunkX, sectionY, chunkZ);
+            if (!this.boundColumns.add(key)) {
+                continue;
+            }
+            SimulationSection section = this.section(key);
+            current.produce(section);
+            this.pending.add(key);
+            this.farlands$requeueNeighbors(key);
         }
-        SimulationSection section = this.section(key);
-        current.produce(section);
-        this.pending.add(key);
-        this.farlands$requeueNeighbors(key);
     }
 
     /** 一列离开方阵：摘段。显存由调用方批量释放，一趟一条 fence。 */
@@ -180,8 +182,9 @@ public final class Simulation {
             // 中心取精确格号：getX() 是 double 投影，2^60 处只能给出 256 格的整数倍，方阵边界会以 16 段为步长跳。
             ExactPosition exact = (ExactPosition) player;
             long centerX = exact.farlands$cellCoord(ExactPosition.POS_X) >> 4;
+            long centerY = exact.farlands$cellCoord(ExactPosition.POS_Y) >> 4;
             long centerZ = exact.farlands$cellCoord(ExactPosition.POS_Z) >> 4;
-            this.farlands$reconcileSquare(current, centerX, centerZ, radius);
+            this.farlands$reconcileSquare(current, centerX, centerY, centerZ, radius);
             this.farlands$buildNearest(centerX, centerZ);
         } else {
             this.farlands$buildNearest();
@@ -193,12 +196,19 @@ public final class Simulation {
      * 方阵对账：出方阵的解绑并批量释放几何，进方阵的绑定。
      *
      * <p>
+     * 解绑判据有两条：XZ 离中心超过半径，或所在的层不在本 tick 的层列表里。后者管竖直方向的进出，玩家的 Y 一变，
+     * 旧的层就整层离开窗口。
+     *
+     * <p>
      * 释放走一次 fence：瞬移或视距变化时会有成百上千列同时解绑，逐列建 fence 会把主线程按在 GPU 上。
      */
-    private void farlands$reconcileSquare(SimulationLayer current, long centerX, long centerZ, int radius) {
+    private void farlands$reconcileSquare(SimulationLayer current, long centerX, long centerY, long centerZ,
+            int radius) {
+        long[] sectionYs = current.sectionsNear(centerY);
         List<SectionKey> stale = null;
         for (SectionKey key : this.boundColumns) {
-            if (Math.abs(key.x() - centerX) > radius || Math.abs(key.z() - centerZ) > radius) {
+            if (Math.abs(key.x() - centerX) > radius || Math.abs(key.z() - centerZ) > radius
+                    || !farlands$inLayers(key.y(), sectionYs)) {
                 if (stale == null) {
                     stale = new ArrayList<>();
                 }
@@ -213,9 +223,19 @@ public final class Simulation {
         }
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
-                this.farlands$bind(current, centerX + dx, centerZ + dz);
+                this.farlands$bind(current, centerX + dx, centerZ + dz, sectionYs);
             }
         }
+    }
+
+    /** 该段号是否在本 tick 的层列表里。列表至多三个元素，线性扫即可。 */
+    private static boolean farlands$inLayers(long sectionY, long[] sectionYs) {
+        for (long candidate : sectionYs) {
+            if (candidate == sectionY) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
