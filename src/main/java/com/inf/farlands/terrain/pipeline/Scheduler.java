@@ -746,9 +746,15 @@ public final class Scheduler {
      * 不让它走泵：泵对被等待的格有确认门槛与一次派发，那一段延迟在实机上就是一次卡顿。
      *
      * <p>
-     * 判据与派发一致，两条支。界内用第七行，所以不会把未就绪的段放出去。界外不用第七行：界外 chunk 的段
+     * 判据与派发一致，三条支。界内用第七行，所以不会把未就绪的段放出去。界外不用第七行：界外 chunk 的段
      * 永不变点亮，第七行对它恒假，而它的 FULL 只有派发的界外支会补；等待点不复制那一条，它的 future 一旦
-     * 被票级变化重建，读的人就永远等。壳不在时两支柱都做不了，那一格只能继续等。
+     * 被票级变化重建，读的人就永远等。壳不在时三条支都做不了，那一格只能继续等。
+     *
+     * <p>
+     * 第三条支是该维度本 tick 没有窗口。此时调度器的准入没有段可派，`sectionsFor` 为空，第七行对界内 chunk
+     * 恒假，那个 future 在本 tick 内不可能被补，等待没有解。按空壳补 FULL：chunk 从此存在且为空，读拿到
+     * 空气，写仍被 {@code ChunkReadiness.isReady} 按段拒掉，所以「FULL 完成但不可写」是既有语义，界外支
+     * 一直在用。判据与 {@code ServerChunkCacheMixin} 的窗口判据同源同形。
      */
     public static void completeIfReady(ServerLevel level, int chunkX, int chunkZ) {
         LevelChunk chunk = SectionLifecycle.latestChunk(level, chunkX, chunkZ);
@@ -756,6 +762,10 @@ public final class Scheduler {
             return;
         }
         if (!WorldBounds.inChunkRange(chunkX, chunkZ)) {
+            ChunkReadiness.completeFull(chunk);
+            return;
+        }
+        if (EntitySectionWindow.ranges(level.dimension()).length == 0) {
             ChunkReadiness.completeFull(chunk);
             return;
         }

@@ -82,13 +82,38 @@ public final class WorldBounds {
         return inChunk(cx) && inChunk(cz);
     }
 
-    public static boolean inBuildHeight(int y) {
-        return y >= FarlandsConfig.worldGenMinY && y < FarlandsConfig.worldGenMaxY;
+    /** 可读写的绝对最小 Y：配置界与可玩方块界的交集下界。 */
+    private static long readableMinY() {
+        return Math.max((long) FarlandsConfig.worldGenMinY, (long) MIN_PLAYABLE_BLOCK);
     }
 
-    /** 范围 [minY, maxY) 是否完全在可玩高度内，沿用 hasChunksAt 语义。 */
+    /** 可读写的绝对最大 Y：配置界与可玩方块界的交集上界。配置界上界开区间，故减一。 */
+    private static long readableMaxY() {
+        return Math.min((long) FarlandsConfig.worldGenMaxY - 1L, (long) MAX_PLAYABLE_BLOCK);
+    }
+
+    /**
+     * 该 Y 是否可读写：配置界与可玩方块界的交集。
+     *
+     * <p>
+     * 只取配置界会留下 16 格缓冲带：可玩方块界到维度高之间，y 在配置界内而所有位置判据都认为那里没有方块。
+     * 那条带里读门放行、窗口判据判无驱动者，于是 {@code Level.getBlockState} 一路走到
+     * {@code getChunk} 的加载版并阻塞在一个永不完成的 FULL 上。取交集之后，读与写都在同一条界上，
+     * 带内直接给 VOID_AIR 与 false，请求不会发出。
+     *
+     * <p>
+     * 读门与写门都以 {@code Level.isInValidBounds} 为唯一入口，后者取本方法与
+     * {@code ChunkPos.isValid}，所以窄化自动同时覆盖读与写。数据侧另有一条同宽的过滤：
+     * {@code Scheduler.sectionsFor} 用 {@code inSection} 剔掉可玩段界之外的段，那条带里不会产出数据，
+     * 因此不会出现「渲染看得见、读说没有」的裂缝。
+     */
+    public static boolean inBuildHeight(int y) {
+        return y >= readableMinY() && y <= readableMaxY();
+    }
+
+    /** 范围 [minY, maxY) 是否完全在可读写高度内，沿用 hasChunksAt 语义。 */
     public static boolean inBuildHeightRange(int minY, int maxY) {
-        return minY >= FarlandsConfig.worldGenMinY && maxY < FarlandsConfig.worldGenMaxY;
+        return minY >= readableMinY() && (long) maxY - 1L <= readableMaxY();
     }
 
     // clamp 含边界，永不落缓冲带

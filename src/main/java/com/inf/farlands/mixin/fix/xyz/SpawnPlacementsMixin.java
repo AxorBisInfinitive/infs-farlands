@@ -1,8 +1,10 @@
 package com.inf.farlands.mixin.fix.xyz;
 
+import com.inf.farlands.util.window.EntitySectionWindow;
 import com.inf.farlands.util.world.WorldBounds;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.SpawnPlacements;
 import net.minecraft.world.level.LevelReader;
@@ -27,8 +29,18 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * 逐字不变，因为守卫只多一次范围比较。
  *
  * <p>
+ * 第二条判据是「该维度本 tick 没有窗口」。那种维度没有驱动者，`sectionsFor` 为空，FULL 永远不补，位置即使
+ * 落在可玩界内，往下读方块也会阻塞在同一个 future 上。实测路径是 `CatSpawner` 把玩家位置横向偏 8 到 31 格，
+ * 落点 chunk 在可玩段界内而玩家自身在界外，于是前一版的范围判据放行，`Level.getBlockState` 经两参
+ * `getChunk`，即 `loadOrGenerate = true`，停在 `managedBlock` 上。
+ *
+ * <p>
  * 放在这个入口而不是逐个 spawner：它是各族共用的那一个，四个调用点一次覆盖。Raid 与
  * WanderingTraderSpawner 直接对实现类调接口方法，不经本入口，不在覆盖范围内。
+ *
+ * <p>
+ * 窗口判据只对 `ServerLevel` 生效。生成期的 `WorldGenRegion` 不是 `ServerLevel`，那里保持原行为；窗口表本身
+ * 也只在服务端维护。
  */
 @Mixin(SpawnPlacements.class)
 public class SpawnPlacementsMixin {
@@ -37,6 +49,11 @@ public class SpawnPlacementsMixin {
     private static void farlands$rejectOutsidePlayable(EntityType<?> type, LevelReader level, BlockPos pos,
             CallbackInfoReturnable<Boolean> cir) {
         if (!WorldBounds.inBlockXZ(pos.getX(), pos.getZ())) {
+            cir.setReturnValue(false);
+            return;
+        }
+        if (level instanceof ServerLevel serverLevel
+                && EntitySectionWindow.ranges(serverLevel.dimension()).length == 0) {
             cir.setReturnValue(false);
         }
     }
