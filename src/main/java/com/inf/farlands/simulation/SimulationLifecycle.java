@@ -277,6 +277,7 @@ public final class SimulationLifecycle {
             }
             SimulationStore.putDecoded(dimension, key, entry.decoded().section(), entry.decoded().shapeMode(),
                     entry.decoded().blockLight(), entry.decoded().skyLight(), entry.decoded().stage());
+            SimulationServer.noteDirty(dimension, key);
             return;
         }
         produce(level, key);
@@ -320,6 +321,7 @@ public final class SimulationLifecycle {
         data.advanceTo(SimulationSectionStage.LIGHTED);
         data.markPersistDirty();
         data.markDirty();
+        SimulationServer.noteDirty(level.dimension(), key);
     }
 
     /**
