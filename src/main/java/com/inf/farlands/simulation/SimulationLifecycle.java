@@ -12,7 +12,8 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.PalettedContainerFactory;
 
 import com.inf.farlands.InfsFarlands;
-import com.inf.farlands.simulation.model.SimulationProducer;
+import com.inf.farlands.simulation.int64.terrainFiller.SimulationFiller;
+import com.inf.farlands.simulation.int64.terrainFiller.StandardSimulationFiller;
 import com.inf.farlands.simulation.model.SimulationSectionData;
 import com.inf.farlands.simulation.model.SimulationSectionKey;
 import com.inf.farlands.simulation.model.SimulationSectionStage;
@@ -40,8 +41,12 @@ import com.inf.farlands.simulation.terrain.SimulationTask;
  */
 public final class SimulationLifecycle {
 
-    /** 当前只有一个测试层。将来由配置或系统选择决定。 */
-    private static final SimulationProducer PRODUCER = new GrassPlaneProducer();
+    /**
+     * 唯一的填充器。逻辑全在 {@code AbstractSimulationFiller}，实例无状态。
+     *
+     * <p>系统不在这里选：填充器按 {@code SimulationSystem.SELECTED} 现取，换系统只改枚举那一处。
+     */
+    private static final SimulationFiller FILLER = new StandardSimulationFiller();
 
     /** 读回在途的段。键含维度：同一个段号在两个维度里互不相干。 */
     private record PendingKey(ResourceKey<Level> dimension, SimulationSectionKey key) {
@@ -255,7 +260,8 @@ public final class SimulationLifecycle {
     private static void produce(ServerLevel level, SimulationSectionKey key) {
         SimulationSectionData data = SimulationStore.createEmpty(level, key);
         data.advanceTo(SimulationSectionStage.NOISE);
-        boolean submitted = SimulationPool.submitProduction(level, new SimulationTask(key, data, PRODUCER),
+        boolean submitted = SimulationPool.submitProduction(level,
+                new SimulationTask(level, key, data, FILLER),
                 success -> finishProduction(level, key, data, success));
         if (!submitted) {
             SimulationStore.removeIfSame(level.dimension(), key, data);
