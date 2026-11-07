@@ -4,6 +4,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -51,24 +52,28 @@ public final class SimulationPool {
      * 提交一段的生产。返回假表示池已关闭，即停服中；调用方据此撤销它做的认领并留待下次。
      *
      * <p>
-     * {@code onDoneMainThread} 在主线程执行，且先于在途计数递减。它负责条件判据与升档，抛异常也会保证计数
-     * 递减。
+     * {@code onDoneMainThread} 在主线程执行，且先于在途计数递减，入参是本次生产成没成。失败也要回调，
+     * 否则调用方无从区分「还在生产」与「生产失败」；回调抛异常同样保证计数递减。
      */
-    public static boolean submitProduction(ServerLevel level, SimulationTask task, Runnable onDoneMainThread) {
+    public static boolean submitProduction(ServerLevel level, SimulationTask task,
+            Consumer<Boolean> onDoneMainThread) {
         IN_FLIGHT.incrementAndGet();
         try {
             POOL.submit(() -> {
+                boolean produced = true;
                 try {
                     task.run();
                 } catch (Throwable t) {
                     // 池任务走 submit，没人读那个 Future，任何 Throwable 都会被静默吞掉
+                    produced = false;
                     InfsFarlands.LOGGER.error("farlands: simulation produce failed section={},{},{}",
                             task.key().x(), task.key().y(), task.key().z(), t);
                 }
+                boolean success = produced;
                 SimulationIO.runOnMainThread(() -> {
                     try {
                         if (onDoneMainThread != null) {
-                            onDoneMainThread.run();
+                            onDoneMainThread.accept(success);
                         }
                     } finally {
                         IN_FLIGHT.decrementAndGet();

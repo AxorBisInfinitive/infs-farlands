@@ -61,7 +61,14 @@ public final class SimulationSection {
     private DataLayer skyLight = new DataLayer();
     private DataLayer blockLight = new DataLayer();
 
-    private final SimulationBlock[] slots = new SimulationBlock[SIZE * SIZE * SIZE];
+    /**
+     * 4096 个格的方块，未写过时为 null。
+     *
+     * <p>
+     * 不预分配：视距内每一段都会建对象，其中绝大多数是空段，而一个 4096 长的引用数组本身就是 16KB，
+     * 按段乘起来是几百 MB。第一次写非空方块时才分配，空段因此只付对象头与几个字段。
+     */
+    private SimulationBlock[] slots;
 
     private int count;
 
@@ -207,7 +214,7 @@ public final class SimulationSection {
         if (!this.eligible) {
             return;
         }
-        Arrays.fill(this.slots, null);
+        this.slots = null;
         this.count = 0;
         this.occupiedCount = 0;
         this.biomes = container.getBiomes();
@@ -225,6 +232,9 @@ public final class SimulationSection {
                             s -> shapeMode == SimulationSectionData.SHAPE_FULL ? SimulationBlock.full(s)
                                     : SimulationBlock.of(s));
                     int index = farlands$index(x, y, z);
+                    if (this.slots == null) {
+                        this.slots = new SimulationBlock[SIZE * SIZE * SIZE];
+                    }
                     this.slots[index] = block;
                     this.count++;
                     this.farlands$occupy(index);
@@ -245,18 +255,29 @@ public final class SimulationSection {
             return;
         }
         int index = farlands$index(localX, localY, localZ);
-        SimulationBlock previous = this.slots[index];
+        SimulationBlock[] current = this.slots;
+        SimulationBlock previous = current == null ? null : current[index];
         if (previous == block) {
             return;
         }
-        if (previous == null) {
-            this.count++;
-            this.farlands$occupy(index);
-        } else if (block == null) {
+        if (block == null) {
+            if (current == null) {
+                return;
+            }
+            current[index] = null;
             this.count--;
             this.farlands$vacate(index);
+        } else {
+            if (current == null) {
+                current = new SimulationBlock[SIZE * SIZE * SIZE];
+                this.slots = current;
+            }
+            if (previous == null) {
+                this.count++;
+                this.farlands$occupy(index);
+            }
+            current[index] = block;
         }
-        this.slots[index] = block;
         this.farlands$markDirty(localX, localY, localZ);
     }
 
@@ -267,7 +288,8 @@ public final class SimulationSection {
 
     /** 读一格，供烘几何与命中用。局部坐标必须在 0 到 15 内。 */
     public SimulationBlock blockAt(int localX, int localY, int localZ) {
-        return this.slots[farlands$index(localX, localY, localZ)];
+        SimulationBlock[] current = this.slots;
+        return current == null ? null : current[farlands$index(localX, localY, localZ)];
     }
 
     /** 非空格的数量。 */
@@ -285,7 +307,7 @@ public final class SimulationSection {
         if (!this.eligible || this.count == 0) {
             return;
         }
-        Arrays.fill(this.slots, null);
+        this.slots = null;
         this.count = 0;
         this.occupiedCount = 0;
         this.farlands$markDirty(0, 0, 0);

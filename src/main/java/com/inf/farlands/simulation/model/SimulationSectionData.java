@@ -32,12 +32,16 @@ public final class SimulationSectionData {
     public DataLayer skyLight = new DataLayer();
 
     /**
-     * 阶段，取值见 {@link SimulationSectionStage}。建段时是 {@code UNPROCESSED}，内容写完之后推到
-     * {@code PROCESSED}，此后不再变。
+     * 阶段，取值见 {@link SimulationSectionStage}。建段时是 {@code UNPROCESSED}，入池生产时推到
+     * {@code PROCESSING}，生产成功并写完统一光照之后推到 {@code LIGHTED}，此后不再变。
      *
      * <p>
      * volatile 只作保险：今天的写方与读方都在服务端主线程，容器内容的可见性由提交到主线程那一步的队列边界给出。
      * 标上它，将来若有人让池线程直接升档，也不会静默丢掉这条边界。
+     *
+     * <p>
+     * 它与两个光照字段之间还有一条顺序约定：写光在前、升到 {@code LIGHTED} 在后，读侧先读档位再读光，这枚
+     * volatile 就是那条先后的载体。
      */
     private volatile int stage;
 

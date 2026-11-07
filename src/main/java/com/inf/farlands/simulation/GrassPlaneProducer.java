@@ -8,14 +8,22 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
- * 测试层：每 6 段一层，沿 x 走一条正弦高度场，从段底填到曲面。
+ * 测试层：沿 x 走一条正弦高度场，从段底填到曲面；只有段号是层距倍数的段才写方块。
  *
  * <p>
  * 内容与客户端原来那个 {@code grassPlane} 逐字相同，只是落点搬到了服务端：高度只随世界 x 变化，z 方向同高，
  * 相位用整数取模算，因为 worldX 可到十亿级以上，直接对 double 取 sin 会在参数归约上丢精度。基线与幅度之和落在
  * 0 到 14，不越出本段。形状取整格，与原来的 {@code SimulationBlock.full} 一致。
+ *
+ * <p>
+ * {@link #LAYER_PERIOD} 是内容口径，不是存在性口径：视距内每一段都被建出来，因为空腔本身要有对象承载光；
+ * 本类只决定其中哪些层写方块。段号按绝对坐标取模，所以草皮仍落在原来那些高程上，每 96 格一层。空段直接返回，
+ * 连形状模式都不设，它们没有方块可渲染。
  */
 public final class GrassPlaneProducer implements SimulationProducer {
+
+    /** 层距，以段计：6 段即 96 格。只有段号是它的倍数的段写方块。 */
+    private static final int LAYER_PERIOD = 6;
 
     /** 正弦的周期，以方块计。32 格跨两个段，跨段接续看得出来。 */
     private static final int PERIOD = 32;
@@ -29,6 +37,9 @@ public final class GrassPlaneProducer implements SimulationProducer {
 
     @Override
     public void produce(SimulationSectionKey key, SimulationSectionData data) {
+        if (Math.floorMod(key.y(), (long) LAYER_PERIOD) != 0L) {
+            return;
+        }
         data.setShapeMode(SimulationSectionData.SHAPE_FULL);
         long baseX = key.x() * SimulationSectionData.SIZE;
         for (int x = 0; x < SimulationSectionData.SIZE; x++) {

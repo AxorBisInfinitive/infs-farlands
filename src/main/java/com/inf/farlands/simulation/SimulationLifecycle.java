@@ -27,7 +27,7 @@ import com.inf.farlands.simulation.terrain.SimulationTask;
  * 模拟段的生命周期编排：读回优先、生产入池、释放落盘、周期刷盘、关服收尾。
  *
  * <p>
- * 与地形侧的 {@code SectionLifecycle} 是同一类职责，但只有两档阶段，所以没有候选表也没有准入：谁该开工由
+ * 与地形侧的 {@code SectionLifecycle} 是同一类职责，但只有三档阶段，所以没有候选表也没有准入：谁该开工由
  * {@link SimulationServer} 的视距并集决定，本类只在段进入与离开并集时被调。
  *
  * <p>
@@ -245,21 +245,57 @@ public final class SimulationLifecycle {
         produce(level, key);
     }
 
-    /** 建空壳并把生产交给池。收尾在主线程，先判「表里还是不是这一份」再升档。 */
+    /**
+     * 建空壳、标 {@code PROCESSING}、把生产交给池。
+     *
+     * <p>
+     * 提交被拒时要摘掉这一格：池只在关闭时拒绝，而那一格之后再没有别的出口会碰它，留着就是一个永久的死档。
+     * 摘掉之后，下一次 {@code ensureSection} 的 {@code contains} 变假，会重新建壳入池，因此是自愈的。
+     */
     private static void produce(ServerLevel level, SimulationSectionKey key) {
         SimulationSectionData data = SimulationStore.createEmpty(level, key);
-        SimulationTask task = new SimulationTask(key, data, PRODUCER);
-        SimulationPool.submitProduction(level, task, () -> finishProduction(level, key, data));
+        data.advanceTo(SimulationSectionStage.PROCESSING);
+        boolean submitted = SimulationPool.submitProduction(level, new SimulationTask(key, data, PRODUCER),
+                success -> finishProduction(level, key, data, success));
+        if (!submitted) {
+            SimulationStore.removeIfSame(level.dimension(), key, data);
+        }
     }
 
-    /** 生产收尾：段已被释放或被同坐标的新一代替换时丢弃本次结果。 */
-    private static void finishProduction(ServerLevel level, SimulationSectionKey key, SimulationSectionData data) {
+    /**
+     * 生产收尾，主线程。失败不升档，段停在 {@code PROCESSING}，等它离开视距时由 {@link #release} 丢弃。
+     *
+     * <p>
+     * 顺序是契约：判身份、写光、升档、置两个脏位。判身份在前，否则会往已经被替换掉的旧对象上白写一份；写光
+     * 在升档之前，因为唯一读光的两处都以终态为前置，反过来就会漏出「已终态而光是空的」的窗口。
+     */
+    private static void finishProduction(ServerLevel level, SimulationSectionKey key, SimulationSectionData data,
+            boolean success) {
+        if (!success) {
+            return;
+        }
         if (SimulationStore.get(level.dimension(), key) != data) {
             return;
         }
-        data.advanceTo(SimulationSectionStage.PROCESSED);
+        applyLight(data);
+        data.advanceTo(SimulationSectionStage.LIGHTED);
         data.markPersistDirty();
         data.markDirty();
+    }
+
+    /**
+     * 生产结束后的统一光照：天光 15、方块光 0。
+     *
+     * <p>
+     * 两级都走 {@code DataLayer.fill}，它只置默认值、不分配数组，所以这一步是两次字段写。填 0 的方块光保持
+     * 空层，落盘被省略、线上占一字节；填 15 的天光保持同质层，线上同样是一字节。
+     *
+     * <p>
+     * 不碰段容器、不碰光照引擎：模拟段的光只有这两个层承载，下发读它们、客户端装它们。
+     */
+    private static void applyLight(SimulationSectionData data) {
+        data.skyLight.fill(15);
+        data.blockLight.fill(0);
     }
 
     /** 关服时清掉读回在途集合与映射表缓存。段表由 {@code SimulationStore.clearAll} 清。 */

@@ -128,7 +128,17 @@ public final class SimulationServer {
         }
     }
 
-    /** 该玩家视距内的段：横向按圆盘，纵向按层枚举，与客户端原先的枚举同源。 */
+    /**
+     * 该玩家视距内的段：横向按圆盘，纵向取整窗，每段一个键。
+     *
+     * <p>
+     * 竖直方向不筛。视距内每一段都必须存在，空腔才有对象承载光：曾经按每 6 段一层枚举，段与段之间的空腔
+     * 没有对象，任何跨出段边界的取光都落到「无段」上得到 0，表现为段底发黑。那个周期如今只是生产者决定
+     * 在哪几层写方块的内容口径，见 {@code GrassPlaneProducer}。
+     *
+     * <p>
+     * 窗口不外扩：边缘的段都是空的，没有面可黑；圆盘边缘朝外的面背向观察者。
+     */
     private static View view(ServerPlayer player) {
         ExactPosition exact = (ExactPosition) player;
         long centerX = exact.farlands$cellCoord(ExactPosition.POS_X) >> 4;
@@ -139,15 +149,15 @@ public final class SimulationServer {
         boolean positioned = tracking instanceof ChunkTrackingView.Positioned;
         int radius = positioned ? ((ChunkTrackingView.Positioned) tracking).viewDistance() : 8;
         long radiusSqr = (long) radius * radius;
-        long[] bands = SimulationBands.sectionsNear(centerY);
+        int half = FarlandsConfig.verticalSimulationDistance;
         Set<SimulationSectionKey> keys = new HashSet<>();
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 if ((long) dx * dx + (long) dz * dz > radiusSqr) {
                     continue;
                 }
-                for (long band : bands) {
-                    keys.add(new SimulationSectionKey(centerX + dx, band, centerZ + dz));
+                for (long sy = centerY - half; sy <= centerY + half; sy++) {
+                    keys.add(new SimulationSectionKey(centerX + dx, sy, centerZ + dz));
                 }
             }
         }
@@ -176,7 +186,7 @@ public final class SimulationServer {
         List<SimulationSectionKey> candidates = new ArrayList<>();
         for (SimulationSectionKey key : view.keys()) {
             SimulationSectionData data = SimulationStore.get(dimension, key);
-            // 未建或内容未定：此刻发出去只能是空壳，留到它升到 PROCESSED 之后的某一 tick。
+            // 未建或内容未定：此刻发出去只能是空壳，留到它升到 LIGHTED 之后的某一 tick。
             if (data == null || !SimulationSectionStage.isTerminal(data.stage())) {
                 continue;
             }
