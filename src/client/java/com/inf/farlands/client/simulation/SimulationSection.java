@@ -1,13 +1,18 @@
 package com.inf.farlands.client.simulation;
 
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 
+import com.inf.farlands.simulation.SimulationSectionData;
 import com.inf.farlands.util.world.WorldBounds;
 
 import net.minecraft.core.Holder;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.DataLayer;
+import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.chunk.PalettedContainerFactory;
 import net.minecraft.world.level.chunk.PalettedContainerRO;
@@ -53,8 +58,8 @@ public final class SimulationSection {
     private volatile PalettedContainerRO<Holder<Biome>> biomes;
 
     /** 天光与方块光，四 bit 一格。默认 0 时是同质未分配层，不占数组。 */
-    private final DataLayer skyLight = new DataLayer();
-    private final DataLayer blockLight = new DataLayer();
+    private DataLayer skyLight = new DataLayer();
+    private DataLayer blockLight = new DataLayer();
 
     private final SimulationBlock[] slots = new SimulationBlock[SIZE * SIZE * SIZE];
 
@@ -183,6 +188,51 @@ public final class SimulationSection {
     /** 该段是否参与模拟。可玩界内的段为假。 */
     public boolean eligible() {
         return this.eligible;
+    }
+
+    /**
+     * 用服务端送来的一份内容整体替换本段：块、群系、两层光照与形状模式。
+     *
+     * <p>
+     * 失效段直接返回：可玩界内的段不参与模拟，服务端也不该发它们。
+     *
+     * <p>
+     * 模拟方块按 {@code BlockState} 建小表复用：同一状态共用一个实例，既省分配，也因为 {@link #set} 的
+     * {@code previous == block} 是引用比较。
+     *
+     * <p>
+     * 只在客户端主线程调，与包的分发点同线程。
+     */
+    public void applyContainer(LevelChunkSection container, int shapeMode, DataLayer blockLight, DataLayer skyLight) {
+        if (!this.eligible) {
+            return;
+        }
+        Arrays.fill(this.slots, null);
+        this.count = 0;
+        this.occupiedCount = 0;
+        this.biomes = container.getBiomes();
+        this.blockLight = blockLight == null ? new DataLayer() : blockLight;
+        this.skyLight = skyLight == null ? new DataLayer() : skyLight;
+        Map<BlockState, SimulationBlock> cache = new HashMap<>(8);
+        for (int y = 0; y < SIZE; y++) {
+            for (int z = 0; z < SIZE; z++) {
+                for (int x = 0; x < SIZE; x++) {
+                    BlockState state = container.getBlockState(x, y, z);
+                    if (state.isAir()) {
+                        continue;
+                    }
+                    SimulationBlock block = cache.computeIfAbsent(state,
+                            s -> shapeMode == SimulationSectionData.SHAPE_FULL ? SimulationBlock.full(s)
+                                    : SimulationBlock.of(s));
+                    int index = farlands$index(x, y, z);
+                    this.slots[index] = block;
+                    this.count++;
+                    this.farlands$occupy(index);
+                }
+            }
+        }
+        this.farlands$markDirty(0, 0, 0);
+        this.farlands$markDirty(SIZE - 1, SIZE - 1, SIZE - 1);
     }
 
     public int count() {

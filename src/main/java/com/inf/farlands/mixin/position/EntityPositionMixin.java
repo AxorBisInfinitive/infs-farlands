@@ -625,6 +625,15 @@ public abstract class EntityPositionMixin implements ExactPosition {
         this.farlands$exactSyncPending = true;
     }
 
+    @Override
+    public void farlands$applyExactPosition(Binary256 x, Binary256 y, Binary256 z) {
+        Binary256[] slots = this.farlands$exactSlots();
+        slots[POS_X] = x;
+        slots[POS_Y] = y;
+        slots[POS_Z] = z;
+        this.farlands$frameReady = false;
+    }
+
     /**
      * 在帧里加一段位移并写回。
      *

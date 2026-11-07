@@ -3,6 +3,7 @@ package com.inf.farlands;
 import com.inf.farlands.light.FarLandsLightEngine;
 import com.inf.farlands.serialize.SectionIO;
 import com.inf.farlands.serialize.SectionLifecycle;
+import com.inf.farlands.simulation.SimulationServer;
 import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.debug.StageMetrics;
 import com.inf.farlands.terrain.pipeline.NeighborhoodTickets;
@@ -249,6 +250,8 @@ public class FarlandsTick {
         }
         // 窗口差量、窗口外清理与派发，与阻塞等待期共用同一段，顺序与理由见 driveWindowAndTerrain。
         driveWindowAndTerrain(server);
+        // 模拟段的下发：读本 tick 已刷新的窗口与玩家表，所以在窗口驱动之后。
+        SimulationServer.tick(server);
         // 兼容层的每 tick 钩子，排在所有核心驱动之后：它只驱动本 port 之外的请求方，例如 Chunky 预生成。
         for (Consumer<MinecraftServer> sink : TICK_SINKS) {
             sink.accept(server);

@@ -154,6 +154,7 @@
     "outside.WorldBorderMixin",
     "simulation.ServerGamePacketListenerImplMixin",
     "position.EntityPositionMixin",
+    "position.EntityExactSaveMixin",
     "position.LivingEntityPositionMixin",
     "position.EnderDragonPositionMixin",
     "position.ShulkerPositionMixin",

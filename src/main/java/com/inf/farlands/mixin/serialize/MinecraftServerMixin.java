@@ -15,6 +15,8 @@ import com.inf.farlands.terrain.biomeSource.BiomeSourceFilter;
 import com.inf.farlands.terrain.decorationFiller.DecorationFiller;
 import com.inf.farlands.terrain.pipeline.GenQueue;
 import com.inf.farlands.terrain.pipeline.NeighborhoodTickets;
+import com.inf.farlands.simulation.SimulationServer;
+import com.inf.farlands.simulation.SimulationStore;
 import com.inf.farlands.terrain.pipeline.OwnershipTable;
 import com.inf.farlands.terrain.pipeline.Scheduler;
 import com.inf.farlands.terrain.pipeline.SpawnPreload;
@@ -82,6 +84,8 @@ public abstract class MinecraftServerMixin {
         SpawnPreload.clearAll();
         NeighborhoodTickets.clearWorldState();
         SystemsSender.clearWorldState();
+        SimulationStore.clearAll();
+        SimulationServer.clearWorldState();
         ChunkReadiness.clearAll();
         SectionStage.clearAll();
         EntitySectionWindow.clear();

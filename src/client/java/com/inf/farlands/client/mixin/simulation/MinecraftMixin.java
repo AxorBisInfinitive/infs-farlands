@@ -4,7 +4,6 @@ import com.inf.farlands.client.render.simulation.SimulationGeometry;
 import com.inf.farlands.client.render.simulation.SimulationRenderPass;
 import com.inf.farlands.client.simulation.Simulation;
 import com.inf.farlands.client.simulation.SimulationHolder;
-import com.inf.farlands.client.simulation.SimulationLayer;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
@@ -50,7 +49,7 @@ public abstract class MinecraftMixin implements SimulationHolder {
 
     @Inject(method = "setLevel(Lnet/minecraft/client/multiplayer/ClientLevel;)V", at = @At("RETURN"))
     private void farlands$simulateOnLevelInstall(ClientLevel level, CallbackInfo ci) {
-        this.simulation().setLayer(SimulationLayer.grassPlane(), level);
+        this.simulation().attach(level);
     }
 
     @Inject(method = "disconnect(Lnet/minecraft/client/gui/screens/Screen;ZZ)V", at = @At("RETURN"))

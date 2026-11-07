@@ -114,6 +114,15 @@ public interface ExactPosition {
     void farlands$adoptExact(Binary256 x, Binary256 y, Binary256 z,
             Binary256 oldX, Binary256 oldY, Binary256 oldZ);
 
+    /**
+     * 只写位置三槽，不动旧位置、不动 double 投影与缓存。
+     *
+     * <p>
+     * 给客户端上报的精确位置用：服务端的位置与物理仍由原版移动包驱动，这里只把真值补进槽位，供
+     * {@code cellCoord} 与段枚举取用。旧位置属于服务端自己，这条不碰。
+     */
+    void farlands$applyExactPosition(Binary256 x, Binary256 y, Binary256 z);
+
     /** 标记该实体这一 tick 有精确位置待同步。 */
     void farlands$markExactSync();
 

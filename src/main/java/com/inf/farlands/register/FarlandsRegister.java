@@ -75,9 +75,11 @@ public class FarlandsRegister {
             ClampStatePacketRegister.registerType();
             ClampTogglePacketRegister.registerType();
             ExactPositionPacketRegister.registerType();
+            ExactClientPositionPacketRegister.registerType();
             LightUpdatePacketRegister.registerType();
             SectionBlocksUpdatePacketRegister.registerType();
             SystemsPacketRegister.registerType();
+            SimulationSectionPacketRegister.registerType();
         }
     }
 
@@ -165,6 +167,7 @@ public class FarlandsRegister {
 
     public static void register() {
         ClampTogglePacketRegister.registerHandler();
+        ExactClientPositionPacketRegister.registerHandler();
         // 命令监听器只在此登记一次；Commands 每次重建（含数据包 reload）时由 CommandsMixin 统一 fire。
         FarlandsCommandRegistry.registerServer(FarLandsCommands::register);
         // Chunky 兼容层：装了它才登记命令与每 tick 钩子，没装时本调用直接返回。

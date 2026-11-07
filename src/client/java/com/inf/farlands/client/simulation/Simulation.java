@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.Set;
 
 import com.inf.farlands.client.render.simulation.SimulationGeometry;
+import com.inf.farlands.simulation.SimulationSectionKey;
 import com.inf.farlands.util.pos.ExactPosition;
 
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -16,21 +17,24 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.world.level.CardinalLighting;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Biomes;
+import net.minecraft.world.level.chunk.DataLayer;
+import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.PalettedContainerFactory;
 
 /**
- * 客户端的模拟方块层：生产者每 tick 写块，提交之后由渲染与碰撞两处统一消费，与服务端无关。
+ * 客户端的模拟方块层：段与内容由服务端的包写入，提交之后由渲染与碰撞两处统一消费。
  *
  * <p>
- * 刻意不经过 {@code BlockPos}、{@code SectionPos} 与段编译。段键是三轴 long，块在段内是 0 到 15 的局部
- * 坐标，世界位置由 {@link #delta} 给出：段原点与相机整数部分都在 long 上相减，差值是小整数，落 float 精确。
+ * 客户端不再有生产者。段的存在与否、内容、光照与群系全部来自 {@code SimulationSectionPacket}，与 {@code sections}
+ * 的生命周期因此完全由服务端驱动：包来了就建，包撤了就删。
  *
  * <p>
- * 段跨 tick 保留，生产者显式清除。可玩界内的段静默失效，见 {@link SimulationSection}。
+ * 刻意不经过 {@code BlockPos}、{@code SectionPos} 与段编译。段键是三轴 long，块在段内是 0 到 15 的局部坐标，
+ * 世界位置由渲染与拾取两处按相机相对量现算，不落回世界量级的 double。
  *
  * <p>
- * 线程：写与 {@link #commit} 只在客户端主线程；{@link #snapshot} 由渲染线程与碰撞读，发布的是不可变快照，
- * 每次提交整体换一次引用。
+ * 线程：写入与 {@link #commit} 只在客户端主线程，包的分发点 {@code ClientPayloadDispatchMixin} 已经保证这一条；
+ * {@link #snapshot} 由渲染线程与碰撞读，发布的是不可变快照，每次提交整体换一次引用。
  */
 public final class Simulation {
 
@@ -41,14 +45,11 @@ public final class Simulation {
 
     private volatile Snapshot snapshot = Snapshot.EMPTY;
 
-    /** 当前图层定义。为空表示没有自动模拟的层。 */
-    private SimulationLayer layer;
-
-    /** 建段用的群系容器工厂与默认群系，与层同一个入口设定，见 {@link #setLayer}。 */
+    /** 建段用的群系容器工厂与默认群系，与关卡同一个入口设定，见 {@link #attach}。 */
     private PalettedContainerFactory biomeFactory;
     private Holder<Biome> defaultBiome;
 
-    /** 该维度的方向明暗，与层同一个入口设定。 */
+    /** 该维度的方向明暗，与关卡同一个入口设定。 */
     private CardinalLighting cardinalLighting = CardinalLighting.DEFAULT;
 
     /**
@@ -60,37 +61,24 @@ public final class Simulation {
      */
     private ClientLevel clientLevel;
 
-    /**
-     * 自动圆盘管理的列，键是三轴段坐标，即「列乘层」。一个列在本 tick 的每一层上各占一个键。
-     *
-     * <p>
-     * 它只是圆盘的绑定记录，不是渲染的前置条件：渲染集合是 {@code sections}。别再把两者当成一件事。
-     */
-    private final Set<SectionKey> boundColumns = new HashSet<>();
-
-    /** 几何尚未烘的段。每 tick 按到玩家的距离取最近的一批。 */
+    /** 几何尚未烘的段。每 tick 按到相机的距离取最近的一批。 */
     private final Set<SectionKey> pending = new HashSet<>();
 
-    /** 每 tick 烘几段几何，把建立成本摊开。取最近的那几列。 */
+    /** 每 tick 烘几段几何，把建立成本摊开。取最近的那几段。 */
     private static final int BUILD_PER_TICK = 8;
 
     /**
-     * 换层或退世界时调。层为空即没有自动圆盘，手动建的段仍会被烘制与提交。
+     * 装关卡或退世界时调。客户端不再有生产者：段与它的内容都从服务端的包来。
      *
      * <p>
-     * 段的群系容器要从该 level 的工厂建，默认群系取 void，所以两样与层同源、在同一处设定：三件一起换，
-     * 不会出现层是新世界的而工厂是旧世界的。
-     *
-     * <p>
-     * 段容器与显存一并清空：换层之后旧层的段没有意义，几何也不再被任何 draw 引用。
+     * 段的群系容器要从该 level 的工厂建，默认群系取 void，所以三件在同一处设定：不会出现关卡是新世界的而工厂
+     * 是旧世界的。段容器与显存一并清空：换关卡之后旧的段没有意义，几何也不再被任何 draw 引用。
      */
-    public void setLayer(SimulationLayer layer, ClientLevel level) {
-        this.layer = layer;
+    public void attach(ClientLevel level) {
         this.clientLevel = level;
         this.biomeFactory = level.palettedContainerFactory();
         this.defaultBiome = level.registryAccess().lookupOrThrow(Registries.BIOME).getOrThrow(Biomes.THE_VOID);
         this.cardinalLighting = level.cardinalLighting();
-        this.boundColumns.clear();
         this.pending.clear();
         this.sections.clear();
         this.structureChanged = true;
@@ -99,31 +87,26 @@ public final class Simulation {
     }
 
     /**
-     * 一列在给定的层上进入圆盘：逐层绑定并各跑一次生产者。
+     * 应用服务端送来的一段。
      *
      * <p>
-     * 绑定与客户端有没有这一列的 chunk 无关，判据只有「在不在圆盘里」。
+     * 段不存在就建，已存在就整体替换；随后入待烘集合并置结构变更，由下一次 {@link #commit} 发布新快照。
+     * 只在客户端主线程调，与服务端那段包的处理点同线程。
      */
-    private void farlands$bind(SimulationLayer current, long chunkX, long chunkZ, long[] sectionYs) {
-        for (long sectionY : sectionYs) {
-            SectionKey key = new SectionKey(chunkX, sectionY, chunkZ);
-            if (!this.boundColumns.add(key)) {
-                continue;
-            }
-            SimulationSection section = this.section(key);
-            current.produce(section);
-            this.pending.add(key);
-            this.farlands$requeueNeighbors(key);
-        }
+    public void applySection(SimulationSectionKey key, LevelChunkSection container,
+            int shapeMode, DataLayer blockLight, DataLayer skyLight) {
+        SectionKey local = new SectionKey(key.x(), key.y(), key.z());
+        SimulationSection section = this.section(local);
+        section.applyContainer(container, shapeMode, blockLight, skyLight);
+        this.pending.add(local);
+        this.structureChanged = true;
     }
 
-    /** 一列离开圆盘：摘段。显存由调用方批量释放，一趟一条 fence。 */
-    private void farlands$unbind(SectionKey key) {
-        if (!this.boundColumns.remove(key)) {
-            return;
-        }
-        this.farlands$detach(key);
+    /** 丢掉服务端撤回的一段。 */
+    public void dropSection(SimulationSectionKey key) {
+        this.removeSection(new SectionKey(key.x(), key.y(), key.z()));
     }
+
 
     /**
      * 摘段但不碰显存：从 {@code sections} 与待烘集合摘掉，并把邻列放回待烘。
@@ -167,83 +150,23 @@ public final class Simulation {
     }
 
     /**
-     * 每 tick 一次：按玩家圆盘对账绑定、按距离限量烘几何、发布快照。
+     * 每客户端 tick 一次：按距离限量烘几何、发布快照。
      *
      * <p>
-     * 半径取客户端渲染距离，不另设上限。绑定与客户端有没有那些 chunk 无关：圆盘覆盖到的列一律有段，于是碰撞、
-     * 线框与渲染都不依赖 chunk 是否存在。
+     * 绑定与解绑不在这里：段集合完全由服务端的包驱动。这里只负责把待烘的那批烘掉，再按脏段重建快照。
      */
-    public void tickSimulation(ClientLevel level) {
-        SimulationLayer current = this.layer;
+    public void tickSimulation() {
         net.minecraft.client.Minecraft minecraft = net.minecraft.client.Minecraft.getInstance();
         net.minecraft.world.entity.player.Player player = minecraft.player;
-        if (current != null && player != null) {
-            int radius = minecraft.options.renderDistance().get();
-            // 中心取精确格号：getX() 是 double 投影，2^60 处只能给出 256 格的整数倍，圆盘边界会以 16 段为步长跳。
+        if (player == null) {
+            this.farlands$buildNearest();
+        } else {
             ExactPosition exact = (ExactPosition) player;
             long centerX = exact.farlands$cellCoord(ExactPosition.POS_X) >> 4;
-            long centerY = exact.farlands$cellCoord(ExactPosition.POS_Y) >> 4;
             long centerZ = exact.farlands$cellCoord(ExactPosition.POS_Z) >> 4;
-            this.farlands$reconcileDisc(current, centerX, centerY, centerZ, radius);
             this.farlands$buildNearest(centerX, centerZ);
-        } else {
-            this.farlands$buildNearest();
         }
         this.commit();
-    }
-
-    /**
-     * 圆盘对账：出圆盘的解绑并批量释放几何，进圆盘的绑定。
-     *
-     * <p>
-     * 解绑判据有两条：XZ 与中心的平方距离超过半径平方，或所在的层不在本 tick 的层列表里。后者管竖直方向的进出，
-     * 玩家的 Y 一变，旧的层就整层离开窗口。
-     *
-     * <p>
-     * 覆盖取圆而不是方：同一半径下方形会把四角也绑上，而那几列在等距之外。判据用平方距离，避免开方。
-     *
-     * <p>
-     * 释放走一次 fence：瞬移或视距变化时会有成百上千列同时解绑，逐列建 fence 会把主线程按在 GPU 上。
-     */
-    private void farlands$reconcileDisc(SimulationLayer current, long centerX, long centerY, long centerZ,
-            int radius) {
-        long[] sectionYs = current.sectionsNear(centerY);
-        long radiusSqr = (long) radius * (long) radius;
-        List<SectionKey> stale = null;
-        for (SectionKey key : this.boundColumns) {
-            long dx = key.x() - centerX;
-            long dz = key.z() - centerZ;
-            if (dx * dx + dz * dz > radiusSqr || !farlands$inLayers(key.y(), sectionYs)) {
-                if (stale == null) {
-                    stale = new ArrayList<>();
-                }
-                stale.add(key);
-            }
-        }
-        if (stale != null) {
-            for (SectionKey key : stale) {
-                this.farlands$unbind(key);
-            }
-            SimulationGeometry.instance().releaseAll(stale);
-        }
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dz = -radius; dz <= radius; dz++) {
-                if ((long) dx * dx + (long) dz * dz > radiusSqr) {
-                    continue;
-                }
-                this.farlands$bind(current, centerX + dx, centerZ + dz, sectionYs);
-            }
-        }
-    }
-
-    /** 该段号是否在本 tick 的层列表里。列表至多三个元素，线性扫即可。 */
-    private static boolean farlands$inLayers(long sectionY, long[] sectionYs) {
-        for (long candidate : sectionYs) {
-            if (candidate == sectionY) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /**
@@ -368,7 +291,6 @@ public final class Simulation {
     /** 全部清空。卸关卡时调用。 */
     public void clear() {
         this.clientLevel = null;
-        this.boundColumns.clear();
         this.pending.clear();
         this.sections.clear();
         this.structureChanged = true;

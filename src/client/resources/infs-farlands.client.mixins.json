@@ -76,6 +76,7 @@
     "position.GuardianRendererPositionMixin",
     "position.AvatarRendererPositionMixin",
     "position.LocalPlayerPositionMixin",
+    "position.LocalPlayerExactPositionMixin",
     "position.DragonBeamMixin",
     "position.FishingLineMixin",
     "position.LeashOffsetMixin",

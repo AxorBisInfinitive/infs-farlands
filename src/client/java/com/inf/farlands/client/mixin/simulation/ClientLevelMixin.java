@@ -25,7 +25,6 @@ public class ClientLevelMixin {
 
     @Inject(method = "tick(Ljava/util/function/BooleanSupplier;)V", at = @At("RETURN"))
     private void farlands$tickSimulation(BooleanSupplier haveTime, CallbackInfo ci) {
-        ((SimulationHolder) Minecraft.getInstance()).simulation()
-                .tickSimulation((ClientLevel) (Object) this);
+        ((SimulationHolder) Minecraft.getInstance()).simulation().tickSimulation();
     }
 }
