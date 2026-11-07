@@ -246,7 +246,7 @@ public final class SimulationLifecycle {
     }
 
     /**
-     * 建空壳、标 {@code PROCESSING}、把生产交给池。
+     * 建空壳、标 {@code NOISE}、把生产交给池。
      *
      * <p>
      * 提交被拒时要摘掉这一格：池只在关闭时拒绝，而那一格之后再没有别的出口会碰它，留着就是一个永久的死档。
@@ -254,7 +254,7 @@ public final class SimulationLifecycle {
      */
     private static void produce(ServerLevel level, SimulationSectionKey key) {
         SimulationSectionData data = SimulationStore.createEmpty(level, key);
-        data.advanceTo(SimulationSectionStage.PROCESSING);
+        data.advanceTo(SimulationSectionStage.NOISE);
         boolean submitted = SimulationPool.submitProduction(level, new SimulationTask(key, data, PRODUCER),
                 success -> finishProduction(level, key, data, success));
         if (!submitted) {
@@ -263,7 +263,7 @@ public final class SimulationLifecycle {
     }
 
     /**
-     * 生产收尾，主线程。失败不升档，段停在 {@code PROCESSING}，等它离开视距时由 {@link #release} 丢弃。
+     * 生产收尾，主线程。失败不升档，段停在 {@code NOISE}，等它离开视距时由 {@link #release} 丢弃。
      *
      * <p>
      * 顺序是契约：判身份、写光、升档、置两个脏位。判身份在前，否则会往已经被替换掉的旧对象上白写一份；写光

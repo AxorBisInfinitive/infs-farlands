@@ -33,7 +33,7 @@ public final class SimulationSectionData {
 
     /**
      * 阶段，取值见 {@link SimulationSectionStage}。建段时是 {@code UNPROCESSED}，入池生产时推到
-     * {@code PROCESSING}，生产成功并写完统一光照之后推到 {@code LIGHTED}，此后不再变。
+     * {@code NOISE}，生产成功并写完统一光照之后推到 {@code LIGHTED}，此后不再变。
      *
      * <p>
      * volatile 只作保险：今天的写方与读方都在服务端主线程，容器内容的可见性由提交到主线程那一步的队列边界给出。
