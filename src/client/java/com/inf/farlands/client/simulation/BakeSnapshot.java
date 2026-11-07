@@ -19,7 +19,7 @@ import net.minecraft.world.level.biome.Biome;
  *
  * <p>
  * {@code neighbors} 是主线程解析好的 27 格邻域。工作线程不查 {@code Simulation.sections}，那是普通 HashMap，
- * 主线程在收包与卸载时增删它。
+ * 主线程在收包与卸载时增删它。{@code missing} 是这份邻域里缺席的那些位的掩码，供邻段后到时定向重烘。
  *
  * <p>
  * {@code revision} 与 {@code generation} 都在主线程写作与比较，工作线程只从快照里读，靠提交队列的发布关系可见。
@@ -33,6 +33,7 @@ record BakeSnapshot(
         int[] occupied,
         int occupiedCount,
         SimulationSection[] neighbors,
+        int missing,
         Holder<Biome> defaultBiome,
         BlockColors blockColors,
         BlockStateModelSet models,

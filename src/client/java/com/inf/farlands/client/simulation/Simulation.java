@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.inf.farlands.InfsFarlands;
 import com.inf.farlands.client.render.simulation.SimulationGeometry;
 import com.inf.farlands.simulation.model.SimulationSectionKey;
 import com.inf.farlands.util.pos.ExactPosition;
@@ -82,6 +83,34 @@ public final class Simulation {
     private int visibilityTick = -1;
 
     /**
+     * 几何变化触发的可见集重算最小间隔，单位 tick。
+     *
+     * <p>
+     * 遮挡传播现在带射线门，一次全量约 45 ms，不能每 tick 跑。相机跨 Section 不受这个间隔约束，那一变必须当帧
+     * 生效；几何变化最多滞后这个间隔，表现为新段晚半秒出现。
+     */
+    private static final int VISIBILITY_INTERVAL = 10;
+
+    /**
+     * 临时读数，结案即删：一个间隔内的收包、段数、烘制、上传、释放与待烘堆，全在客户端主线程读写。
+     *
+     * <p>
+     * 判两件事：{@code sectionsIn} 与 {@code packets} 的比值即每包段数；{@code pendingNow} 若单调上升，说明到达
+     * 速率大于烘制速率，否则说明到达的是重复内容。
+     */
+    private int probePackets;
+
+    private int probeSectionsIn;
+
+    private int probeBuilds;
+
+    private int probeUploads;
+
+    private int probeReleases;
+
+    private int probePendingPeak;
+
+    /**
      * 每 tick 烘几段几何，取最近的那几段。
      *
      * <p>
@@ -138,7 +167,7 @@ public final class Simulation {
             this.section(local).applyAir(container, blockLight, skyLight);
             SimulationGeometry.instance().release(local);
             this.farlands$clearTintAround(local);
-            this.farlands$requeueNeighbors(local);
+            this.farlands$requeueFilledAround(local);
             this.structureChanged = true;
             this.visibilityDirty = true;
             return;
@@ -193,14 +222,11 @@ public final class Simulation {
     }
 
     /**
-     * 邻段重烘：邻段的存在性也是烘制输入。
+     * 邻段消失时的全量重烘。
      *
      * <p>
-     * 剔除跨段查邻块，光与群系也在段边界外采样，所以一段的绑定或解绑会让邻段的烘制结果变旧。数据变更走
-     * {@code farlands$requeueGeometry} 的扩散，这条只补绑定与解绑；不补的话，邻段解绑后边界那一面会缺。
-     *
-     * <p>
-     * 只放回存在的六向邻段，对角不需要：剔除与角采样只沿面方向。存在性变化没有脏范围可判，六个面邻段一律带上。
+     * 一段被摘掉，它周围每一段的几何都可能变：面剔除只跨一格，环境光遮蔽的角采样与群系混合还会落到对角邻段。
+     * 摘除让邻段从「有」变「无」，没有掩码可用，所以这一支把 26 个邻位一律放回待烘。
      */
     private void farlands$requeueNeighbors(SectionKey key) {
         for (int dx = -1; dx <= 1; dx++) {
@@ -212,6 +238,38 @@ public final class Simulation {
                     SectionKey neighbor = new SectionKey(key.x() + dx, key.y() + dy, key.z() + dz);
                     if (this.sections.containsKey(neighbor)) {
                         this.pending.add(neighbor);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 邻段到达时的定向重烘：只放回「烘制那一版几何时确实缺了这一格」的邻段。
+     *
+     * <p>
+     * 判据落在对方的 {@link SimulationSection#missing()} 上。邻段 M 相对自己看，本段位于 {@code M + (-d)}，所以查
+     * 的位是 {@code (-dx + 1) * 9 + (-dy + 1) * 3 + (-dz + 1)}，与快照里的位序同一套。
+     *
+     * <p>
+     * 全量的那一支换来的是正确性，这一支换来的是次数：一段若是等邻域齐了才烘的，它的掩码里没有这一位，后到的邻段
+     * 就不会替它排一次队。实测的每段烘制次数由此从 4.588 次往下走。
+     */
+    private void farlands$requeueFilledAround(SectionKey key) {
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    if (dx == 0 && dy == 0 && dz == 0) {
+                        continue;
+                    }
+                    SectionKey neighborKey = new SectionKey(key.x() + dx, key.y() + dy, key.z() + dz);
+                    SimulationSection neighbor = this.sections.get(neighborKey);
+                    if (neighbor == null) {
+                        continue;
+                    }
+                    int bit = (-dx + 1) * 9 + (-dy + 1) * 3 + (-dz + 1);
+                    if ((neighbor.missing() & (1 << bit)) != 0) {
+                        this.pending.add(neighborKey);
                     }
                 }
             }
@@ -237,6 +295,36 @@ public final class Simulation {
                     exact.farlands$cellCoord(ExactPosition.POS_Z) >> 4, true);
         }
         this.commit();
+        this.farlands$reportProbe();
+    }
+
+    /**
+     * 临时读数，结案即删：记一次收包与它带的段数。
+     *
+     * <p>
+     * 由包处理入口调，与 {@link #applySection} 同线程。
+     */
+    public void notePacket(int sections) {
+        this.probePackets++;
+        this.probeSectionsIn += sections;
+    }
+
+    /** 临时读数，结案即删：每 200 tick 打一行，随后清零。 */
+    private void farlands$reportProbe() {
+        this.probePendingPeak = Math.max(this.probePendingPeak, this.pending.size());
+        if (this.tickCount % 200 != 0) {
+            return;
+        }
+        InfsFarlands.LOGGER.info(
+                "FLMESH packets={} sectionsIn={} builds={} uploads={} releases={} pendingNow={} pendingPeak={}",
+                this.probePackets, this.probeSectionsIn, this.probeBuilds, this.probeUploads, this.probeReleases,
+                this.pending.size(), this.probePendingPeak);
+        this.probePackets = 0;
+        this.probeSectionsIn = 0;
+        this.probeBuilds = 0;
+        this.probeUploads = 0;
+        this.probeReleases = 0;
+        this.probePendingPeak = 0;
     }
 
     /**
@@ -276,52 +364,53 @@ public final class Simulation {
                 SimulationGeometry.instance().release(key);
                 section.setVisibility(SimulationVisibility.OPEN);
                 this.visibilityDirty = true;
+                this.probeReleases++;
                 continue;
             }
+            this.probeBuilds++;
+            section.setMissing(snapshot.missing());
             section.setVisibility(build.visibility());
             this.visibilityDirty = true;
             if (build.mesh() == null) {
                 SimulationGeometry.instance().release(key);
+                this.probeReleases++;
             } else {
                 SimulationGeometry.instance().upload(key, build.mesh());
+                this.probeUploads++;
             }
         }
     }
 
     /**
-     * 选最近的一批提交到烘焙池。
+     * 从上一帧的可见集里挑一批提交到烘焙池。
      *
      * <p>
-     * 先进先出在半径 32 时会让脚下的草等半分钟，按距离取之后近的先出。距离取平方，与圆盘判据同一把尺，不必开方，
-     * 也不会因为量纲不同把四个斜角排到后面。
+     * 选谁烘的判据是「会被画」而不是「住得近」：看不见的段即使烘出来也只会占着显存与带宽，所以候选只取可见集与
+     * 待烘集的交集。原先按待烘集取最近的做法会把整个窗口都烘一遍，而窗口是 112,315 段。
+     *
+     * <p>
+     * 可见集来自上一帧的遮挡传播，读它有一帧滞后；一帧之内新进的段最多晚一帧加一次烘制出现。
      *
      * <p>
      * 每 tick 提交量受两个上限夹住：一段一批的配额，与烘焙池的空余名额。后者存在的理由不是省内存，而是防积压，
      * 一段的内容在途期间可能又变了。
      *
      * <p>
-     * 无玩家基准时不排序，按 {@code pending} 的迭代顺序取：段号在模拟之地是两亿级，拿 {@code (0, 0)} 当中心会把
-     * 远处的列排到前面。
+     * 无玩家基准时不排序，按可见集的顺序取：段号在模拟之地是两亿级，拿 {@code (0, 0)} 当中心会把远处的列排到前面。
      */
     private void farlands$submit(long centerX, long centerZ, boolean positioned) {
         int quota = Math.min(BUILD_PER_TICK, SimulationMeshPool.freeSlots());
         if (quota <= 0 || this.pending.isEmpty()) {
             return;
         }
-        int want = Math.min(quota, this.pending.size());
-        SectionKey[] picked = new SectionKey[want];
-        int found;
-        if (positioned) {
-            found = this.farlands$pickNearest(picked, centerX, centerZ);
-        } else {
-            found = 0;
-            for (SectionKey key : this.pending) {
-                if (found == want) {
-                    break;
-                }
-                picked[found++] = key;
-            }
+        List<SnapSection> visible = this.visibility.sections();
+        if (visible.isEmpty()) {
+            return;
         }
+        SectionKey[] picked = new SectionKey[quota];
+        int found = positioned
+                ? this.farlands$pickNearestVisible(visible, picked, centerX, centerZ)
+                : this.farlands$takeFirstVisible(visible, picked);
         for (int i = 0; i < found; i++) {
             SectionKey key = picked[i];
             this.pending.remove(key);
@@ -338,17 +427,21 @@ public final class Simulation {
     }
 
     /**
-     * 把最近的 {@code picked.length} 个待烘段填进 {@code picked}，返回实际填了几个。
+     * 把可见集里最近的若干个待烘段填进 {@code picked}，返回实际填了几个。
      *
      * <p>
-     * 选取用容量等于本批配额的固定最大堆，堆顶是已选中最远的一个。候选只与堆顶比一次，近了才替换并下沉。逐候选
-     * 线性找最大在配额上百、待烘上万时是千万次比较，与烘制本身同量级。
+     * 选取用容量等于本批配额的固定最大堆，堆顶是已选中最远的一个。候选只与堆顶比一次，近了才替换并下沉。
      */
-    private int farlands$pickNearest(SectionKey[] picked, long centerX, long centerZ) {
+    private int farlands$pickNearestVisible(List<SnapSection> visible, SectionKey[] picked, long centerX,
+            long centerZ) {
         int want = picked.length;
         long[] distances = new long[want];
         int size = 0;
-        for (SectionKey key : this.pending) {
+        for (SnapSection snap : visible) {
+            SectionKey key = snap.key();
+            if (!this.pending.contains(key)) {
+                continue;
+            }
             long dx = key.x() - centerX;
             long dz = key.z() - centerZ;
             long distance = dx * dx + dz * dz;
@@ -366,6 +459,22 @@ public final class Simulation {
             }
         }
         return size;
+    }
+
+    /** 没有玩家基准时按可见集的顺序取，不做距离排序。 */
+    private int farlands$takeFirstVisible(List<SnapSection> visible, SectionKey[] picked) {
+        int want = picked.length;
+        int found = 0;
+        for (SnapSection snap : visible) {
+            if (found == want) {
+                break;
+            }
+            SectionKey key = snap.key();
+            if (this.pending.contains(key)) {
+                picked[found++] = key;
+            }
+        }
+        return found;
     }
 
     /** 新入堆的元素上浮到它在最大堆里的位置。 */
@@ -416,17 +525,22 @@ public final class Simulation {
      */
     private BakeSnapshot farlands$snapshot(SectionKey key, SimulationSection section) {
         SimulationSection[] neighbors = new SimulationSection[27];
+        int missing = 0;
         for (int dx = -1; dx <= 1; dx++) {
             for (int dy = -1; dy <= 1; dy++) {
                 for (int dz = -1; dz <= 1; dz++) {
-                    neighbors[(dx + 1) * 9 + (dy + 1) * 3 + (dz + 1)] =
-                            this.sectionOrNull(key.x() + dx, key.y() + dy, key.z() + dz);
+                    int index = (dx + 1) * 9 + (dy + 1) * 3 + (dz + 1);
+                    SimulationSection neighbor = this.sectionOrNull(key.x() + dx, key.y() + dy, key.z() + dz);
+                    neighbors[index] = neighbor;
+                    if (neighbor == null) {
+                        missing |= 1 << index;
+                    }
                 }
             }
         }
         net.minecraft.client.Minecraft minecraft = net.minecraft.client.Minecraft.getInstance();
         return new BakeSnapshot(key, this.generation, section.revision(), section, section.occupiedSnapshot(),
-                section.occupiedCount(), neighbors, this.defaultBiome, minecraft.getBlockColors(),
+                section.occupiedCount(), neighbors, missing, this.defaultBiome, minecraft.getBlockColors(),
                 minecraft.getModelManager().getBlockStateModelSet(), this.cardinalLighting,
                 minecraft.options.ambientOcclusion().get(), minecraft.options.biomeBlendRadius().get());
     }
@@ -506,7 +620,7 @@ public final class Simulation {
         double inSectionY = cameraLocalY - Math.floor(cameraLocalY) + (double) (blockY - (sectionY << 4));
         double inSectionZ = cameraLocalZ - Math.floor(cameraLocalZ) + (double) (blockZ - (sectionZ << 4));
         boolean moved = !this.visibility.matches(sectionX, sectionY, sectionZ);
-        if (moved || (this.visibilityDirty && this.visibilityTick != this.tickCount)) {
+        if (moved || (this.visibilityDirty && this.tickCount - this.visibilityTick >= VISIBILITY_INTERVAL)) {
             this.visibility.rebuild(this, sectionX, sectionY, sectionZ, inSectionX, inSectionY, inSectionZ);
             this.visibilityDirty = false;
             this.visibilityTick = this.tickCount;
@@ -599,6 +713,10 @@ public final class Simulation {
      * 段内部写入只重烘本段。
      *
      * <p>
+     * 邻段还要再过一道掩码：只有当它烘制当前这一版几何时本段还缺席，才值得重烘。本段自己不受这一道约束，它总
+     * 要重烘。这一道把「每到达一段就替 26 个邻段各排一次队」压成「只替当时确实缺了它的那些段排队」。
+     *
+     * <p>
      * 只放回存在的段：未建的段放回去也只会在烘制时被跳过。
      */
     private void farlands$requeueGeometry(SimulationSection section, SimulationSection.Dirty dirty, int reach) {
@@ -624,9 +742,17 @@ public final class Simulation {
                         continue;
                     }
                     SectionKey key = new SectionKey(centerX + dx, centerY + dy, centerZ + dz);
-                    if (this.sections.containsKey(key)) {
-                        this.pending.add(key);
+                    SimulationSection neighbor = this.sections.get(key);
+                    if (neighbor == null) {
+                        continue;
                     }
+                    if (dx != 0 || dy != 0 || dz != 0) {
+                        int bit = (-dx + 1) * 9 + (-dy + 1) * 3 + (-dz + 1);
+                        if ((neighbor.missing() & (1 << bit)) == 0) {
+                            continue;
+                        }
+                    }
+                    this.pending.add(key);
                 }
             }
         }

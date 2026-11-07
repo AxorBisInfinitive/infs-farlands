@@ -54,6 +54,34 @@ public final class SimulationLifecycle {
 
     private static final Set<PendingKey> LOADING = new HashSet<>();
 
+    /** 临时读数，结案即删：命中、未命中、生产、读回、释放五档，全在服务端主线程自增。 */
+    private static int probeHit;
+
+    private static int probeMiss;
+
+    private static int probeProduce;
+
+    private static int probeReadback;
+
+    private static int probeRelease;
+
+    /**
+     * 临时读数，结案即删：取走五档计数并清零。
+     *
+     * <p>
+     * 命中与未命中判的是 {@code SimulationStore.contains}；生产与读回分开计，是为了把「键没了又被建回来」与
+     * 「盘上有数据要读回」两种成因分开。
+     */
+    static int[] takeProbe() {
+        int[] out = new int[] { probeHit, probeMiss, probeProduce, probeReadback, probeRelease };
+        probeHit = 0;
+        probeMiss = 0;
+        probeProduce = 0;
+        probeReadback = 0;
+        probeRelease = 0;
+        return out;
+    }
+
     private SimulationLifecycle() {
     }
 
@@ -66,9 +94,11 @@ public final class SimulationLifecycle {
     public static void ensureSection(ServerLevel level, SimulationSectionKey key) {
         ResourceKey<Level> dimension = level.dimension();
         if (SimulationStore.contains(dimension, key)) {
+            probeHit++;
             SimulationStore.unmarkReleasing(dimension, key);
             return;
         }
+        probeMiss++;
         PendingKey pending = new PendingKey(dimension, key);
         if (!LOADING.add(pending)) {
             return; // 上一次读回还没回来，等它的回调
@@ -97,6 +127,7 @@ public final class SimulationLifecycle {
         }
         List<SimulationIO.SlotKey> keys = List
                 .of(new SimulationIO.SlotKey(key.x(), key.y(), key.z(), ref));
+        probeReadback++;
         SimulationIO.submitRead(level, path, keys, level.palettedContainerFactory(),
                 decoded -> finishRead(level, key, pending, decoded));
     }
@@ -114,6 +145,7 @@ public final class SimulationLifecycle {
         if (data == null || data.isReleasing()) {
             return;
         }
+        probeRelease++;
         if (!SimulationSectionStage.isTerminal(data.stage())) {
             // 没写完的段没有落盘价值：盘上要么没有它，要么是更早的一份。
             SimulationStore.removeIfSame(dimension, key, data);
@@ -258,6 +290,7 @@ public final class SimulationLifecycle {
      * 摘掉之后，下一次 {@code ensureSection} 的 {@code contains} 变假，会重新建壳入池，因此是自愈的。
      */
     private static void produce(ServerLevel level, SimulationSectionKey key) {
+        probeProduce++;
         SimulationSectionData data = SimulationStore.createEmpty(level, key);
         data.advanceTo(SimulationSectionStage.NOISE);
         boolean submitted = SimulationPool.submitProduction(level,

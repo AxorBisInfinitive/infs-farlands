@@ -48,6 +48,52 @@ public final class SimulationServer {
     /** 临时读数，用完删除：上一 tick 的并集大小与存储大小。 */
     private static final Map<ResourceKey<Level>, int[]> LAST_TICK = new HashMap<>();
 
+    /**
+     * 临时读数，结案即删：一个间隔内的累计量与最近一次的存量，全在服务端主线程读写。
+     *
+     * <p>
+     * 判三件事：{@code sendResent} 高而 {@code sendNew} 低说明是同一批键被反复重发；{@code ensureMiss} 与
+     * {@code produce} 非零且伴随 {@code release} 说明键在释放与重建之间打转；{@code clearDirty} 远小于
+     * 发送数则是清除条件没成立。
+     */
+    private static int probeSendNew;
+
+    private static int probeSendResent;
+
+    private static int probeClearDirty;
+
+    private static int probeStore;
+
+    private static int probeUnion;
+
+    private static int probeSent;
+
+    private static int probeSamples;
+
+    private static int probeTicks;
+
+    private static void farlands$reportProbe() {
+        int[] core = SimulationLifecycle.takeProbe();
+        InfsFarlands.LOGGER.info(
+                "FLSIM2 store={} union={} sent={} ensureHit={} ensureMiss={} produce={} readback={} release={} sendNew={} sendResent={} clearDirty={}",
+                probeStore, probeUnion, probeSent, core[0], core[1], core[2], core[3], core[4], probeSendNew,
+                probeSendResent, probeClearDirty);
+        probeSendNew = 0;
+        probeSendResent = 0;
+        probeClearDirty = 0;
+        probeSamples = 0;
+    }
+
+    /** 临时读数，结案即删：每个间隔最多 8 条被重发的键，带档位与脏位。 */
+    private static void farlands$resentSample(SimulationSectionKey key, SimulationSectionData data) {
+        if (probeSamples >= 8) {
+            return;
+        }
+        probeSamples++;
+        InfsFarlands.LOGGER.info("FLSIM2 resent key={},{},{} stage={} dirty={}", key.x(), key.y(), key.z(),
+                data.stage(), data.isDirty());
+    }
+
     private SimulationServer() {
     }
 
@@ -63,6 +109,9 @@ public final class SimulationServer {
             tickLevel(level, roster);
         }
         SENT.keySet().retainAll(roster);
+        if (++probeTicks % 200 == 0) {
+            farlands$reportProbe();
+        }
     }
 
     private static void tickLevel(ServerLevel level, Set<UUID> roster) {
@@ -72,6 +121,7 @@ public final class SimulationServer {
             for (SimulationSectionKey key : SimulationStore.keys(dimension)) {
                 SimulationLifecycle.release(level, key);
             }
+            probeStore = SimulationStore.size(dimension);
             return;
         }
 
@@ -87,6 +137,7 @@ public final class SimulationServer {
                 wantCount.merge(key, 1, Integer::sum);
             }
         }
+        probeUnion = union.size();
 
         for (SimulationSectionKey key : union) {
             SimulationLifecycle.ensureSection(level, key);
@@ -96,6 +147,7 @@ public final class SimulationServer {
                 SimulationLifecycle.release(level, key);
             }
         }
+        probeStore = SimulationStore.size(dimension);
 
         int[] totals = new int[2];
         Map<SimulationSectionKey, Integer> queued = new HashMap<>();
@@ -107,6 +159,7 @@ public final class SimulationServer {
             SimulationSectionData data = SimulationStore.get(dimension, entry.getKey());
             if (data != null && entry.getValue() >= wantCount.getOrDefault(entry.getKey(), 0)) {
                 data.clearDirty();
+                probeClearDirty++;
             }
         }
         // 临时读数，用完删除。
@@ -182,6 +235,7 @@ public final class SimulationServer {
             return true;
         });
         farlands$removalReadout(dimension, view, removed);
+        probeSent = sent.size();
 
         List<SimulationSectionKey> candidates = new ArrayList<>();
         for (SimulationSectionKey key : view.keys()) {
@@ -212,10 +266,17 @@ public final class SimulationServer {
             if (used > 0 && used + size > budget) {
                 break;
             }
+            boolean resent = sent.contains(key);
             loaded.add(SimulationSectionPacket.encode(key, data));
             used += size;
             sent.add(key);
             queued.merge(key, 1, Integer::sum);
+            if (resent) {
+                probeSendResent++;
+                farlands$resentSample(key, data);
+            } else {
+                probeSendNew++;
+            }
         }
         totals[0] += loaded.size();
         totals[1] += removed.size();

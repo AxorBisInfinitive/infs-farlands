@@ -34,6 +34,8 @@ public final class SimulationSectionPacketRegister {
                 return;
             }
             Simulation simulation = ((SimulationHolder) minecraft).simulation();
+            // 临时读数，结案即删：记一个包与它带的段数。
+            simulation.notePacket(payload.loaded().size());
             for (SimulationSectionPacket.SectionEntry entry : payload.loaded()) {
                 LevelChunkSection container = new LevelChunkSection(level.palettedContainerFactory());
                 FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.wrappedBuffer(entry.data()));

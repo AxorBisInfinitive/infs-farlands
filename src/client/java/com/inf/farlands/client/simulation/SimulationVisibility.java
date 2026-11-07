@@ -5,7 +5,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import net.minecraft.core.Direction;
 
@@ -38,6 +37,15 @@ final class SimulationVisibility {
     /** 没有来路方向：种子节点用，向六个邻段推进时不判穿面。 */
     private static final int NO_SOURCE = -1;
 
+    /**
+     * 被门判掉的记号，写在 {@code sources} 里。
+     *
+     * <p>
+     * 用它与「到达过的位集」区分开：到达过的节点值必为非负的位集，记号是负数，所以直线校验与再入队都能认出它，
+     * 同一个节点也只会被判一次。
+     */
+    private static final int REJECTED = -1;
+
     /** 超过这个段数差才做直线校验，取 60 格折成段数，与原版 {@code SectionOcclusionGraph} 同阈值。 */
     private static final long RAY_MIN_SECTIONS = 3;
 
@@ -66,9 +74,15 @@ final class SimulationVisibility {
     /** 上一次算出的可见集，按传播的出队顺序，即近似由近到远。 */
     private List<Simulation.SnapSection> sections = List.of();
 
-    /** 本帧要画的 Section。顺序即 draw 顺序，近的在前对早期深度测试有利。 */
+    /**
+     * 上一次算出的可见集。顺序即 draw 顺序，近的在前对早期深度测试有利。
+     *
+     * <p>
+     * 作废之后返回空表而不是旧表：换关卡时 {@code invalidate} 只清标志，字段里还留着上一个关卡的键，
+     * 而烘制那一侧会拿这张表去挑候选。
+     */
     List<Simulation.SnapSection> sections() {
-        return this.sections;
+        return this.built ? this.sections : List.of();
     }
 
     /** 上一次的结果是不是以该相机 Section 为基准。 */
@@ -92,8 +106,13 @@ final class SimulationVisibility {
      * 每个「Section 加来路方向」的组合最多入队一次，所以单个 Section 最多处理六次，边数是六向。
      *
      * <p>
-     * 传播之后再走一遍直线校验，见 {@link #farlands$rayClear}。校验只从可见集里删，不参与传播本身，所以它无论
-     * 删掉哪一段都不会影响别的段被传播到。
+     * 直线校验是传播途中的门，见 {@link #farlands$rayClear}：远处节点在全开父节点这一条边上、入队之前先跑这条路，
+     * 不通过就不入图。门与后置过滤用同一个判据，强度差在时序：门问的是「路上每一段是否已经在建到一半的图里」，
+     * 过滤问的是全图建完之后，那时路上每一段当然都在，等于没判。
+     *
+     * <p>
+     * 门每个节点只判一次：被判掉的节点在 {@code sources} 里留一个 {@link #REJECTED} 记号，后续出口直接跳过，于是
+     * 成本是「节点数乘步进」，不是「边数乘步进」。
      */
     void rebuild(Simulation simulation, long sectionX, long sectionY, long sectionZ,
             double cameraX, double cameraY, double cameraZ) {
@@ -137,17 +156,21 @@ final class SimulationVisibility {
                 int bit = 1 << exit.ordinal();
                 Integer have = sources.get(next);
                 if (have == null) {
+                    if (mask == OPEN
+                            && !farlands$rayClear(next, base, store, sources, cameraX, cameraY, cameraZ)) {
+                        sources.put(next, REJECTED);
+                        continue;
+                    }
                     sources.put(next, bit);
                     order.add(next);
                     queue.add(new Node(next, exit.ordinal()));
-                } else if ((have & bit) == 0) {
+                } else if (have != REJECTED && (have & bit) == 0) {
                     sources.put(next, have | bit);
                     queue.add(new Node(next, exit.ordinal()));
                 }
             }
         }
 
-        Set<Simulation.SectionKey> reached = sources.keySet();
         List<Simulation.SnapSection> visible = new ArrayList<>(order.size());
         for (Simulation.SectionKey key : order) {
             SimulationSection section = store.get(key);
@@ -155,15 +178,9 @@ final class SimulationVisibility {
                 continue;
             }
             Simulation.SnapSection snap = section.snap();
-            if (snap == null) {
-                continue;
+            if (snap != null) {
+                visible.add(snap);
             }
-            // 直线校验只对真要画的 Section 做：被传到的空 Section 没有几何，判它一次也删不出东西，只会白付
-            // 几十次探针。它是传播的必经之路，作为「已到达」的证据留在 reached 里。
-            if (!farlands$rayClear(key, base, store, reached, cameraX, cameraY, cameraZ)) {
-                continue;
-            }
-            visible.add(snap);
         }
         this.sections = List.copyOf(visible);
         this.built = true;
@@ -186,19 +203,19 @@ final class SimulationVisibility {
 
     /**
      * 直线校验：从该 Section 离相机最近的一点朝相机走一条直线，路上若穿过「存在但没被传播到」的 Section，判这一段
-     * 是传播漏出来的，从可见集里去掉。
+     * 是传播漏出来的，不入图。
      *
      * <p>
      * 掩码只答「这个 Section 能不能从某个面穿到某个面」，不答开口在哪，所以一串开口错开的 Section 也能连成通路，
      * 表现为大片本来被挡住的东西被算成可见。这一遍用直线把这类通路掐掉，与原版对 60 格之外的 Section 做的那次步进
-     * 同源，区别只在它是传播之后的过滤，而不是传播途中的门。
+     * 同源。它必须跑在入队之前：一路上「已经到达」的那批节点，正是这个时序给出的约束。
      *
      * <p>
-     * 缺段不算证据：它还没到达，判不了，按穿过处理。坐标全部用「相对相机所在 Section 原点」的量，量级只有几十格，
-     * double 在 int 之外也精确。
+     * 缺段不算证据：它还没到达，判不了，按穿过处理。带 {@link #REJECTED} 记号的节点按「没到达」算，因为它已经被
+     * 别的边判掉过一次。坐标全部用「相对相机所在 Section 原点」的量，量级只有几十格，double 在 int 之外也精确。
      */
     private static boolean farlands$rayClear(Simulation.SectionKey key, Simulation.SectionKey base,
-            Map<Simulation.SectionKey, SimulationSection> store, Set<Simulation.SectionKey> reached,
+            Map<Simulation.SectionKey, SimulationSection> store, Map<Simulation.SectionKey, Integer> reached,
             double cameraX, double cameraY, double cameraZ) {
         long offsetX = key.x() - base.x();
         long offsetY = key.y() - base.y();
@@ -241,7 +258,8 @@ final class SimulationVisibility {
                     base.x() + Math.floorDiv((long) Math.floor(probeX), 16L),
                     base.y() + Math.floorDiv((long) Math.floor(probeY), 16L),
                     base.z() + Math.floorDiv((long) Math.floor(probeZ), 16L));
-            if (store.get(probed) != null && !reached.contains(probed)) {
+            Integer seen = reached.get(probed);
+            if (store.get(probed) != null && (seen == null || seen == REJECTED)) {
                 return false;
             }
         }

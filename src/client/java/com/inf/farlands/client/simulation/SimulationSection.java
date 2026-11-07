@@ -111,6 +111,19 @@ public final class SimulationSection {
      */
     private long visibility = SimulationVisibility.OPEN;
 
+    /** 27 个邻位的全集。位序见 {@link #missing}。 */
+    static final int ALL_NEIGHBORS_MISSING = (1 << 27) - 1;
+
+    /**
+     * 27 位邻域缺失掩码：烘制当前这一版几何时，哪几个邻位还不存在。
+     *
+     * <p>
+     * 位序与 {@code Simulation.farlands$snapshot} 的邻域数组同一套，即 {@code (dx + 1) * 9 + (dy + 1) * 3 + (dz + 1)}，
+     * 自分位 13 永不参与判定。缺省全 1：没烘过的段按「邻域全缺」算，邻段到达时它一定会被放回待烘，不会留下一版
+     * 在旧邻域下算出的几何。
+     */
+    private int missing = ALL_NEIGHBORS_MISSING;
+
     /**
      * 每格的 tint 缓存，按 resolver 与「Y 的 quart 带」两级。0 表示未算，tint 恒不透明，所以 0 不会是真值。
      *
@@ -386,6 +399,16 @@ public final class SimulationSection {
     /** 写入烘制期算出的掩码。 */
     void setVisibility(long mask) {
         this.visibility = mask;
+    }
+
+    /** 当前这一版几何的邻域缺失掩码。见 {@link #missing}。 */
+    int missing() {
+        return this.missing;
+    }
+
+    /** 写入烘制这一版几何时缺席的邻位。 */
+    void setMissing(int mask) {
+        this.missing = mask;
     }
 
     /**
