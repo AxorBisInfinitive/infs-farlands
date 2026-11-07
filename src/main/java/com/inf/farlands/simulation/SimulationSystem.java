@@ -2,6 +2,7 @@ package com.inf.farlands.simulation;
 
 import com.inf.farlands.simulation.int64.SimulationNoiseSystem;
 import com.inf.farlands.simulation.int64.system.terrain.noise.misc.Void.VoidSimulationNoiseSystem;
+import com.inf.farlands.simulation.int64.system.terrain.noise.overworld.Cwg.CwgSimulationNoiseSystem;
 
 /**
  * 模拟层的系统选择，硬编码，不做参数。
@@ -12,10 +13,13 @@ import com.inf.farlands.simulation.int64.system.terrain.noise.misc.Void.VoidSimu
 public enum SimulationSystem {
 
     /** 全空气，与 terrain 的 VoidNoiseSystem 同形。 */
-    VOID_NOISE;
+    VOID_NOISE,
+
+    /** 四路八度噪声加一条密度链，穹顶按 int32 的索引上界在 int64 域内形成。 */
+    CWG;
 
     /** 当前选中的系统。 */
-    public static final SimulationSystem SELECTED = VOID_NOISE;
+    public static final SimulationSystem SELECTED = CWG;
 
     private SimulationNoiseSystem system;
 
@@ -31,6 +35,7 @@ public enum SimulationSystem {
     private SimulationNoiseSystem create() {
         return switch (this) {
             case VOID_NOISE -> new VoidSimulationNoiseSystem();
+            case CWG -> new CwgSimulationNoiseSystem();
         };
     }
 }
