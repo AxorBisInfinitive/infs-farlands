@@ -1,7 +1,7 @@
 package com.inf.farlands.client.render;
 
 import com.inf.farlands.InfsFarlands;
-import com.inf.farlands.simulation.SimulationConfig;
+import com.inf.farlands.simulation.model.SimulationConfig;
 import com.inf.farlands.util.pos.ExactPosition;
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.vertex.PoseStack;

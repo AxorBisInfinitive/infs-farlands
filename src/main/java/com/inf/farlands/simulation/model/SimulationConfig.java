@@ -1,4 +1,4 @@
-package com.inf.farlands.simulation;
+package com.inf.farlands.simulation.model;
 
 import java.util.Map;
 
@@ -32,8 +32,28 @@ public class SimulationConfig {
             .build();
     public static final boolean nanStaticOverlay;
 
+    /** 打开的 ssa 文件缓存上限。 */
+    public static final ConfigEntry<Integer> SSA_CACHE_LIMIT = CONFIG.setInt("ssaCacheLimit")
+            .comment("en_us", "Maximum number of open ssa files kept in cache")
+            .comment("zh_cn", "打开的 ssa 文件缓存上限")
+            .range(16, 1024)
+            .define(128)
+            .build();
+    public static final int ssaCacheLimit;
+
+    /** 定期持久化脏模拟段的间隔，单位 tick。 */
+    public static final ConfigEntry<Long> SSA_PERSIST_INTERVAL = CONFIG.setLong("ssaPersistInterval")
+            .comment("en_us", "Interval in ticks between periodic persistence of dirty simulation sections")
+            .comment("zh_cn", "定期持久化脏模拟段的间隔，单位 tick")
+            .range(100L, 120000L)
+            .define(6000L)
+            .build();
+    public static final long ssaPersistInterval;
+
     static {
         CONFIG.init();
         nanStaticOverlay = NAN_STATIC_OVERLAY.get();
+        ssaCacheLimit = SSA_CACHE_LIMIT.get();
+        ssaPersistInterval = SSA_PERSIST_INTERVAL.get();
     }
 }

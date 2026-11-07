@@ -1,5 +1,9 @@
 package com.inf.farlands.simulation;
 
+import com.inf.farlands.simulation.model.SimulationProducer;
+import com.inf.farlands.simulation.model.SimulationSectionData;
+import com.inf.farlands.simulation.model.SimulationSectionKey;
+
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -32,7 +36,9 @@ public final class GrassPlaneProducer implements SimulationProducer {
             int height = BASE + (int) Math.round(AMPLITUDE * Math.sin(2.0 * Math.PI * phase / PERIOD));
             for (int z = 0; z < SimulationSectionData.SIZE; z++) {
                 for (int y = 0; y <= height; y++) {
-                    data.section.setBlockState(x, y, z, GRASS);
+                    // 五参的 false：生产者跑在 farlands-sim 上，带检测那一档会取容器自己的线程检测器，而主线程
+                    // 的打包与落盘编码也要取它。
+                    data.section.setBlockState(x, y, z, GRASS, false);
                 }
             }
         }

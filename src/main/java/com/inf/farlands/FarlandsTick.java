@@ -3,7 +3,9 @@ package com.inf.farlands;
 import com.inf.farlands.light.FarLandsLightEngine;
 import com.inf.farlands.serialize.SectionIO;
 import com.inf.farlands.serialize.SectionLifecycle;
+import com.inf.farlands.simulation.SimulationLifecycle;
 import com.inf.farlands.simulation.SimulationServer;
+import com.inf.farlands.simulation.model.SimulationConfig;
 import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.debug.StageMetrics;
 import com.inf.farlands.terrain.pipeline.NeighborhoodTickets;
@@ -247,6 +249,10 @@ public class FarlandsTick {
         if (tickCount % FarlandsConfig.fsaPersistInterval == 0) {
             SectionLifecycle.flushAllDirty(server);
             SectionIO.flushAllOffsetTables();
+        }
+        // 模拟段的周期落盘。与窗口清理同理，是崩溃与强退的兜底；自成一个间隔，不复用 fsa 那条。
+        if (tickCount % SimulationConfig.ssaPersistInterval == 0) {
+            SimulationLifecycle.flushAllDirty(server);
         }
         // 窗口差量、窗口外清理与派发，与阻塞等待期共用同一段，顺序与理由见 driveWindowAndTerrain。
         driveWindowAndTerrain(server);

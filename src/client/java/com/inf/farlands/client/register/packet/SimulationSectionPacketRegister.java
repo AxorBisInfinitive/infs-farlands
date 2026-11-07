@@ -5,7 +5,7 @@ import com.inf.farlands.client.simulation.Simulation;
 import com.inf.farlands.client.simulation.SimulationHolder;
 import com.inf.farlands.network.expand.y.ChunkDataPacket;
 import com.inf.farlands.network.simulation.SimulationSectionPacket;
-import com.inf.farlands.simulation.SimulationSectionKey;
+import com.inf.farlands.simulation.model.SimulationSectionKey;
 
 import io.netty.buffer.Unpooled;
 import net.minecraft.client.Minecraft;

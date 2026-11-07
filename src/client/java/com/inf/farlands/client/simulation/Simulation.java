@@ -8,7 +8,7 @@ import java.util.Map;
 import java.util.Set;
 
 import com.inf.farlands.client.render.simulation.SimulationGeometry;
-import com.inf.farlands.simulation.SimulationSectionKey;
+import com.inf.farlands.simulation.model.SimulationSectionKey;
 import com.inf.farlands.util.pos.ExactPosition;
 
 import net.minecraft.client.multiplayer.ClientLevel;

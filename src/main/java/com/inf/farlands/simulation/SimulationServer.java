@@ -12,6 +12,10 @@ import java.util.UUID;
 import com.inf.farlands.FarlandsConfig;
 import com.inf.farlands.InfsFarlands;
 import com.inf.farlands.network.simulation.SimulationSectionPacket;
+import com.inf.farlands.simulation.model.SimulationSectionData;
+import com.inf.farlands.simulation.model.SimulationSectionKey;
+import com.inf.farlands.simulation.model.SimulationSectionStage;
+import com.inf.farlands.simulation.model.SimulationStore;
 import com.inf.farlands.util.pos.ExactPosition;
 
 import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
@@ -37,9 +41,6 @@ import net.minecraft.world.level.Level;
  * 全部在服务端主线程调用。{@link SimulationStore} 的内层表是普通 map，正是靠这一条成立。
  */
 public final class SimulationServer {
-
-    /** 当前只有一个测试层。将来由配置或系统选择决定。 */
-    private static final SimulationProducer PRODUCER = new GrassPlaneProducer();
 
     /** 每玩家每维度已经发过哪些段。 */
     private static final Map<UUID, Map<ResourceKey<Level>, Set<SimulationSectionKey>>> SENT = new HashMap<>();
@@ -69,7 +70,7 @@ public final class SimulationServer {
         List<ServerPlayer> players = level.players();
         if (players.isEmpty()) {
             for (SimulationSectionKey key : SimulationStore.keys(dimension)) {
-                SimulationStore.release(dimension, key);
+                SimulationLifecycle.release(level, key);
             }
             return;
         }
@@ -88,13 +89,11 @@ public final class SimulationServer {
         }
 
         for (SimulationSectionKey key : union) {
-            if (!SimulationStore.contains(dimension, key)) {
-                SimulationStore.create(level, key, PRODUCER);
-            }
+            SimulationLifecycle.ensureSection(level, key);
         }
         for (SimulationSectionKey key : SimulationStore.keys(dimension)) {
             if (!union.contains(key)) {
-                SimulationStore.release(dimension, key);
+                SimulationLifecycle.release(level, key);
             }
         }
 
@@ -176,12 +175,16 @@ public final class SimulationServer {
 
         List<SimulationSectionKey> candidates = new ArrayList<>();
         for (SimulationSectionKey key : view.keys()) {
+            SimulationSectionData data = SimulationStore.get(dimension, key);
+            // 未建或内容未定：此刻发出去只能是空壳，留到它升到 PROCESSED 之后的某一 tick。
+            if (data == null || !SimulationSectionStage.isTerminal(data.stage())) {
+                continue;
+            }
             if (!sent.contains(key)) {
                 candidates.add(key);
                 continue;
             }
-            SimulationSectionData data = SimulationStore.get(dimension, key);
-            if (data != null && data.isDirty()) {
+            if (data.isDirty()) {
                 candidates.add(key);
             }
         }

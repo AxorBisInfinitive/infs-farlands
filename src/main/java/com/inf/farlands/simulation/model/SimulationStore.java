@@ -1,4 +1,4 @@
-package com.inf.farlands.simulation;
+package com.inf.farlands.simulation.model;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -16,6 +16,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Biomes;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.DataLayer;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.chunk.PalettedContainerFactory;
@@ -24,8 +25,9 @@ import net.minecraft.world.level.chunk.PalettedContainerFactory;
  * 服务端的模拟段存储：按维度分表的纯内存结构，不做持久化。
  *
  * <p>
- * 生命周期由 {@link SimulationServer} 驱动：段第一次进入某个玩家的视距时创建，最后一个玩家离开后释放。写入口
- * 只有生产者与将来的数据写入方，两侧都只在服务端主线程，所以内层表用普通 {@link HashMap}，内层也没有加锁。
+ * 生命周期由 {@code com.inf.farlands.simulation.SimulationServer} 驱动：段第一次进入某个玩家的视距时创建，
+ * 最后一个玩家离开后释放。写入口只有生产者与将来的数据写入方，两侧都只在服务端主线程，所以内层表用普通
+ * {@link HashMap}，内层也没有加锁。
  *
  * <p>
  * 段内容用 {@link LevelChunkSection} 承载，工厂取 {@code level.palettedContainerFactory()}，与客户端同一套
@@ -58,12 +60,12 @@ public final class SimulationStore {
     }
 
     /**
-     * 建一段并跑一次生产者。已存在时直接返回旧的那一份，不重复生产。
+     * 建一段空壳，不跑生产者。内容由调用方在池上填，填完自己升档。
      *
      * <p>
-     * 新段一律置脏：它还没发给任何人。
+     * 已存在时直接返回旧的那一份。新段不置下发脏位：它此刻还没有内容，发也是空的。
      */
-    public static SimulationSectionData create(ServerLevel level, SimulationSectionKey key, SimulationProducer producer) {
+    public static SimulationSectionData createEmpty(ServerLevel level, SimulationSectionKey key) {
         Map<SimulationSectionKey, SimulationSectionData> sections = STORE.computeIfAbsent(level.dimension(),
                 k -> new HashMap<>());
         SimulationSectionData existing = sections.get(key);
@@ -71,10 +73,62 @@ public final class SimulationStore {
             return existing;
         }
         SimulationSectionData data = new SimulationSectionData(newSection(level));
-        producer.produce(key, data);
-        data.markDirty();
         sections.put(key, data);
         return data;
+    }
+
+    /**
+     * 读回路径的建段：容器与阶段都来自盘上，不再跑生产者。
+     *
+     * <p>
+     * 走新建实例而不是复用旧对象，因为 {@code section} 是 final 字段，换不了容器。同 key 已有条目时直接替换。
+     *
+     * <p>
+     * 两个脏位分开设：内容与盘上一致，所以落盘位是假；它还没发给任何人，所以下发位是真。
+     */
+    public static SimulationSectionData putDecoded(ResourceKey<Level> dimension, SimulationSectionKey key,
+            LevelChunkSection section, int shapeMode, DataLayer blockLight, DataLayer skyLight, int stage) {
+        SimulationSectionData data = new SimulationSectionData(section);
+        data.setShapeMode(shapeMode);
+        if (blockLight != null) {
+            data.blockLight = blockLight;
+        }
+        if (skyLight != null) {
+            data.skyLight = skyLight;
+        }
+        data.advanceTo(stage);
+        data.markDirty();
+        STORE.computeIfAbsent(dimension, k -> new HashMap<>()).put(key, data);
+        return data;
+    }
+
+    /**
+     * 条件摘除：只有表里那一条就是 expected 时才摘，返回是否真的摘掉。
+     *
+     * <p>
+     * 落盘提交回调与任务收尾都走它。不做条件判断的话，同 key 的新一代会被旧一代的收尾摘掉。
+     */
+    public static boolean removeIfSame(ResourceKey<Level> dimension, SimulationSectionKey key,
+            SimulationSectionData expected) {
+        Map<SimulationSectionKey, SimulationSectionData> sections = STORE.get(dimension);
+        if (sections == null || sections.get(key) != expected) {
+            return false;
+        }
+        sections.remove(key);
+        if (sections.isEmpty()) {
+            STORE.remove(dimension);
+        }
+        return true;
+    }
+
+    /** 撤销 releasing 标记：该段在落盘提交完成前又被需要，复用原对象。返回是否命中。 */
+    public static boolean unmarkReleasing(ResourceKey<Level> dimension, SimulationSectionKey key) {
+        SimulationSectionData data = get(dimension, key);
+        if (data == null || !data.isReleasing()) {
+            return false;
+        }
+        data.clearReleasing();
+        return true;
     }
 
     /** 新段的容器：块用工厂的默认空气，群系用 void。 */
@@ -104,18 +158,6 @@ public final class SimulationStore {
         Holder<Biome> resolved = registries.lookupOrThrow(Registries.BIOME).getOrThrow(Biomes.THE_VOID);
         VOID_BIOMES.put(registries, resolved);
         return resolved;
-    }
-
-    /** 释放一段，只放内存。 */
-    public static void release(ResourceKey<Level> dimension, SimulationSectionKey key) {
-        Map<SimulationSectionKey, SimulationSectionData> sections = STORE.get(dimension);
-        if (sections == null) {
-            return;
-        }
-        sections.remove(key);
-        if (sections.isEmpty()) {
-            STORE.remove(dimension);
-        }
     }
 
     /** 该维度现存段的键，拷贝一份供遍历时安全删除。 */

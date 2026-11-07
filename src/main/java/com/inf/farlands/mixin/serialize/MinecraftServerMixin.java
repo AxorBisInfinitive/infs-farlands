@@ -15,8 +15,10 @@ import com.inf.farlands.terrain.biomeSource.BiomeSourceFilter;
 import com.inf.farlands.terrain.decorationFiller.DecorationFiller;
 import com.inf.farlands.terrain.pipeline.GenQueue;
 import com.inf.farlands.terrain.pipeline.NeighborhoodTickets;
+import com.inf.farlands.simulation.SimulationLifecycle;
 import com.inf.farlands.simulation.SimulationServer;
-import com.inf.farlands.simulation.SimulationStore;
+import com.inf.farlands.simulation.model.SimulationStore;
+import com.inf.farlands.simulation.terrain.SimulationPool;
 import com.inf.farlands.terrain.pipeline.OwnershipTable;
 import com.inf.farlands.terrain.pipeline.Scheduler;
 import com.inf.farlands.terrain.pipeline.SpawnPreload;
@@ -52,6 +54,9 @@ public abstract class MinecraftServerMixin {
             SectionIO.awaitIODrain();
             SectionIO.drainMainThreadTasks(server);
             GenQueue.awaitIdle(server, 5000);
+            // 仿真段与 fsa 没有数据依赖，排在 fsa 的同步刷盘之前，只为让「等在途」与「刷自己的盘」相邻。
+            SimulationPool.awaitIdle(server, 5000);
+            SimulationLifecycle.shutdownSyncFlush(server);
             SectionLifecycle.shutdownSyncFlush(server);
         } catch (Exception e) {
             InfsFarlands.LOGGER.error("farlands: fsa shutdown flush failed", e);
@@ -86,6 +91,7 @@ public abstract class MinecraftServerMixin {
         SystemsSender.clearWorldState();
         SimulationStore.clearAll();
         SimulationServer.clearWorldState();
+        SimulationLifecycle.clearWorldState();
         ChunkReadiness.clearAll();
         SectionStage.clearAll();
         EntitySectionWindow.clear();

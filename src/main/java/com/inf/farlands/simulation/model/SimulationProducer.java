@@ -1,4 +1,4 @@
-package com.inf.farlands.simulation;
+package com.inf.farlands.simulation.model;
 
 /**
  * 模拟段的生产者。一段只在被创建时跑一次。

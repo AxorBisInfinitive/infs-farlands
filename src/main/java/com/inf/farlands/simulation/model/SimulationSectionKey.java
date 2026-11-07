@@ -1,4 +1,4 @@
-package com.inf.farlands.simulation;
+package com.inf.farlands.simulation.model;
 
 /**
  * 模拟段的键：三轴段坐标。

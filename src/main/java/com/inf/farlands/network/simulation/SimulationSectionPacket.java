@@ -5,8 +5,8 @@ import java.util.List;
 
 import com.inf.farlands.InfsFarlands;
 import com.inf.farlands.network.expand.y.ChunkDataPacket;
-import com.inf.farlands.simulation.SimulationSectionData;
-import com.inf.farlands.simulation.SimulationSectionKey;
+import com.inf.farlands.simulation.model.SimulationSectionData;
+import com.inf.farlands.simulation.model.SimulationSectionKey;
 
 import io.netty.buffer.Unpooled;
 import net.minecraft.core.registries.Registries;
