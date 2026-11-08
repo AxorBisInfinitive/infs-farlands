@@ -1,10 +1,8 @@
 package com.inf.farlands.simulation;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -35,9 +33,13 @@ import net.minecraft.world.level.Level;
  * 与 chunk 的差别只有一条：这里不持久化，段释放即丢。
  *
  * <p>
- * 每 tick 的工作量与窗口变化量成正比，不与窗口大小成正比。旧写法每 tick 重建 11 万个键的窗口、重算并集、扫全表
- * 找该释放的段，在视距 32 下稳定是五十毫秒级的开销，与玩家是否移动无关。现在窗口按玩家缓存，只有中心段、视距或
+ * 每 tick 的工作量只与本 tick 真正发出去的段数成正比，不与窗口大小成正比。窗口按玩家缓存，只有中心段、视距或
  * 维度变了才重建；并集是按维度增量维护的计数表，「谁想要某个键」与「并集」因此是同一份信息。
+ *
+ * <p>
+ * 派发顺序由层桶给出：每个玩家窗口内、尚未发给该玩家的段，按水平切比雪夫距离分进 0 到 radius 共 33 个桶，每 tick
+ * 从最内层往外取到字节预算满。不排序、不扫全窗。旧写法每 tick 把 11 万个候选全排一遍，视距 32 下占满一个服务端
+ * tick 的七成。
  *
  * <p>
  * 已发集合与计数表都按维度分表：段键只有三轴段号，不含维度，跨维度同坐标会互相覆盖。
@@ -62,11 +64,11 @@ public final class SimulationServer {
     private static final Map<ResourceKey<Level>, Map<SimulationSectionKey, Integer>> WANT = new HashMap<>();
 
     /**
-     * 按维度的「待下发」集合。
+     * 按维度的「内容变更待分发」集合。
      *
      * <p>
-     * 内容是「还没发全的段」，来源有三处：生产与读回完成时的标脏，见 {@link #noteDirty}；窗口新进的段；以及本 tick
-     * 因字节预算没发完的候选。每 tick 的候选从它里面取，不再扫全窗。
+     * 只有一个来源：生产收尾与读回完成时的登记，见 {@link #noteDirty}。每 tick 分发给窗口内各玩家的层桶，随即
+     * 清空。窗口新进的段不进这张表，它们直接进桶；预算没发完的段也不进，它们留在桶里等下一 tick。
      *
      * <p>
      * 段的键只有三轴段号，所以这张表也按维度分。
@@ -92,7 +94,7 @@ public final class SimulationServer {
 
     private static int probeSendResent;
 
-    private static int probeClearDirty;
+    private static int probeDistribute;
 
     private static int probeStore;
 
@@ -104,34 +106,61 @@ public final class SimulationServer {
 
     private static int probeTicks;
 
+    /** 临时读数，结案即删：每维度每 tick 派发耗时的纳秒累计、峰值与次数。 */
+    private static long probeSrvSum;
+
+    private static long probeSrvMax;
+
+    private static int probeSrvCalls;
+
+    /** 临时读数，结案即删：记一次 {@code tickLevel} 的耗时。 */
+    private static void farlands$recordTickLevel(long nanos) {
+        probeSrvSum += nanos;
+        probeSrvCalls++;
+        if (nanos > probeSrvMax) {
+            probeSrvMax = nanos;
+        }
+    }
+
     private static void farlands$reportProbe() {
         int[] core = SimulationLifecycle.takeProbe();
         InfsFarlands.LOGGER.info(
-                "FLSIM2 store={} union={} sent={} ensureHit={} ensureMiss={} produce={} readback={} release={} sendNew={} sendResent={} clearDirty={}",
+                "FLSIM2 store={} union={} sent={} ensureHit={} ensureMiss={} produce={} readback={} release={} sendNew={} sendResent={} distribute={}",
                 probeStore, probeUnion, probeSent, core[0], core[1], core[2], core[3], core[4], probeSendNew,
-                probeSendResent, probeClearDirty);
+                probeSendResent, probeDistribute);
+        InfsFarlands.LOGGER.info("FLSRV calls={} avg={}us max={}us", probeSrvCalls,
+                probeSrvCalls == 0 ? 0L : probeSrvSum / 1000L / probeSrvCalls, probeSrvMax / 1000L);
         probeSendNew = 0;
         probeSendResent = 0;
-        probeClearDirty = 0;
+        probeDistribute = 0;
         probeSamples = 0;
+        probeSrvSum = 0L;
+        probeSrvMax = 0L;
+        probeSrvCalls = 0;
     }
 
-    /** 临时读数，结案即删：每个间隔最多 8 条被重发的键，带档位与脏位。 */
+    /** 临时读数，结案即删：每个间隔最多 8 条被重发的键，带档位。 */
     private static void farlands$resentSample(SimulationSectionKey key, SimulationSectionData data) {
         if (probeSamples >= 8) {
             return;
         }
         probeSamples++;
-        InfsFarlands.LOGGER.info("FLSIM2 resent key={},{},{} stage={} dirty={}", key.x(), key.y(), key.z(),
-                data.stage(), data.isDirty());
+        InfsFarlands.LOGGER.info("FLSIM2 resent key={},{},{} stage={}", key.x(), key.y(), key.z(),
+                data.stage());
     }
 
     private SimulationServer() {
     }
 
-    /** 一个玩家的窗口：中心三轴、视距与它的键集。 */
+    /**
+     * 一个玩家的窗口：中心三轴、视距、它的键集，以及按层分的待发桶。
+     *
+     * <p>
+     * {@code buckets} 是可变集合，{@link #send} 每 tick 从里面摘走已发的段。窗口变化时整份重建而不是原地挪动：
+     * 层号相对玩家中心，中心一动，所有键的层号都可能变。竖直移动只改段带不改层号，地面上每次跨 chunk 才改。
+     */
     private record View(ResourceKey<Level> dimension, long centerX, long centerY, long centerZ, int radius,
-            boolean positioned, Set<SimulationSectionKey> keys) {
+            boolean positioned, Set<SimulationSectionKey> keys, List<Set<SimulationSectionKey>> buckets) {
 
         /** 缓存是否仍然对应当前这一刻的窗口。 */
         boolean sameWindow(ResourceKey<Level> dimension, long centerX, long centerY, long centerZ, int radius,
@@ -155,7 +184,9 @@ public final class SimulationServer {
     public static void tick(MinecraftServer server) {
         Set<UUID> roster = new HashSet<>();
         for (ServerLevel level : server.getAllLevels()) {
+            long levelStart = System.nanoTime();
             tickLevel(level, roster);
+            farlands$recordTickLevel(System.nanoTime() - levelStart);
         }
         if (!SENT.keySet().equals(roster)) {
             // 玩家进出：增量路径覆盖不到他们的窗口，下一个 tick 对一次全表
@@ -187,7 +218,6 @@ public final class SimulationServer {
         }
 
         Map<UUID, List<SimulationSectionKey>> removed = new HashMap<>();
-        Map<UUID, List<SimulationSectionKey>> arrived = new HashMap<>();
         for (ServerPlayer player : players) {
             roster.add(player.getUUID());
             ExactPosition exact = (ExactPosition) player;
@@ -202,12 +232,12 @@ public final class SimulationServer {
                 continue;
             }
             Set<SimulationSectionKey> keys = farlands$keys(centerX, centerY, centerZ, radius);
-            List<SimulationSectionKey> in = new ArrayList<>();
             List<SimulationSectionKey> out = new ArrayList<>();
-            farlands$applyWindowChange(level, player, dimension, want, dirty, cached, keys, in, out);
-            arrived.put(player.getUUID(), in);
+            farlands$applyWindowChange(level, player, dimension, want, cached, keys, out);
             removed.put(player.getUUID(), out);
-            VIEWS.put(player.getUUID(), new View(dimension, centerX, centerY, centerZ, radius, positioned, keys));
+            Set<SimulationSectionKey> sent = farlands$sentOf(player, dimension);
+            VIEWS.put(player.getUUID(), new View(dimension, centerX, centerY, centerZ, radius, positioned, keys,
+                    farlands$buckets(keys, sent, centerX, centerZ, radius)));
         }
 
         if (rescan) {
@@ -215,29 +245,35 @@ public final class SimulationServer {
             for (SimulationSectionKey key : SimulationStore.keys(dimension)) {
                 if (!want.containsKey(key)) {
                     SimulationLifecycle.release(level, key);
-                    dirty.remove(key);
                 }
             }
         }
         probeStore = SimulationStore.size(dimension);
         probeUnion = want.size();
 
-        int[] totals = new int[2];
-        Map<SimulationSectionKey, Integer> queued = new HashMap<>();
-        for (ServerPlayer player : players) {
-            View view = VIEWS.get(player.getUUID());
-            List<SimulationSectionKey> gone = removed.getOrDefault(player.getUUID(), List.of());
-            List<SimulationSectionKey> in = arrived.getOrDefault(player.getUUID(), List.of());
-            send(level, player, view, in, dirty, gone, queued, totals);
-        }
-        // 脏标记只在「所有想要它的玩家这一 tick 都收到了」时才清，否则留在下一 tick 补发。
-        for (Map.Entry<SimulationSectionKey, Integer> entry : queued.entrySet()) {
-            SimulationSectionData data = SimulationStore.get(dimension, entry.getKey());
-            if (data != null && entry.getValue() >= want.getOrDefault(entry.getKey(), 0)) {
-                data.clearDirty();
-                dirty.remove(entry.getKey());
-                probeClearDirty++;
+        // 内容变更分发给窗口内的各玩家桶：进过桶但没发的键本就在桶里，这里补的是「已发过、内容又变了」那一批，
+        // 以及「进窗时非终态、当时被摘掉」那一批。
+        if (!dirty.isEmpty()) {
+            for (ServerPlayer player : players) {
+                View view = VIEWS.get(player.getUUID());
+                if (view == null) {
+                    continue;
+                }
+                for (SimulationSectionKey key : dirty) {
+                    if (!view.keys().contains(key)) {
+                        continue;
+                    }
+                    view.buckets().get(farlands$layer(key, view.centerX(), view.centerZ())).add(key);
+                    probeDistribute++;
+                }
             }
+            dirty.clear();
+        }
+
+        int[] totals = new int[2];
+        for (ServerPlayer player : players) {
+            send(level, player, VIEWS.get(player.getUUID()),
+                    removed.getOrDefault(player.getUUID(), List.of()), totals);
         }
         // 临时读数，用完删除。
         farlands$tickReadout(dimension, players.size(), want.size(), totals);
@@ -253,13 +289,11 @@ public final class SimulationServer {
      * <p>
      * 换维度时先把旧维度那一份整份退回：段键不含维度，把两个维度的键放进同一张计数表会互相覆盖。
      *
-     * @param arrived 出参：本 tick 进入窗口的键，供派发做首次发送
      * @param removed 出参：本 tick 离开窗口的键，供派发通知客户端撤回
      */
     private static void farlands$applyWindowChange(ServerLevel level, ServerPlayer player,
-            ResourceKey<Level> dimension, Map<SimulationSectionKey, Integer> want,
-            Set<SimulationSectionKey> dirty, View cached, Set<SimulationSectionKey> next,
-            List<SimulationSectionKey> arrived, List<SimulationSectionKey> removed) {
+            ResourceKey<Level> dimension, Map<SimulationSectionKey, Integer> want, View cached,
+            Set<SimulationSectionKey> next, List<SimulationSectionKey> removed) {
         if (cached != null && !cached.dimension().equals(dimension)) {
             farlands$retractDimension(player, cached);
             cached = null;
@@ -279,7 +313,6 @@ public final class SimulationServer {
             }
             if (have <= 1) {
                 want.remove(key);
-                dirty.remove(key);
                 SimulationLifecycle.release(level, key);
             } else {
                 want.put(key, have - 1);
@@ -290,7 +323,6 @@ public final class SimulationServer {
                 continue;
             }
             want.merge(key, 1, Integer::sum);
-            arrived.add(key);
             SimulationLifecycle.ensureSection(level, key);
         }
     }
@@ -376,71 +408,65 @@ public final class SimulationServer {
     }
 
     /**
-     * 对单个玩家做一次差分并限量发送。
+     * 对单个玩家派发一批：从最内层桶往外取，取到字节预算满为止。
      *
      * <p>
-     * 候选只来自两处：本 tick 新进窗口的键，与待发集合里属于本玩家窗口的键。旧写法扫全窗，11 万个键每 tick 一遍。
+     * 候选只有一处来源：该玩家窗口的层桶。桶里是「窗口内、尚未发给该玩家」的段，窗口变化时整份重建，平时只有
+     * 摘除。所以本方法每 tick 的工作量是「取到预算满」那一小批，与窗口大小无关。
      *
      * <p>
-     * 候选先整体登记回待发集合，再由调用方按「所有想要它的玩家都收到了」逐条摘除。这样因字节预算没发完的那批会留在
-     * 集合里，下一 tick 接着发，不需要再扫一遍窗口。
+     * 非终态的段当场从桶里摘掉而不留：它升到终态时由 {@code SimulationLifecycle} 经 {@link #noteDirty} 登记，
+     * 那一笔会把它重新放进桶。留在桶里只会让每一 tick 白看它一遍。
+     *
+     * <p>
+     * 迭代中不改集合：先把要摘的键收进两张表，循环结束后按层号回摘。
      */
-    private static void send(ServerLevel level, ServerPlayer player, View view, List<SimulationSectionKey> arrived,
-            Set<SimulationSectionKey> dirty, List<SimulationSectionKey> gone,
-            Map<SimulationSectionKey, Integer> queued, int[] totals) {
+    private static void send(ServerLevel level, ServerPlayer player, View view, List<SimulationSectionKey> gone,
+            int[] totals) {
         ResourceKey<Level> dimension = level.dimension();
         Set<SimulationSectionKey> sent = farlands$sentOf(player, dimension);
         farlands$removalReadout(dimension, view, gone);
         probeSent = sent.size();
 
-        Set<SimulationSectionKey> candidateSet = new LinkedHashSet<>();
-        for (SimulationSectionKey key : arrived) {
-            SimulationSectionData data = SimulationStore.get(dimension, key);
-            // 未建或内容未定：此刻发出去只能是空壳，留到它升到 LIGHTED 之后的某一 tick。
-            if (data == null || !SimulationSectionStage.isTerminal(data.stage())) {
-                continue;
-            }
-            if (!sent.contains(key)) {
-                candidateSet.add(key);
-            }
-        }
-        for (SimulationSectionKey key : dirty) {
-            if (!view.keys().contains(key)) {
-                continue;
-            }
-            SimulationSectionData data = SimulationStore.get(dimension, key);
-            if (data == null || !SimulationSectionStage.isTerminal(data.stage())) {
-                continue;
-            }
-            candidateSet.add(key);
-        }
-        List<SimulationSectionKey> candidates = new ArrayList<>(candidateSet);
-        candidates.sort(Comparator.comparingLong(key -> distanceSqr(key, view)));
-        dirty.addAll(candidateSet);
-
         int budget = FarlandsConfig.sectionSendBytesPerTick;
         int used = 0;
+        boolean full = false;
         List<SimulationSectionPacket.SectionEntry> loaded = new ArrayList<>();
-        for (SimulationSectionKey key : candidates) {
-            SimulationSectionData data = SimulationStore.get(dimension, key);
-            if (data == null) {
-                continue;
+        List<SimulationSectionKey> taken = new ArrayList<>();
+        List<SimulationSectionKey> dropped = new ArrayList<>();
+        for (Set<SimulationSectionKey> bucket : view.buckets()) {
+            for (SimulationSectionKey key : bucket) {
+                SimulationSectionData data = SimulationStore.get(dimension, key);
+                if (data == null || !SimulationSectionStage.isTerminal(data.stage())) {
+                    dropped.add(key);
+                    continue;
+                }
+                int size = SimulationSectionPacket.estimatedSize(data);
+                if (used > 0 && used + size > budget) {
+                    full = true;
+                    break;
+                }
+                boolean resent = sent.contains(key);
+                loaded.add(SimulationSectionPacket.encode(key, data));
+                used += size;
+                taken.add(key);
+                if (resent) {
+                    probeSendResent++;
+                    farlands$resentSample(key, data);
+                } else {
+                    probeSendNew++;
+                }
             }
-            int size = SimulationSectionPacket.estimatedSize(data);
-            if (used > 0 && used + size > budget) {
+            if (full) {
                 break;
             }
-            boolean resent = sent.contains(key);
-            loaded.add(SimulationSectionPacket.encode(key, data));
-            used += size;
+        }
+        for (SimulationSectionKey key : taken) {
+            view.buckets().get(farlands$layer(key, view.centerX(), view.centerZ())).remove(key);
             sent.add(key);
-            queued.merge(key, 1, Integer::sum);
-            if (resent) {
-                probeSendResent++;
-                farlands$resentSample(key, data);
-            } else {
-                probeSendNew++;
-            }
+        }
+        for (SimulationSectionKey key : dropped) {
+            view.buckets().get(farlands$layer(key, view.centerX(), view.centerZ())).remove(key);
         }
         totals[0] += loaded.size();
         totals[1] += gone.size();
@@ -449,6 +475,37 @@ public final class SimulationServer {
         }
         player.connection.send(new ClientboundCustomPayloadPacket(
                 new SimulationSectionPacket(dimension, loaded, gone)));
+    }
+
+    /**
+     * 段键的层号：水平切比雪夫距离。窗口内的键因此落在 {@code 0..radius}，可以直接当下标。
+     */
+    private static int farlands$layer(SimulationSectionKey key, long centerX, long centerZ) {
+        long dx = Math.abs(key.x() - centerX);
+        long dz = Math.abs(key.z() - centerZ);
+        return (int) Math.max(dx, dz);
+    }
+
+    /**
+     * 按层分桶：下标是水平切比雪夫距离，内容是「窗口内、尚未发给该玩家」的键。
+     *
+     * <p>
+     * 每次窗口变化整份重建，代价是一次键集遍历，与 {@link #farlands$keys} 的建集同量级；换来的稳态是每 tick
+     * 只碰预算允许的那几段。层用切比雪夫而不是欧氏距离：两者都保证内层先发，切比雪夫能落到定长数组上。
+     */
+    private static List<Set<SimulationSectionKey>> farlands$buckets(Set<SimulationSectionKey> keys,
+            Set<SimulationSectionKey> sent, long centerX, long centerZ, int radius) {
+        List<Set<SimulationSectionKey>> buckets = new ArrayList<>(radius + 1);
+        for (int layer = 0; layer <= radius; layer++) {
+            buckets.add(new HashSet<>());
+        }
+        for (SimulationSectionKey key : keys) {
+            if (sent.contains(key)) {
+                continue;
+            }
+            buckets.get(farlands$layer(key, centerX, centerZ)).add(key);
+        }
+        return buckets;
     }
 
     /**
@@ -482,13 +539,7 @@ public final class SimulationServer {
                 ys.size(), rmin, rmax, view.radius(), view.positioned(), SimulationStore.size(dimension));
     }
 
-    private static long distanceSqr(SimulationSectionKey key, View view) {
-        long dx = key.x() - view.centerX();
-        long dz = key.z() - view.centerZ();
-        return dx * dx + dz * dz;
-    }
-
-    /** 停服清空已发记录、窗口缓存、计数表与待发集合，并置全表对账。 */
+    /** 停服清空已发记录、窗口缓存、计数表与待分发集合，并置全表对账。 */
     public static void clearWorldState() {
         SENT.clear();
         VIEWS.clear();

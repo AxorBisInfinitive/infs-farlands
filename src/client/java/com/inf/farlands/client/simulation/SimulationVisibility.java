@@ -1,28 +1,43 @@
 package com.inf.farlands.client.simulation;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+
+import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
+import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
+import it.unimi.dsi.fastutil.longs.LongArrayList;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+
+import com.inf.farlands.client.render.AnchoredFrustum;
 
 import net.minecraft.core.Direction;
+import net.minecraft.util.Util;
 
 /**
- * 模拟层的遮挡剔除：从相机所在的 Section 起，按每段的面可见性做广度优先传播，产出本帧要画的 Section 列表。
+ * 模拟层的遮挡剔除，按原版 {@code SectionOcclusionGraph} 的形态组织：传播在后台线程、由图输入驱动，可见集是
+ * 视锥裁剪的产物，裁剪只在图更新或相机转动越过 2 度时重跑。
  *
  * <p>
- * 输入是每段的 36 位掩码，由 {@link SimulationMesher} 在烘制期用 {@code VisGraph} 算出，含义与原版
- * {@code VisibilitySet} 相同，即「从某一个面进、能不能从另一个面出去」。传播照抄原版
- * {@code SectionOcclusionGraph}：节点记着来路的行进方向，向六个邻段推进时用当前段的掩码判能不能穿过那个面，
- * 能穿过的邻段才进列表。
+ * 传播的输入由主线程拍成快照：段的三轴、掩码与 snap 拷进任务自己的数组，后台只读这份数组。原版的
+ * {@code GraphState} 是同一个做法，理由也一样：{@code SimulationSection} 的字段由主线程写，后台直接读就是跨线程读。
  *
  * <p>
- * 三条按开处理的规则，方向一律是少剔：掩码缺省 {@link #OPEN}，空段在 {@code applyAir} 里被置成全开，缺段则
- * 只跳过它自己不往下传，因为缺段本来就没有几何可画，等它到达时调用方会把可见集置脏重算。
+ * 一次只允许一个任务在途。在途期间主线程可以继续推高请求计数，任务结束时按「请求计数是否还等于自己抓的那个」决定
+ * 要不要再来一轮，所以脏位不会丢，也不会堆出多个任务。
  *
  * <p>
- * 只在客户端主线程调。段表是普通 HashMap，而客户端 tick、包分发与渲染同线程。
+ * 传播内部用「相对任务 base」的打包键：每轴 8 位、偏置 128，三轴拼进一个 long。绝对段号是 long 全域，打包不进去；
+ * 相对量的上界只由窗口决定，八位足够。越界用 {@link #PACK_OUT_OF_RANGE} 表达，不截断也不回绕。
+ *
+ * <p>
+ * 发布出去的 {@link Graph} 不可变，主线程只读；{@link #containsVisible} 用图自带的 base 打包，不用当前相机段：
+ * 图在途期间相机可能已经跨段，用当前段打包会与图里的键对不上。
+ *
+ * <p>
+ * 主线程读写本类的字段，后台任务只碰自己的 {@link Job} 与局部容器；两侧通过 volatile 的 {@link #current}、
+ * {@link #submitted}、{@link #inFlight} 交接。
  */
 final class SimulationVisibility {
 
@@ -37,164 +52,359 @@ final class SimulationVisibility {
     /** 没有来路方向：种子节点用，向六个邻段推进时不判穿面。 */
     private static final int NO_SOURCE = -1;
 
-    /**
-     * 被门判掉的记号，写在 {@code sources} 里。
-     *
-     * <p>
-     * 用它与「到达过的位集」区分开：到达过的节点值必为非负的位集，记号是负数，所以直线校验与再入队都能认出它，
-     * 同一个节点也只会被判一次。
-     */
-    private static final int REJECTED = -1;
-
-    /** 超过这个段数差才做直线校验，取 60 格折成段数，与原版 {@code SectionOcclusionGraph} 同阈值。 */
+    /** 超过这个段数差才做直线校验，取 60 格折成段数，与原版同阈值。 */
     private static final long RAY_MIN_SECTIONS = 3;
 
     /** 直线校验的步长：一段的体对角线向上取整，保证每步至少跨过一段，不会原地打转。 */
     private static final double RAY_STEP = Math.ceil(Math.sqrt(3.0) * 16.0);
 
-    /** 60 格的平方。距相机这个距离以内不做直线校验，近处本来也不会被遮住多少。 */
+    /** 60 格的平方。距相机这个距离以内不做直线校验。 */
     private static final double RAY_MIN_DISTANCE_SQ = 3600.0;
 
-    /** 直线校验的步数上限。正常相机几十步内就收敛，这段只为让非有限坐标也能终止。 */
+    /** 直线校验的步数上限，只为让非有限坐标也能终止。 */
     private static final int RAY_MAX_STEPS = 4096;
 
-    /** 一个待处理的 Section 与它的来路行进方向，取值为 {@code Direction.ordinal()} 或 {@link #NO_SOURCE}。 */
-    private record Node(Simulation.SectionKey key, int source) {
-    }
+    /** 打包键每轴的位宽，偏置之后落在 0 到 255。 */
+    private static final int PACK_BITS = 8;
 
-    /** 上一次是否算过，以及是不是以该相机 Section 为基准。 */
-    private boolean built;
+    /** 打包键每轴的偏置。 */
+    private static final long PACK_BIAS = 128L;
 
-    private long baseX;
+    /** 打包键的掩码，低 24 位。 */
+    private static final long PACK_MASK = (1L << (PACK_BITS * 3)) - 1L;
 
-    private long baseY;
+    /** 越界哨兵。合法键恒在 0 到 2^24-1。 */
+    private static final long PACK_OUT_OF_RANGE = -1L;
 
-    private long baseZ;
-
-    /** 上一次算出的可见集，按传播的出队顺序，即近似由近到远。 */
-    private List<Simulation.SnapSection> sections = List.of();
+    /** 相机段自身的打包键。 */
+    private static final long BASE_KEY = (PACK_BIAS << 16) | (PACK_BIAS << 8) | PACK_BIAS;
 
     /**
-     * 上一次算出的可见集。顺序即 draw 顺序，近的在前对早期深度测试有利。
+     * {@code sources} 的缺省值，即「未到达」。
      *
      * <p>
-     * 作废之后返回空表而不是旧表：换关卡时 {@code invalidate} 只清标志，字段里还留着上一个关卡的键，
-     * 而烘制那一侧会拿这张表去挑候选。
+     * 存储值是方向集加一，所以 0 只表示缺省：根节点的方向集本身就是 0，用 0 当缺省就分不开「在表里且来路为空」
+     * 与「不在表里」。
      */
+    private static final int SOURCES_ABSENT = 0;
+
+    /** 被直线校验判掉的记号。方向集最多 6 位即 64，所以 65 空着。 */
+    private static final int SOURCES_REJECTED = 65;
+
+    /** 队列条目里方向所占的位移。低 24 位是打包键，第 32 位起放方向加一。 */
+    private static final int QUEUE_SOURCE_SHIFT = 32;
+
+    /** 裁剪粒度：相机转动按 2 度取整比较，取自原版 {@code LevelRenderer} 的同一判据。 */
+    private static final float ROTATION_STEP = 2.0F;
+
+    /** 一次调用要用的相机与视锥，全部由主线程给出。 */
+    record View(long sectionX, long sectionY, long sectionZ, double inSectionX, double inSectionY,
+            double inSectionZ, long anchorX, long anchorY, long anchorZ, double localX, double localY,
+            double localZ, float xRot, float yRot, AnchoredFrustum frustum) {
+    }
+
+    /**
+     * 一次传播的产物，不可变。
+     *
+     * <p>
+     * {@code packed} 与 {@code snaps} 平行、只含 snap 非空的段，供裁剪用；{@code keys} 是全部到达过的打包键，
+     * 供 {@link #containsVisible} 用。两组都按图自己的 {@code base} 打包。
+     */
+    private record Graph(long baseX, long baseY, long baseZ, long[] packed, Simulation.SnapSection[] snaps,
+            LongOpenHashSet keys) {
+    }
+
+    /** 一次传播的输入。主线程填，后台只读。 */
+    private record Job(long baseX, long baseY, long baseZ, double cameraX, double cameraY, double cameraZ,
+            int generation, int request, long[] packed, long[] masks, Simulation.SnapSection[] snaps) {
+    }
+
+    /** 已发布的图。后台写，主线程读。 */
+    private volatile Graph current;
+
+    /** 主线程推上去的请求计数；每次图输入或相机段变化都加一。 */
+    private volatile int requested;
+
+    /** 后台任务抓走的那一个请求计数。与 {@link #requested} 不等说明该再跑一轮。 */
+    private volatile int submitted;
+
+    /** 是否有任务在途。 */
+    private volatile boolean inFlight;
+
+    /** 关卡代次。换关卡时加一，在途任务的结果按它丢弃。 */
+    private volatile int generation;
+
+    /** 裁剪集：传播结果经视锥过滤后的产物，只主线程读写。 */
+    private List<Simulation.SnapSection> culled = List.of();
+
+    private int culledVersion;
+
+    /** 图更新之后还没重裁过。 */
+    private boolean needsCull = true;
+
+    /** 上次裁剪时的相机转动角，用于判断要不要重裁。 */
+    private float lastXRot = Float.NaN;
+
+    private float lastYRot = Float.NaN;
+
+    /** 上次请求时看到的图输入版本与相机段，用来决定要不要推高请求计数。 */
+    private int lastGraphVersion = -1;
+
+    private long lastSectionX = Long.MIN_VALUE;
+
+    private long lastSectionY = Long.MIN_VALUE;
+
+    private long lastSectionZ = Long.MIN_VALUE;
+
+    /** 每帧调一次：按需提交后台传播、按需重裁，返回裁剪集。 */
+    List<Simulation.SnapSection> update(Simulation simulation, View view) {
+        boolean moved = view.sectionX() != this.lastSectionX || view.sectionY() != this.lastSectionY
+                || view.sectionZ() != this.lastSectionZ;
+        int version = simulation.graphVersion();
+        if (version != this.lastGraphVersion || moved) {
+            this.lastGraphVersion = version;
+            this.lastSectionX = view.sectionX();
+            this.lastSectionY = view.sectionY();
+            this.lastSectionZ = view.sectionZ();
+            this.requested++;
+        }
+        if (!this.inFlight && this.submitted != this.requested) {
+            this.farlands$submit(simulation, view);
+        }
+        this.farlands$cull(view);
+        return this.culled;
+    }
+
+    /** 裁剪集。没有图时为空表。 */
     List<Simulation.SnapSection> sections() {
-        return this.built ? this.sections : List.of();
+        return this.culled;
     }
 
-    /** 上一次的结果是不是以该相机 Section 为基准。 */
-    boolean matches(long sectionX, long sectionY, long sectionZ) {
-        return this.built && this.baseX == sectionX && this.baseY == sectionY && this.baseZ == sectionZ;
+    /** 裁剪集内容的版本，供渲染批次缓存判重。 */
+    int culledVersion() {
+        return this.culledVersion;
     }
 
-    /** 作废：换关卡或清空段表时调，下一次取用必然重算。 */
+    /** 该段此刻是否在传播结果里。按图自带的 base 打包，见类注释。 */
+    boolean containsVisible(long sectionX, long sectionY, long sectionZ) {
+        Graph graph = this.current;
+        if (graph == null) {
+            return false;
+        }
+        long key = farlands$pack(sectionX - graph.baseX(), sectionY - graph.baseY(), sectionZ - graph.baseZ());
+        return key != PACK_OUT_OF_RANGE && graph.keys().contains(key);
+    }
+
+    /** 作废：换关卡或清空段表时调。在途任务的结果按代次丢弃。 */
     void invalidate() {
-        this.built = false;
+        this.generation++;
+        this.current = null;
+        this.culled = List.of();
+        this.culledVersion++;
+        this.needsCull = true;
+        this.lastGraphVersion = -1;
+        this.lastSectionX = Long.MIN_VALUE;
+        this.lastSectionY = Long.MIN_VALUE;
+        this.lastSectionZ = Long.MIN_VALUE;
+        this.lastXRot = Float.NaN;
+        this.lastYRot = Float.NaN;
     }
 
-    /**
-     * 重算可见集。
-     *
-     * <p>
-     * 相机所在 Section 存在就从它出发，来路方向取 {@link #NO_SOURCE}，向六个邻段推进时不判穿面；不存在则从它
-     * 的六个邻段出发，来路方向取从相机 Section 指向该邻段的那一方向，于是该邻段自己的掩码照常参与判定。
-     *
-     * <p>
-     * 每个「Section 加来路方向」的组合最多入队一次，所以单个 Section 最多处理六次，边数是六向。
-     *
-     * <p>
-     * 直线校验是传播途中的门，见 {@link #farlands$rayClear}：远处节点在全开父节点这一条边上、入队之前先跑这条路，
-     * 不通过就不入图。门与后置过滤用同一个判据，强度差在时序：门问的是「路上每一段是否已经在建到一半的图里」，
-     * 过滤问的是全图建完之后，那时路上每一段当然都在，等于没判。
-     *
-     * <p>
-     * 门每个节点只判一次：被判掉的节点在 {@code sources} 里留一个 {@link #REJECTED} 记号，后续出口直接跳过，于是
-     * 成本是「节点数乘步进」，不是「边数乘步进」。
-     */
-    void rebuild(Simulation simulation, long sectionX, long sectionY, long sectionZ,
-            double cameraX, double cameraY, double cameraZ) {
-        Map<Simulation.SectionKey, SimulationSection> store = simulation.sectionMap();
-        Map<Simulation.SectionKey, Integer> sources = new HashMap<>();
-        List<Simulation.SectionKey> order = new ArrayList<>();
-        ArrayDeque<Node> queue = new ArrayDeque<>();
+    /** 拍快照并交给后台。主线程调。 */
+    private void farlands$submit(Simulation simulation, View view) {
+        int captured = this.requested;
+        int capturedGeneration = this.generation;
+        int count = simulation.sectionMap().size();
+        long[] packed = new long[count];
+        long[] masks = new long[count];
+        Simulation.SnapSection[] snaps = new Simulation.SnapSection[count];
+        int at = 0;
+        for (SimulationSection section : simulation.sectionMap().values()) {
+            packed[at] = farlands$pack(section.sectionX() - view.sectionX(),
+                    section.sectionY() - view.sectionY(), section.sectionZ() - view.sectionZ());
+            masks[at] = section.visibility();
+            snaps[at] = section.snap();
+            at++;
+        }
+        Job job = new Job(view.sectionX(), view.sectionY(), view.sectionZ(), view.inSectionX(), view.inSectionY(),
+                view.inSectionZ(), capturedGeneration, captured, packed, masks, snaps);
+        this.inFlight = true;
+        CompletableFuture.runAsync(() -> this.farlands$propagate(job), Util.backgroundExecutor());
+    }
 
-        Simulation.SectionKey base = new Simulation.SectionKey(sectionX, sectionY, sectionZ);
-        if (store.containsKey(base)) {
-            sources.put(base, 0);
-            order.add(base);
-            queue.add(new Node(base, NO_SOURCE));
+    /** 后台：从快照算出一张图并发布。只碰 {@code job} 与局部容器。 */
+    private void farlands$propagate(Job job) {
+        Long2IntOpenHashMap indexOf = new Long2IntOpenHashMap(job.packed().length);
+        for (int i = 0; i < job.packed().length; i++) {
+            if (job.packed()[i] != PACK_OUT_OF_RANGE) {
+                indexOf.put(job.packed()[i], i);
+            }
+        }
+        Long2IntOpenHashMap sources = new Long2IntOpenHashMap();
+        LongArrayList order = new LongArrayList();
+        LongArrayFIFOQueue queue = new LongArrayFIFOQueue();
+
+        if (indexOf.getOrDefault(BASE_KEY, -1) >= 0) {
+            sources.put(BASE_KEY, 1);
+            order.add(BASE_KEY);
+            queue.enqueue(BASE_KEY | ((long) (NO_SOURCE + 1) << QUEUE_SOURCE_SHIFT));
         } else {
             for (Direction direction : DIRECTIONS) {
-                Simulation.SectionKey seed = farlands$offset(base, direction);
-                if (!store.containsKey(seed)) {
+                long seed = farlands$pack(direction.getStepX(), direction.getStepY(), direction.getStepZ());
+                if (indexOf.getOrDefault(seed, -1) < 0) {
                     continue;
                 }
-                sources.put(seed, 1 << direction.ordinal());
+                sources.put(seed, (1 << direction.ordinal()) + 1);
                 order.add(seed);
-                queue.add(new Node(seed, direction.ordinal()));
+                queue.enqueue(seed | ((long) (direction.ordinal() + 1) << QUEUE_SOURCE_SHIFT));
             }
         }
 
-        while (!queue.isEmpty()) {
-            Node node = queue.poll();
-            SimulationSection section = store.get(node.key());
-            if (section == null) {
+        while (queue.size() > 0) {
+            long entry = queue.dequeueLong();
+            long key = entry & PACK_MASK;
+            int source = (int) (entry >>> QUEUE_SOURCE_SHIFT) - 1;
+            int at = indexOf.getOrDefault(key, -1);
+            if (at < 0) {
                 continue;
             }
-            long mask = section.visibility();
+            long mask = job.masks()[at];
             for (Direction exit : DIRECTIONS) {
-                if (node.source() != NO_SOURCE && !farlands$passes(mask, node.source(), exit.ordinal())) {
+                if (source != NO_SOURCE && !farlands$passes(mask, source, exit.ordinal())) {
                     continue;
                 }
-                Simulation.SectionKey next = farlands$offset(node.key(), exit);
-                if (!store.containsKey(next)) {
+                long next = farlands$step(key, exit);
+                if (next == PACK_OUT_OF_RANGE || indexOf.getOrDefault(next, -1) < 0) {
                     continue;
                 }
                 int bit = 1 << exit.ordinal();
-                Integer have = sources.get(next);
-                if (have == null) {
-                    if (mask == OPEN
-                            && !farlands$rayClear(next, base, store, sources, cameraX, cameraY, cameraZ)) {
-                        sources.put(next, REJECTED);
+                int have = sources.getOrDefault(next, SOURCES_ABSENT);
+                if (have == SOURCES_ABSENT) {
+                    if (mask == OPEN && !farlands$rayClear(next, indexOf, sources, job.cameraX(), job.cameraY(),
+                            job.cameraZ())) {
+                        sources.put(next, SOURCES_REJECTED);
                         continue;
                     }
-                    sources.put(next, bit);
+                    sources.put(next, bit + 1);
                     order.add(next);
-                    queue.add(new Node(next, exit.ordinal()));
-                } else if (have != REJECTED && (have & bit) == 0) {
-                    sources.put(next, have | bit);
-                    queue.add(new Node(next, exit.ordinal()));
+                    queue.enqueue(next | ((long) (exit.ordinal() + 1) << QUEUE_SOURCE_SHIFT));
+                } else if (have != SOURCES_REJECTED && (((have - 1) & bit) == 0)) {
+                    sources.put(next, ((have - 1) | bit) + 1);
+                    queue.enqueue(next | ((long) (exit.ordinal() + 1) << QUEUE_SOURCE_SHIFT));
                 }
             }
         }
 
-        List<Simulation.SnapSection> visible = new ArrayList<>(order.size());
-        for (Simulation.SectionKey key : order) {
-            SimulationSection section = store.get(key);
-            if (section == null) {
+        int size = order.size();
+        long[] packedOut = new long[size];
+        Simulation.SnapSection[] snapsOut = new Simulation.SnapSection[size];
+        LongOpenHashSet keys = new LongOpenHashSet(size);
+        int kept = 0;
+        for (int i = 0; i < size; i++) {
+            long key = order.getLong(i);
+            keys.add(key);
+            int at = indexOf.getOrDefault(key, -1);
+            if (at < 0) {
                 continue;
             }
-            Simulation.SnapSection snap = section.snap();
+            Simulation.SnapSection snap = job.snaps()[at];
             if (snap != null) {
-                visible.add(snap);
+                packedOut[kept] = key;
+                snapsOut[kept] = snap;
+                kept++;
             }
         }
-        this.sections = List.copyOf(visible);
-        this.built = true;
-        this.baseX = sectionX;
-        this.baseY = sectionY;
-        this.baseZ = sectionZ;
+        Graph graph = new Graph(job.baseX(), job.baseY(), job.baseZ(), Arrays.copyOf(packedOut, kept),
+                Arrays.copyOf(snapsOut, kept), keys);
+        this.inFlight = false;
+        this.submitted = job.request();
+        if (job.generation() == this.generation) {
+            this.current = graph;
+            this.needsCull = true;
+        }
+    }
+
+    /**
+     * 主线程：按需重裁。
+     *
+     * <p>
+     * 重裁条件是「图发布过但还没裁」或「相机转动跨过 2 度」。平移不触发：图本身随相机段变化重算，段内平移对裁剪
+     * 的影响小于一次裁剪的成本。
+     */
+    private void farlands$cull(View view) {
+        Graph graph = this.current;
+        if (graph == null) {
+            return;
+        }
+        boolean rotationMoved = Math.floor(view.xRot() / ROTATION_STEP) != Math.floor(this.lastXRot / ROTATION_STEP)
+                || Math.floor(view.yRot() / ROTATION_STEP) != Math.floor(this.lastYRot / ROTATION_STEP);
+        if (!this.needsCull && !rotationMoved) {
+            return;
+        }
+        this.lastXRot = view.xRot();
+        this.lastYRot = view.yRot();
+        this.needsCull = false;
+        AnchoredFrustum frustum = view.frustum();
+        long anchorX = view.anchorX();
+        long anchorY = view.anchorY();
+        long anchorZ = view.anchorZ();
+        double localX = view.localX();
+        double localY = view.localY();
+        double localZ = view.localZ();
+        long[] packed = graph.packed();
+        Simulation.SnapSection[] snaps = graph.snaps();
+        List<Simulation.SnapSection> next = new ArrayList<>(snaps.length);
+        for (int i = 0; i < snaps.length; i++) {
+            Simulation.SnapSection snap = snaps[i];
+            if (frustum == null) {
+                next.add(snap);
+                continue;
+            }
+            double originX = (double) (snap.originX() - anchorX) - localX;
+            double originY = (double) (snap.originY() - anchorY) - localY;
+            double originZ = (double) (snap.originZ() - anchorZ) - localZ;
+            if (frustum.farlands$isVisibleRelative(originX, originY, originZ, originX + SimulationSection.SIZE,
+                    originY + SimulationSection.SIZE, originZ + SimulationSection.SIZE)) {
+                next.add(snap);
+            }
+        }
+        this.culled = List.copyOf(next);
+        this.culledVersion++;
+    }
+
+    /** 相对任务 base 的三轴偏移打包成一个 long，越界返回 {@link #PACK_OUT_OF_RANGE}。 */
+    private static long farlands$pack(long dx, long dy, long dz) {
+        if (((dx + PACK_BIAS) >>> PACK_BITS) != 0L || ((dy + PACK_BIAS) >>> PACK_BITS) != 0L
+                || ((dz + PACK_BIAS) >>> PACK_BITS) != 0L) {
+            return PACK_OUT_OF_RANGE;
+        }
+        return ((dx + PACK_BIAS) << 16) | ((dy + PACK_BIAS) << 8) | (dz + PACK_BIAS);
+    }
+
+    private static long farlands$unpackX(long key) {
+        return ((key >> 16) & 0xFFL) - PACK_BIAS;
+    }
+
+    private static long farlands$unpackY(long key) {
+        return ((key >> 8) & 0xFFL) - PACK_BIAS;
+    }
+
+    private static long farlands$unpackZ(long key) {
+        return (key & 0xFFL) - PACK_BIAS;
+    }
+
+    /** 沿该方向走一段。必须解包再打包：直接对打包值加偏移会让字段串位。 */
+    private static long farlands$step(long key, Direction direction) {
+        return farlands$pack(farlands$unpackX(key) + direction.getStepX(),
+                farlands$unpackY(key) + direction.getStepY(),
+                farlands$unpackZ(key) + direction.getStepZ());
     }
 
     /**
      * 来路是 {@code source} 这一行进方向时，能不能从 {@code exit} 这个面穿出去。
      *
      * <p>
-     * 来路方向是「从上一段走进本段」的方向，所以入口面是它的反面；这与原版 {@code SectionOcclusionGraph} 传
-     * {@code DIRECTION[source].getOpposite()} 的做法一致。
+     * 来路方向是「从上一段走进本段」的方向，所以入口面是它的反面，与原版传 {@code getOpposite()} 的做法一致。
      */
     private static boolean farlands$passes(long mask, int source, int exit) {
         Direction entry = DIRECTIONS[source].getOpposite();
@@ -202,24 +412,17 @@ final class SimulationVisibility {
     }
 
     /**
-     * 直线校验：从该 Section 离相机最近的一点朝相机走一条直线，路上若穿过「存在但没被传播到」的 Section，判这一段
-     * 是传播漏出来的，不入图。
+     * 直线校验：从该段离相机最近的一点朝相机走一条直线，路上若穿过「存在但没被传播到」的段，判这一段是漏出来的。
      *
      * <p>
-     * 掩码只答「这个 Section 能不能从某个面穿到某个面」，不答开口在哪，所以一串开口错开的 Section 也能连成通路，
-     * 表现为大片本来被挡住的东西被算成可见。这一遍用直线把这类通路掐掉，与原版对 60 格之外的 Section 做的那次步进
-     * 同源。它必须跑在入队之前：一路上「已经到达」的那批节点，正是这个时序给出的约束。
-     *
-     * <p>
-     * 缺段不算证据：它还没到达，判不了，按穿过处理。带 {@link #REJECTED} 记号的节点按「没到达」算，因为它已经被
-     * 别的边判掉过一次。坐标全部用「相对相机所在 Section 原点」的量，量级只有几十格，double 在 int 之外也精确。
+     * 掩码只答「能不能从某个面穿到某个面」，不答开口在哪，所以一串开口错开的段也能连成通路。它必须跑在入队之前：
+     * 一路上「已经到达」的那批节点，正是这个时序给出的约束。缺段不算证据，按穿过处理。
      */
-    private static boolean farlands$rayClear(Simulation.SectionKey key, Simulation.SectionKey base,
-            Map<Simulation.SectionKey, SimulationSection> store, Map<Simulation.SectionKey, Integer> reached,
+    private static boolean farlands$rayClear(long key, Long2IntOpenHashMap indexOf, Long2IntOpenHashMap sources,
             double cameraX, double cameraY, double cameraZ) {
-        long offsetX = key.x() - base.x();
-        long offsetY = key.y() - base.y();
-        long offsetZ = key.z() - base.z();
+        long offsetX = farlands$unpackX(key);
+        long offsetY = farlands$unpackY(key);
+        long offsetZ = farlands$unpackZ(key);
         long span = Math.max(Math.abs(offsetX), Math.max(Math.abs(offsetY), Math.abs(offsetZ)));
         if (span <= RAY_MIN_SECTIONS) {
             return true;
@@ -254,20 +457,17 @@ final class SimulationVisibility {
             probeX += stepX;
             probeY += stepY;
             probeZ += stepZ;
-            Simulation.SectionKey probed = new Simulation.SectionKey(
-                    base.x() + Math.floorDiv((long) Math.floor(probeX), 16L),
-                    base.y() + Math.floorDiv((long) Math.floor(probeY), 16L),
-                    base.z() + Math.floorDiv((long) Math.floor(probeZ), 16L));
-            Integer seen = reached.get(probed);
-            if (store.get(probed) != null && (seen == null || seen == REJECTED)) {
+            long probed = farlands$pack(Math.floorDiv((long) Math.floor(probeX), 16L),
+                    Math.floorDiv((long) Math.floor(probeY), 16L),
+                    Math.floorDiv((long) Math.floor(probeZ), 16L));
+            if (probed == PACK_OUT_OF_RANGE) {
+                continue;
+            }
+            int seen = sources.getOrDefault(probed, SOURCES_ABSENT);
+            if (indexOf.getOrDefault(probed, -1) >= 0 && (seen == SOURCES_ABSENT || seen == SOURCES_REJECTED)) {
                 return false;
             }
         }
         return true;
-    }
-
-    private static Simulation.SectionKey farlands$offset(Simulation.SectionKey key, Direction direction) {
-        return new Simulation.SectionKey(key.x() + direction.getStepX(), key.y() + direction.getStepY(),
-                key.z() + direction.getStepZ());
     }
 }

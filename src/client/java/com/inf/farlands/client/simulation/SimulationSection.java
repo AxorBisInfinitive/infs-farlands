@@ -5,6 +5,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import com.mojang.blaze3d.buffers.GpuBuffer;
+
 import com.inf.farlands.simulation.model.SimulationSectionData;
 import com.inf.farlands.util.world.WorldBounds;
 
@@ -125,6 +127,19 @@ public final class SimulationSection {
     private int missing = ALL_NEIGHBORS_MISSING;
 
     /**
+     * 该段在 uber 缓冲里的几何位置，没有几何时为 null。
+     *
+     * <p>
+     * 挂段对象上而不是挂在一张按段号索引的表里，是为了让渲染侧取几何只是一次字段读：原版的
+     * {@code section.getSectionMesh()} 走的就是这条路。{@code baseVertex} 是这块顶点在共享缓冲里的起始顶点
+     * 序号，draw 拿它做 {@code glDrawElementsBaseVertex} 的偏移。
+     */
+    private Geometry geometry;
+
+    /** 待发布几何的顶点数。烘制完成时写下，分配落地时与偏移一起发布，见 {@link #publishGeometry}。 */
+    private int stagedVertexCount;
+
+    /**
      * 每格的 tint 缓存，按 resolver 与「Y 的 quart 带」两级。0 表示未算，tint 恒不透明，所以 0 不会是真值。
      *
      * <p>
@@ -236,6 +251,42 @@ public final class SimulationSection {
         this.farlands$markDirty(0, 0, 0);
         this.farlands$markDirty(SimulationSection.SIZE - 1, SimulationSection.SIZE - 1,
                 SimulationSection.SIZE - 1);
+    }
+
+    /**
+     * 段几何：共享顶点缓冲、起始顶点序号、顶点数。
+     *
+     * <p>
+     * 缓冲是 uber 缓冲里的一块 heap，很多段共用它；本段的内容从 {@code baseVertex} 个顶点处开始。索引仍是
+     * 自有的顺序索引缓冲，所以绘制时由 {@code baseVertex} 把零基索引平移到本段。
+     */
+    public record Geometry(GpuBuffer buffer, int baseVertex, int vertexCount) {
+
+        /** 按「每四个顶点接六个索引」换算的索引数。 */
+        public int indexCount() {
+            return this.vertexCount / 4 * 6;
+        }
+    }
+
+    /** 当前几何，没有则为 null。 */
+    public Geometry geometry() {
+        return this.geometry;
+    }
+
+    /** 记下待发布几何的顶点数，见 {@link #stagedVertexCount}。 */
+    public void setStagedVertexCount(int vertexCount) {
+        this.stagedVertexCount = vertexCount;
+    }
+
+    /** 分配落地之后发布几何。缓冲与偏移来自 uber 缓冲的上传回调。 */
+    public void publishGeometry(GpuBuffer buffer, int baseVertex) {
+        this.geometry = new Geometry(buffer, baseVertex, this.stagedVertexCount);
+    }
+
+    /** 摘掉几何。段被摘除或几何被释放时调，见 {@code SimulationGeometry.drop}。 */
+    public void clearGeometry() {
+        this.geometry = null;
+        this.stagedVertexCount = 0;
     }
 
     /** 该段是否参与模拟。可玩界内的段为假。 */

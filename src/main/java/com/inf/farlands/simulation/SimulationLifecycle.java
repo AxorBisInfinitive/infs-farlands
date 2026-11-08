@@ -320,7 +320,6 @@ public final class SimulationLifecycle {
         applyLight(data);
         data.advanceTo(SimulationSectionStage.LIGHTED);
         data.markPersistDirty();
-        data.markDirty();
         SimulationServer.noteDirty(level.dimension(), key);
     }
 

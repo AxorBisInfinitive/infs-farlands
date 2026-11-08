@@ -2,6 +2,7 @@ package com.inf.farlands.client.mixin.simulation;
 
 import java.util.List;
 
+import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.systems.RenderPass;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
@@ -9,6 +10,7 @@ import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 
 import com.inf.farlands.client.render.simulation.SimulationPipelines;
 import com.inf.farlands.client.render.simulation.SimulationRenderPass;
+import com.inf.farlands.client.simulation.SimulationTimings;
 
 import net.minecraft.client.renderer.chunk.ChunkSectionLayerGroup;
 import net.minecraft.client.renderer.chunk.ChunkSectionsToRender;
@@ -62,8 +64,14 @@ public class ChunkSectionsToRenderMixin {
             return;
         }
         pass.setPipeline(SimulationPipelines.SIMULATION_TERRAIN);
-        pass.drawMultipleIndexed(batch.draws(), null, null,
-                List.of("SimSection"), batch.infos());
+        long drawStart = SimulationTimings.begin();
+        int draws = 0;
+        for (List<RenderPass.Draw<GpuBufferSlice[]>> bufferGroup : batch.groups()) {
+            draws += bufferGroup.size();
+            pass.drawMultipleIndexed(bufferGroup, null, null, List.of("SimSection"), batch.infos());
+        }
+        SimulationTimings.draws(draws);
+        SimulationTimings.end(SimulationTimings.DRAW, drawStart);
         pass.setPipeline(pipeline);
     }
 }

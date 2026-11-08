@@ -2,7 +2,9 @@ package com.inf.farlands.client.render.simulation;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
@@ -18,6 +20,7 @@ import com.inf.farlands.client.render.ExactCameraOrigin;
 import com.inf.farlands.client.simulation.Simulation;
 import com.inf.farlands.client.simulation.SimulationHolder;
 import com.inf.farlands.client.simulation.SimulationSection;
+import com.inf.farlands.client.simulation.SimulationTimings;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.DynamicUniformStorage;
@@ -64,8 +67,16 @@ public final class SimulationRenderPass {
     /** 一条环形存储容纳的段数上限；超过时由存储自己扩容并打一条日志。 */
     private static final int CAPACITY = 512;
 
-    /** 一批绘制：draw 列表、它们各自的段 UBO 切片，以及合计索引数。 */
-    public record Batch(List<RenderPass.Draw<GpuBufferSlice[]>> draws, GpuBufferSlice[] infos, int indexCount) {
+    /**
+     * 一批绘制：按顶点缓冲分好的组、它们各自的段 UBO 切片，以及合计索引数。
+     *
+     * <p>
+     * 分组不是优化而是必需：{@code VertexArrayCache} 只在相邻两条 draw 用同一块缓冲时才跳过
+     * {@code glBindVertexBuffer}，而段的绘制顺序与缓冲归属无关。同一组内所有 draw 共用一块 uber heap，于是每组
+     * 只绑一次。
+     */
+    public record Batch(List<List<RenderPass.Draw<GpuBufferSlice[]>>> groups, GpuBufferSlice[] infos,
+            int indexCount) {
     }
 
     /**
@@ -94,6 +105,39 @@ public final class SimulationRenderPass {
 
     /** 本帧准备好的批次，没有可见段时为 null。 */
     private Batch batch;
+
+    /** 缓存是否有效。失效条件是可见集内容、几何、相机位姿、图集尺寸任一项变化。 */
+    private boolean cacheValid;
+
+    private int cacheVisibleVersion = -1;
+
+    private int cacheGeometryVersion = -1;
+
+    private long cacheAnchorX;
+
+    private long cacheAnchorY;
+
+    private long cacheAnchorZ;
+
+    private double cacheLocalX;
+
+    private double cacheLocalY;
+
+    private double cacheLocalZ;
+
+    private final Matrix4f cacheView = new Matrix4f();
+
+    private int cacheAtlasWidth = -1;
+
+    private int cacheAtlasHeight = -1;
+
+    /** 缓存下来的段 UBO 输入。相机不变时偏移与矩阵都不变，所以只需重写、不必重建。 */
+    private SectionInfo[] cachedInfos;
+
+    /** 缓存下来的 draw 分组。顶点缓冲与索引缓冲在几何不变时不变，切片由 {@code batch.infos()} 现给。 */
+    private List<List<RenderPass.Draw<GpuBufferSlice[]>>> cachedGroups;
+
+    private int cachedIndices;
 
     /** 自有的索引缓冲，内容是 0 起的四边形顺序索引。容量按索引数记。 */
     private GpuBuffer indexBuffer;
@@ -139,48 +183,67 @@ public final class SimulationRenderPass {
             camLocalY = cameraPos.y - (double) camAnchorY;
             camLocalZ = cameraPos.z - (double) camAnchorZ;
         }
-        // 可见集由遮挡剔除给出，遍历源不再是整张快照：被地形挡住的 Section 在这里就已经不在列表里。
+        // 先把此前 stage 的几何落地：段上的几何引用在回调里更新，之后遍历读到的都是本帧的偏移。
+        SimulationGeometry.instance().flush();
+        // 遍历源是视锥裁剪过的集：传播与裁剪都在 SimulationVisibility 里，裁剪只在图发布或相机转动跨 2 度时重跑。
+        AnchoredFrustum frustum = camera.initialized && camera.cullFrustum instanceof AnchoredFrustum candidate
+                ? candidate
+                : null;
+        long rebuildStart = SimulationTimings.begin();
         List<Simulation.SnapSection> sections = simulation.visibleSections(camAnchorX, camAnchorY, camAnchorZ,
-                camLocalX, camLocalY, camLocalZ);
+                camLocalX, camLocalY, camLocalZ, camera.xRot, camera.yRot, frustum);
+        SimulationTimings.end(SimulationTimings.REBUILD, rebuildStart);
+        SimulationTimings.visible(sections.size());
+        int atlasWidth = atlas.getWidth(0);
+        int atlasHeight = atlas.getHeight(0);
+        Matrix4f view = new Matrix4f(camera.viewRotationMatrix);
+        int visibleVersion = simulation.visibleVersion();
+        int geometryVersion = SimulationGeometry.instance().version();
+        if (this.farlands$cacheHit(visibleVersion, geometryVersion, camAnchorX, camAnchorY, camAnchorZ, camLocalX,
+                camLocalY, camLocalZ, view, atlasWidth, atlasHeight)) {
+            SimulationTimings.cache(true);
+            if (this.cachedGroups == null) {
+                return;
+            }
+            long uboStart = SimulationTimings.begin();
+            GpuBufferSlice[] hitSlices = this.farlands$storage().writeUniforms(this.cachedInfos);
+            SimulationTimings.end(SimulationTimings.UBO, uboStart);
+            this.batch = new Batch(this.cachedGroups, hitSlices, this.cachedIndices);
+            return;
+        }
+        this.farlands$storeCache(visibleVersion, geometryVersion, camAnchorX, camAnchorY, camAnchorZ, camLocalX,
+                camLocalY, camLocalZ, view, atlasWidth, atlasHeight);
+        this.cachedGroups = null;
+        this.cachedInfos = null;
+        this.cachedIndices = 0;
+        long iterateStart = SimulationTimings.begin();
         if (sections.isEmpty()) {
+            SimulationTimings.end(SimulationTimings.ITERATE, iterateStart);
             return;
         }
         List<Simulation.SnapSection> visible = new ArrayList<>(sections.size());
-        List<SimulationGeometry.Entry> buffers = new ArrayList<>(sections.size());
+        List<SimulationSection.Geometry> geometries = new ArrayList<>(sections.size());
         int indices = 0;
         int maxDrawIndices = 0;
         for (Simulation.SnapSection section : sections) {
-            Simulation.SectionKey columnKey = section.key();
-            SimulationGeometry.Entry entry = SimulationGeometry.instance().get(columnKey);
-            if (entry == null || entry.vertexCount() <= 0) {
+            SimulationSection.Geometry geometry = section.section().geometry();
+            if (geometry == null || geometry.vertexCount() <= 0) {
                 continue;
             }
-            if (camera.initialized && camera.cullFrustum instanceof AnchoredFrustum frustum) {
-                double originX = (double) (section.originX() - camAnchorX) - camLocalX;
-                double originY = (double) (section.originY() - camAnchorY) - camLocalY;
-                double originZ = (double) (section.originZ() - camAnchorZ) - camLocalZ;
-                if (!frustum.farlands$isVisibleRelative(originX, originY, originZ,
-                        originX + SimulationSection.SIZE, originY + SimulationSection.SIZE,
-                        originZ + SimulationSection.SIZE)) {
-                    continue;
-                }
-            }
-            int drawIndices = entry.vertexCount() / 4 * 6;
+            int drawIndices = geometry.indexCount();
             indices += drawIndices;
             if (drawIndices > maxDrawIndices) {
                 maxDrawIndices = drawIndices;
             }
             visible.add(section);
-            buffers.add(entry);
+            geometries.add(geometry);
         }
         int count = visible.size();
+        SimulationTimings.end(SimulationTimings.ITERATE, iterateStart);
         if (count == 0) {
             return;
         }
         this.farlands$ensureIndices(maxDrawIndices);
-        int atlasWidth = atlas.getWidth(0);
-        int atlasHeight = atlas.getHeight(0);
-        Matrix4f view = new Matrix4f(camera.viewRotationMatrix);
         SectionInfo[] infos = new SectionInfo[count];
         for (int i = 0; i < count; i++) {
             Simulation.SnapSection section = visible.get(i);
@@ -189,16 +252,58 @@ public final class SimulationRenderPass {
                     (float) ((double) (section.originY() - camAnchorY) - camLocalY),
                     (float) ((double) (section.originZ() - camAnchorZ) - camLocalZ));
         }
+        long uboStart = SimulationTimings.begin();
         GpuBufferSlice[] slices = this.farlands$storage().writeUniforms(infos);
-        List<RenderPass.Draw<GpuBufferSlice[]>> draws = new ArrayList<>(count);
+        SimulationTimings.end(SimulationTimings.UBO, uboStart);
+        Map<GpuBuffer, List<RenderPass.Draw<GpuBufferSlice[]>>> byBuffer = new LinkedHashMap<>();
         for (int i = 0; i < count; i++) {
-            SimulationGeometry.Entry entry = buffers.get(i);
+            SimulationSection.Geometry geometry = geometries.get(i);
             int slot = i;
-            int drawIndices = entry.vertexCount() / 4 * 6;
-            draws.add(new RenderPass.Draw<>(0, entry.buffer(), this.indexBuffer, this.indexType, 0, drawIndices, 0,
-                    (all, uploader) -> uploader.upload("SimSection", all[slot])));
+            byBuffer.computeIfAbsent(geometry.buffer(), owner -> new ArrayList<>())
+                    .add(new RenderPass.Draw<>(0, geometry.buffer(), this.indexBuffer, this.indexType, 0,
+                            geometry.indexCount(), geometry.baseVertex(),
+                            (all, uploader) -> uploader.upload("SimSection", all[slot])));
         }
-        this.batch = new Batch(draws, slices, indices);
+        List<List<RenderPass.Draw<GpuBufferSlice[]>>> groups = List.copyOf(byBuffer.values());
+        this.cachedInfos = infos;
+        this.cachedGroups = groups;
+        this.cachedIndices = indices;
+        this.batch = new Batch(groups, slices, indices);
+    }
+
+    /**
+     * 缓存键比对：可见集内容、几何、相机位姿、图集尺寸四项全等才算命中。
+     *
+     * <p>
+     * 位姿三项缺一不可：视锥测试依赖位置与朝向，段 UBO 的偏移依赖位置、`modelView` 依赖朝向。图集尺寸进 UBO，
+     * 资源重载换图集时会连带清几何、版本自增，所以它是第二道闸而不是主闸。
+     */
+    private boolean farlands$cacheHit(int visibleVersion, int geometryVersion, long anchorX, long anchorY,
+            long anchorZ, double localX, double localY, double localZ, Matrix4f view, int atlasWidth,
+            int atlasHeight) {
+        return this.cacheValid && this.cacheVisibleVersion == visibleVersion
+                && this.cacheGeometryVersion == geometryVersion && this.cacheAnchorX == anchorX
+                && this.cacheAnchorY == anchorY && this.cacheAnchorZ == anchorZ && this.cacheLocalX == localX
+                && this.cacheLocalY == localY && this.cacheLocalZ == localZ
+                && this.cacheView.equals(view, 0.0F) && this.cacheAtlasWidth == atlasWidth
+                && this.cacheAtlasHeight == atlasHeight;
+    }
+
+    private void farlands$storeCache(int visibleVersion, int geometryVersion, long anchorX, long anchorY,
+            long anchorZ, double localX, double localY, double localZ, Matrix4f view, int atlasWidth,
+            int atlasHeight) {
+        this.cacheValid = true;
+        this.cacheVisibleVersion = visibleVersion;
+        this.cacheGeometryVersion = geometryVersion;
+        this.cacheAnchorX = anchorX;
+        this.cacheAnchorY = anchorY;
+        this.cacheAnchorZ = anchorZ;
+        this.cacheLocalX = localX;
+        this.cacheLocalY = localY;
+        this.cacheLocalZ = localZ;
+        this.cacheView.set(view);
+        this.cacheAtlasWidth = atlasWidth;
+        this.cacheAtlasHeight = atlasHeight;
     }
 
     /** 本帧准备好的批次，没有则为 null。渲染期取用。 */
@@ -222,6 +327,10 @@ public final class SimulationRenderPass {
     /** 释放本类持有的显存。关服或换世界时调，之后实例作废，下一次 {@code prepare} 重建。 */
     public void clear() {
         this.batch = null;
+        this.cacheValid = false;
+        this.cachedGroups = null;
+        this.cachedInfos = null;
+        this.cachedIndices = 0;
         if (this.indexBuffer != null) {
             GpuBuffer buffer = this.indexBuffer;
             this.indexBuffer = null;
