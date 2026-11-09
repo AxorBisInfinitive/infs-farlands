@@ -104,6 +104,15 @@ public final class Simulation {
     private static final int BUILD_PER_TICK = 320;
 
     /**
+     * 不可达段在烘焙排序里的偏置，比任何窗口内距离都大。
+     *
+     * <p>
+     * 窗口半径最大 32，两轴平方和的上界是 2 乘 32 的平方，远小于这个值；加上它之后偏置不会溢出，也不会盖住可达段之间的
+     * 距离次序。
+     */
+    private static final long UNREACHABLE_BIAS = 1L << 40;
+
+    /**
      * 装关卡或退世界时调。客户端不再有生产者：段与它的内容都从服务端的包来。
      *
      * <p>
@@ -422,50 +431,57 @@ public final class Simulation {
     }
 
     /**
-     * 把最近的 {@code picked.length} 个待烘段填进 {@code picked}，返回实际填了几个。
+     * 把最近的一批待烘段填进 {@code picked}，返回实际填了几个。
      *
      * <p>
-     * 选取用容量等于本批配额的固定最大堆，堆顶是已选中最远的一个。候选只与堆顶比一次，近了才替换并下沉。逐候选
-     * 线性找最大在配额上百、待烘上万时是千万次比较，与烘制本身同量级。
+     * 排序键是「可达优先，其次距离」：遮挡传播判为不可达的段加上一个比任何窗口内距离都大的偏置，于是它们只在配额有剩时
+     * 才被烘。这一条只改顺序，不动任何存在性语义。不可达的段照样留在待烘集里，图一变就会轮到它。
+     *
+     * <p>
+     * 选取用容量等于本批配额的固定最大堆，堆顶是已选中最差的一个。候选只与堆顶比一次，更好才替换并下沉。逐候选线性找
+     * 最大在配额上百、待烘上万时是千万次比较，与烘制本身同量级。
      */
     private int farlands$pickNearest(SectionKey[] picked, long centerX, long centerZ) {
         int want = picked.length;
-        long[] distances = new long[want];
+        long[] scores = new long[want];
         int size = 0;
         for (SectionKey key : this.pending) {
             long dx = key.x() - centerX;
             long dz = key.z() - centerZ;
-            long distance = dx * dx + dz * dz;
+            long score = dx * dx + dz * dz;
+            if (!this.visibility.containsVisible(key.x(), key.y(), key.z())) {
+                score += UNREACHABLE_BIAS;
+            }
             if (size < want) {
                 picked[size] = key;
-                distances[size] = distance;
-                farlands$siftUp(picked, distances, size);
+                scores[size] = score;
+                farlands$siftUp(picked, scores, size);
                 size++;
                 continue;
             }
-            if (distance < distances[0]) {
+            if (score < scores[0]) {
                 picked[0] = key;
-                distances[0] = distance;
-                farlands$siftDown(picked, distances, size);
+                scores[0] = score;
+                farlands$siftDown(picked, scores, size);
             }
         }
         return size;
     }
 
     /** 新入堆的元素上浮到它在最大堆里的位置。 */
-    private static void farlands$siftUp(SectionKey[] keys, long[] distances, int index) {
+    private static void farlands$siftUp(SectionKey[] keys, long[] scores, int index) {
         while (index > 0) {
             int parent = (index - 1) >>> 1;
-            if (distances[parent] >= distances[index]) {
+            if (scores[parent] >= scores[index]) {
                 return;
             }
-            farlands$swap(keys, distances, parent, index);
+            farlands$swap(keys, scores, parent, index);
             index = parent;
         }
     }
 
     /** 替换堆顶之后下沉到它在最大堆里的位置。 */
-    private static void farlands$siftDown(SectionKey[] keys, long[] distances, int size) {
+    private static void farlands$siftDown(SectionKey[] keys, long[] scores, int size) {
         int index = 0;
         while (true) {
             int left = (index << 1) + 1;
@@ -473,22 +489,22 @@ public final class Simulation {
                 return;
             }
             int right = left + 1;
-            int largest = right < size && distances[right] > distances[left] ? right : left;
-            if (distances[index] >= distances[largest]) {
+            int largest = right < size && scores[right] > scores[left] ? right : left;
+            if (scores[index] >= scores[largest]) {
                 return;
             }
-            farlands$swap(keys, distances, index, largest);
+            farlands$swap(keys, scores, index, largest);
             index = largest;
         }
     }
 
-    private static void farlands$swap(SectionKey[] keys, long[] distances, int a, int b) {
+    private static void farlands$swap(SectionKey[] keys, long[] scores, int a, int b) {
         SectionKey key = keys[a];
         keys[a] = keys[b];
         keys[b] = key;
-        long distance = distances[a];
-        distances[a] = distances[b];
-        distances[b] = distance;
+        long score = scores[a];
+        scores[a] = scores[b];
+        scores[b] = score;
     }
 
     /**
@@ -671,6 +687,24 @@ public final class Simulation {
     /** 图输入的版本，见 {@link #graphVersion}。 */
     int graphVersion() {
         return this.graphVersion;
+    }
+
+    /**
+     * 作废全部已烘几何：先清段上的引用，再关显存侧。
+     *
+     * <p>
+     * 顺序是契约。反过来的话，从关显存到该段重新烘完并发布的那几秒里，渲染会拿已删除的 GL 缓冲名字建 draw，GL 报
+     * {@code INVALID_OPERATION} 并丢掉那一批，表现为整片方块暂时不画。清完引用之后那几秒是「没有几何可画」，与
+     * vanilla 改视距后的重编译同形。
+     *
+     * <p>
+     * 调用点：资源重载、画质与视距变化、换关卡。这些都会让已烘入顶点的东西失效。
+     */
+    public void invalidateGeometry() {
+        for (SimulationSection section : this.sections.values()) {
+            section.clearAllGeometry();
+        }
+        SimulationGeometry.instance().clear();
     }
 
     /** 裁剪集内容的版本，供渲染批次缓存判重。 */

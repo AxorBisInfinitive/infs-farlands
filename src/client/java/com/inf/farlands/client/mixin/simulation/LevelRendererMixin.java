@@ -3,7 +3,6 @@ package com.inf.farlands.client.mixin.simulation;
 import com.mojang.blaze3d.vertex.PoseStack;
 
 import com.inf.farlands.client.render.ExactCameraOrigin;
-import com.inf.farlands.client.render.simulation.SimulationGeometry;
 import com.inf.farlands.client.render.simulation.SimulationRenderPass;
 import com.inf.farlands.client.simulation.Simulation;
 import com.inf.farlands.client.simulation.SimulationHolder;
@@ -93,7 +92,11 @@ public class LevelRendererMixin {
      * <p>
      * 触发点：资源重载成功分支、{@code ambientOcclusion}、{@code cutoutLeaves}、{@code improvedTransparency}、
      * 群系混合半径、有效渲染距离变化，以及 {@code setLevel}。这些都改已烘入顶点或落在模型与图集上的东西，
-     * 所以清模型部件缓存、释放全部段几何、把全部段放回待烘。
+     * 所以清模型部件缓存、作废全部段几何、把全部段放回待烘。
+     *
+     * <p>
+     * 几何的作废走 {@link Simulation#invalidateGeometry()}，它在关显存之前先清段上的引用。只调
+     * {@code SimulationGeometry.clear()} 不够：段上仍挂着已关闭的缓冲，之后每一帧都会拿死名字建 draw。
      *
      * <p>
      * {@code setLevel} 那一次要跳过：此时 {@code Simulation.setLayer} 还没跑，缓存与列都属于旧关卡，
@@ -107,7 +110,7 @@ public class LevelRendererMixin {
             return;
         }
         SimulationMesher.clearParts();
-        SimulationGeometry.instance().clear();
+        simulation.invalidateGeometry();
         simulation.requeueAllSections();
     }
 

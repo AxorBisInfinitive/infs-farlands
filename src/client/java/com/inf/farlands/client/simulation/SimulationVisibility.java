@@ -8,6 +8,7 @@ import java.util.concurrent.CompletableFuture;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 
 import com.inf.farlands.client.render.AnchoredFrustum;
 
@@ -108,9 +109,11 @@ final class SimulationVisibility {
      * 一次传播的产物，不可变。
      *
      * <p>
-     * 只留 snap 非空的段：没有 snap 的段没有几何，进裁剪集也只是被跳过。
+     * {@code keys} 是按图自己的 base 打包的「到达过」的全集，供 {@link #containsVisible} 用；{@code snaps} 只留 snap
+     * 非空的段，供裁剪用。两组都按同一个 base 打包，所以相机跨段之后仍能与图里的键对上。
      */
-    private record Graph(Simulation.SnapSection[] snaps) {
+    private record Graph(long baseX, long baseY, long baseZ, LongOpenHashSet keys,
+            Simulation.SnapSection[] snaps) {
     }
 
     /** 一次传播的输入。主线程填，后台只读。 */
@@ -177,6 +180,22 @@ final class SimulationVisibility {
     /** 裁剪集内容的版本，供渲染批次缓存判重。 */
     int culledVersion() {
         return this.culledVersion;
+    }
+
+    /**
+     * 该段此刻是否在传播结果里，即从相机段出发、经可穿过的面能不能走到它。
+     *
+     * <p>
+     * 按图自带的 base 打包，不用当前相机段：图在途期间相机可能已经跨段，用当前段打包会与图里的键对不上。图还没发布时
+     * 返回假，调用方据此退回「不区分可达性」的顺序。
+     */
+    boolean containsVisible(long sectionX, long sectionY, long sectionZ) {
+        Graph graph = this.current;
+        if (graph == null) {
+            return false;
+        }
+        long key = farlands$pack(sectionX - graph.baseX(), sectionY - graph.baseY(), sectionZ - graph.baseZ());
+        return key != PACK_OUT_OF_RANGE && graph.keys().contains(key);
     }
 
     /** 作废：换关卡或清空段表时调。在途任务的结果按代次丢弃。 */
@@ -283,10 +302,13 @@ final class SimulationVisibility {
         }
 
         int size = order.size();
+        LongOpenHashSet keys = new LongOpenHashSet(size);
         Simulation.SnapSection[] snapsOut = new Simulation.SnapSection[size];
         int kept = 0;
         for (int i = 0; i < size; i++) {
-            int at = indexOf.getOrDefault(order.getLong(i), -1);
+            long key = order.getLong(i);
+            keys.add(key);
+            int at = indexOf.getOrDefault(key, -1);
             if (at < 0) {
                 continue;
             }
@@ -296,7 +318,7 @@ final class SimulationVisibility {
                 kept++;
             }
         }
-        Graph graph = new Graph(Arrays.copyOf(snapsOut, kept));
+        Graph graph = new Graph(job.baseX(), job.baseY(), job.baseZ(), keys, Arrays.copyOf(snapsOut, kept));
         this.inFlight = false;
         this.submitted = job.request();
         if (job.generation() == this.generation) {
