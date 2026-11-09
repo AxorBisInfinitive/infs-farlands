@@ -208,11 +208,12 @@ public final class SimulationServer {
             if (data == null) {
                 continue;
             }
-            int size = SimulationSectionPacket.estimatedSize(data);
+            SimulationSectionPacket.SectionEntry entry = SimulationSectionPacket.encode(key, data);
+            int size = SimulationSectionPacket.encodedSize(entry);
             if (used > 0 && used + size > budget) {
                 break;
             }
-            loaded.add(SimulationSectionPacket.encode(key, data));
+            loaded.add(entry);
             used += size;
             sent.add(key);
             queued.merge(key, 1, Integer::sum);

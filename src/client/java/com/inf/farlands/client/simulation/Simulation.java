@@ -136,7 +136,7 @@ public final class Simulation {
             }
             SimulationGeometry.instance().release(local);
             this.farlands$clearTintAround(local);
-            this.farlands$requeueNeighbors(local);
+            this.farlands$requeueFilledAround(local);
             return;
         }
         SimulationSection section = this.section(local);
@@ -224,6 +224,38 @@ public final class Simulation {
     }
 
     /**
+     * 邻段到达时的定向重烘：只放回「烘制那一版几何时确实缺了这一格」的邻段。
+     *
+     * <p>
+     * 判据落在对方的 {@link SimulationSection#missing()} 上。邻段 M 相对自己看，本段位于 {@code M + (-d)}，所以查
+     * 的位是 {@code (-dx + 1) * 9 + (-dy + 1) * 3 + (-dz + 1)}，与快照里的位序同一套。
+     *
+     * <p>
+     * 这一支只判存在性，不判光：邻段烘制时本格已在，则它的面剔除与跨边界采样都按「有这一段」算过，本格的到达不改变
+     * 那些结论。全量的那一支换的是正确性，这一支换的是次数。
+     */
+    private void farlands$requeueFilledAround(SectionKey key) {
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    if (dx == 0 && dy == 0 && dz == 0) {
+                        continue;
+                    }
+                    SectionKey neighborKey = new SectionKey(key.x() + dx, key.y() + dy, key.z() + dz);
+                    SimulationSection neighbor = this.sections.get(neighborKey);
+                    if (neighbor == null) {
+                        continue;
+                    }
+                    int bit = (-dx + 1) * 9 + (-dy + 1) * 3 + (-dz + 1);
+                    if ((neighbor.missing() & (1 << bit)) != 0) {
+                        this.pending.add(neighborKey);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
      * 每客户端 tick 一次：取走完成结果、提交新一批、发布快照。
      *
      * <p>
@@ -271,6 +303,8 @@ public final class Simulation {
                 this.pending.add(key);
                 continue;
             }
+            // 掩码随结果写回：实心段不产四边形，但它的缺席位是邻段重烘的唯一判据，不能跟着网格一起丢。
+            section.setMissing(snapshot.missing());
             if (done.mesh() == null) {
                 SimulationGeometry.instance().release(key);
             } else {
@@ -428,8 +462,14 @@ public final class Simulation {
             }
         }
         net.minecraft.client.Minecraft minecraft = net.minecraft.client.Minecraft.getInstance();
+        int missing = 0;
+        for (int i = 0; i < Neighborhood.SLOTS; i++) {
+            if (neighborhood.contents[i] == null) {
+                missing |= 1 << i;
+            }
+        }
         return new BakeSnapshot(key, this.generation, section.revision(), section, section.content(),
-                neighborhood.contents.clone(), this.defaultBiome, minecraft.getBlockColors(),
+                neighborhood.contents.clone(), missing, this.defaultBiome, minecraft.getBlockColors(),
                 minecraft.getModelManager().getBlockStateModelSet(), this.cardinalLighting,
                 minecraft.options.ambientOcclusion().get(), minecraft.options.biomeBlendRadius().get());
     }
@@ -620,9 +660,18 @@ public final class Simulation {
                         continue;
                     }
                     SectionKey key = new SectionKey(centerX + dx, centerY + dy, centerZ + dz);
-                    if (this.sections.containsKey(key)) {
-                        this.pending.add(key);
+                    SimulationSection neighbor = this.sections.get(key);
+                    if (neighbor == null) {
+                        continue;
                     }
+                    if (dx != 0 || dy != 0 || dz != 0) {
+                        // 邻段还要再过一道掩码：只有它烘制当前这一版几何时本段还缺席，才值得重烘。本段自己不受此限。
+                        int bit = (-dx + 1) * 9 + (-dy + 1) * 3 + (-dz + 1);
+                        if ((neighbor.missing() & (1 << bit)) == 0) {
+                            continue;
+                        }
+                    }
+                    this.pending.add(key);
                 }
             }
         }

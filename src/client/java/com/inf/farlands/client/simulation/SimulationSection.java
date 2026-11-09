@@ -132,6 +132,19 @@ public final class SimulationSection {
      */
     private int revision;
 
+    /** 27 个邻位的全集。位序见 {@link #missing}。 */
+    static final int ALL_NEIGHBORS_MISSING = (1 << 27) - 1;
+
+    /**
+     * 27 位邻域缺失掩码：烘制当前这一版几何时，哪几个邻位还不存在。
+     *
+     * <p>
+     * 位序与 {@code Simulation.farlands$snapshot} 的邻域数组同一套，即
+     * {@code (dx + 1) * 9 + (dy + 1) * 3 + (dz + 1)}，自分位 13 永不参与判定。缺省全 1：没烘过的段按「邻域全缺」算，
+     * 邻段到达时它一定会被放回待烘，不会留下一版在旧邻域下算出的几何。
+     */
+    private int missing = ALL_NEIGHBORS_MISSING;
+
     /** 已发布的内容。构造、应用、单格写与清理都会换一份新的。 */
     private volatile Content content;
 
@@ -503,6 +516,16 @@ public final class SimulationSection {
     /** 当前内容版本。只在客户端主线程读写。 */
     public int revision() {
         return this.revision;
+    }
+
+    /** 当前这一版几何的邻域缺失掩码。见 {@link #missing}。 */
+    int missing() {
+        return this.missing;
+    }
+
+    /** 写入烘制这一版几何时缺席的邻位。 */
+    void setMissing(int mask) {
+        this.missing = mask;
     }
 
     /** 该格的 tint，未算返回 0。 */

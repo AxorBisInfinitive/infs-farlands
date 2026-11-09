@@ -23,6 +23,10 @@ import net.minecraft.world.level.biome.Biome;
  * 除此之外工作线程不读 {@code owner} 的任何字段。
  *
  * <p>
+ * {@code missing} 是这份邻域里缺席的那些位的掩码，位序与 {@code neighbors} 的下标同一套。它随烘制结果写回段上，
+ * 供邻段到达时判定「这一段当初是不是缺了它」。
+ *
+ * <p>
  * {@code revision} 与 {@code generation} 都在主线程写作与比较，工作线程只从快照里读，靠提交队列的发布关系可见。
  * 前者判内容是否在烘制期间变过，后者判关卡是否换过。
  */
@@ -33,6 +37,7 @@ record BakeSnapshot(
         SimulationSection owner,
         SimulationSection.Content content,
         SimulationSection.Content[] neighbors,
+        int missing,
         Holder<Biome> defaultBiome,
         BlockColors blockColors,
         BlockStateModelSet models,
