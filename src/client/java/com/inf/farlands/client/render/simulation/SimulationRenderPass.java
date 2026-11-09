@@ -114,7 +114,7 @@ public final class SimulationRenderPass {
     /** 缓存是否有效。失效条件是可见集内容、几何、相机位姿、图集尺寸任一项变化。 */
     private boolean cacheValid;
 
-    private int cacheSnapshotVersion = -1;
+    private int cacheVisibleVersion = -1;
 
     private int cacheGeometryVersion = -1;
 
@@ -195,9 +195,15 @@ public final class SimulationRenderPass {
         int atlasWidth = atlas.getWidth(0);
         int atlasHeight = atlas.getHeight(0);
         Matrix4f view = new Matrix4f(camera.viewRotationMatrix);
-        int snapshotVersion = simulation.snapshotVersion();
+        AnchoredFrustum frustum = camera.initialized && camera.cullFrustum instanceof AnchoredFrustum candidate
+                ? candidate
+                : null;
+        // 可见集由遮挡传播与视锥裁剪给出，裁剪只在图更新或相机转动跨 2 度时重跑，所以这里不再逐段试视锥。
+        List<Simulation.SnapSection> sections = simulation.visibleSections(camAnchorX, camAnchorY, camAnchorZ,
+                camLocalX, camLocalY, camLocalZ, camera.xRot, camera.yRot, frustum);
+        int visibleVersion = simulation.visibleVersion();
         int geometryVersion = SimulationGeometry.instance().version();
-        if (this.farlands$cacheHit(snapshotVersion, geometryVersion, camAnchorX, camAnchorY, camAnchorZ, camLocalX,
+        if (this.farlands$cacheHit(visibleVersion, geometryVersion, camAnchorX, camAnchorY, camAnchorZ, camLocalX,
                 camLocalY, camLocalZ, view, atlasWidth, atlasHeight)) {
             if (this.cachedGroups == null) {
                 return;
@@ -206,31 +212,18 @@ public final class SimulationRenderPass {
             this.batch = new Batch(this.cachedGroups, hitSlices, this.cachedIndices);
             return;
         }
-        this.farlands$storeCache(snapshotVersion, geometryVersion, camAnchorX, camAnchorY, camAnchorZ, camLocalX,
+        this.farlands$storeCache(visibleVersion, geometryVersion, camAnchorX, camAnchorY, camAnchorZ, camLocalX,
                 camLocalY, camLocalZ, view, atlasWidth, atlasHeight);
         this.cachedGroups = null;
         this.cachedInfos = null;
         this.cachedIndices = 0;
 
-        AnchoredFrustum frustum = camera.initialized && camera.cullFrustum instanceof AnchoredFrustum candidate
-                ? candidate
-                : null;
-        List<Simulation.SnapSection> drawn = new ArrayList<>();
-        for (Simulation.SnapSection section : simulation.snapshot().sections()) {
+        List<Simulation.SnapSection> drawn = new ArrayList<>(sections.size());
+        for (Simulation.SnapSection section : sections) {
             SimulationSection body = section.section();
             if (body.geometry(ChunkSectionLayer.SOLID) == null && body.geometry(ChunkSectionLayer.CUTOUT) == null
                     && body.geometry(ChunkSectionLayer.TRANSLUCENT) == null) {
                 continue;
-            }
-            if (frustum != null) {
-                double originX = (double) (section.originX() - camAnchorX) - camLocalX;
-                double originY = (double) (section.originY() - camAnchorY) - camLocalY;
-                double originZ = (double) (section.originZ() - camAnchorZ) - camLocalZ;
-                if (!frustum.farlands$isVisibleRelative(originX, originY, originZ,
-                        originX + SimulationSection.SIZE, originY + SimulationSection.SIZE,
-                        originZ + SimulationSection.SIZE)) {
-                    continue;
-                }
             }
             drawn.add(section);
         }
@@ -288,10 +281,10 @@ public final class SimulationRenderPass {
      * 位姿三项缺一不可：视锥测试依赖位置与朝向，段 UBO 的偏移依赖位置、{@code modelView} 依赖朝向。图集尺寸进 UBO，
      * 资源重载换图集时会连带清几何、版本自增，所以它是第二道闸而不是主闸。
      */
-    private boolean farlands$cacheHit(int snapshotVersion, int geometryVersion, long anchorX, long anchorY,
+    private boolean farlands$cacheHit(int visibleVersion, int geometryVersion, long anchorX, long anchorY,
             long anchorZ, double localX, double localY, double localZ, Matrix4f view, int atlasWidth,
             int atlasHeight) {
-        return this.cacheValid && this.cacheSnapshotVersion == snapshotVersion
+        return this.cacheValid && this.cacheVisibleVersion == visibleVersion
                 && this.cacheGeometryVersion == geometryVersion && this.cacheAnchorX == anchorX
                 && this.cacheAnchorY == anchorY && this.cacheAnchorZ == anchorZ && this.cacheLocalX == localX
                 && this.cacheLocalY == localY && this.cacheLocalZ == localZ
@@ -299,11 +292,11 @@ public final class SimulationRenderPass {
                 && this.cacheAtlasHeight == atlasHeight;
     }
 
-    private void farlands$storeCache(int snapshotVersion, int geometryVersion, long anchorX, long anchorY,
+    private void farlands$storeCache(int visibleVersion, int geometryVersion, long anchorX, long anchorY,
             long anchorZ, double localX, double localY, double localZ, Matrix4f view, int atlasWidth,
             int atlasHeight) {
         this.cacheValid = true;
-        this.cacheSnapshotVersion = snapshotVersion;
+        this.cacheVisibleVersion = visibleVersion;
         this.cacheGeometryVersion = geometryVersion;
         this.cacheAnchorX = anchorX;
         this.cacheAnchorY = anchorY;

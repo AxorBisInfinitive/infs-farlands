@@ -19,6 +19,8 @@ import net.minecraft.client.renderer.block.ModelBlockRenderer;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModelPart;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
+import net.minecraft.client.renderer.chunk.VisGraph;
+import net.minecraft.client.renderer.chunk.VisibilitySet;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.client.resources.model.geometry.BakedQuad;
 import net.minecraft.core.BlockPos;
@@ -109,8 +111,8 @@ public final class SimulationMesher {
         }
     }
 
-    /** 一段烘制的结果：三层各自可为 null。 */
-    public record Build(Mesh solid, Mesh cutout, Mesh translucent) {
+    /** 一段烘制的结果：三层各自可为 null，掩码始终有效。 */
+    public record Build(Mesh solid, Mesh cutout, Mesh translucent, long visibility) {
     }
 
     /** 烘一段。三层都可能是 null。 */
@@ -130,6 +132,8 @@ public final class SimulationMesher {
         // 所以它必须与一段的烘制同起同落，绝不能跨段复用。
         BlockModelLighter.enableCaching();
         Map<ChunkSectionLayer, LayerBuffer> layers = new EnumMap<>(ChunkSectionLayer.class);
+        // 掩码的输入就是循环里已经在手的 BlockState：遮挡体判据照抄原版 SectionCompiler，只看 isSolidRender。
+        VisGraph visGraph = new VisGraph();
         try {
             for (int i = 0; i < occupied; i++) {
                 int index = occupiedIndexes[i];
@@ -144,6 +148,9 @@ public final class SimulationMesher {
                 List<BlockStateModelPart> parts = farlands$parts(snapshot.models(), state);
                 getter.at(x, y, z, state);
                 localPos.set(x, y, z);
+                if (state.isSolidRender()) {
+                    visGraph.setOpaque(localPos);
+                }
                 boolean smooth = ambientOcclusion && state.getLightEmission() == 0
                         && !parts.isEmpty() && parts.getFirst().useAmbientOcclusion();
                 boolean forceOpaque = ModelBlockRenderer.forceOpaque(cutoutLeaves, state);
@@ -169,10 +176,12 @@ public final class SimulationMesher {
                     }
                 }
             }
+            long visibility = farlands$visibility(visGraph.resolve());
             return new Build(farlands$finish(snapshot, ChunkSectionLayer.SOLID, layers.get(ChunkSectionLayer.SOLID)),
                     farlands$finish(snapshot, ChunkSectionLayer.CUTOUT, layers.get(ChunkSectionLayer.CUTOUT)),
                     farlands$finish(snapshot, ChunkSectionLayer.TRANSLUCENT,
-                            layers.get(ChunkSectionLayer.TRANSLUCENT)));
+                            layers.get(ChunkSectionLayer.TRANSLUCENT)),
+                    visibility);
         } finally {
             for (LayerBuffer buffer : layers.values()) {
                 buffer.close();
@@ -182,8 +191,7 @@ public final class SimulationMesher {
     }
 
     /** 四边形该进哪一层。实体覆盖优先，其余按它材质上带的层。 */
-    private static ChunkSectionLayer farlands$layerOf(BakedQuad quad, boolean forceOpaque) {
-        if (forceOpaque) {
+    private static ChunkSectionLayer farlands$layerOf(BakedQuad quad, boolean forceOpaque) {        if (forceOpaque) {
             return ChunkSectionLayer.SOLID;
         }
         ChunkSectionLayer layer = quad.materialInfo().layer();
@@ -250,6 +258,25 @@ public final class SimulationMesher {
         } catch (RuntimeException e) {
             return null;
         }
+    }
+
+    /**
+     * 把 6 乘 6 的可达矩阵压成 36 位。
+     *
+     * <p>
+     * 位序与原版 {@code VisibilitySet} 的存放顺序一致，下标是 {@code from.ordinal() + to.ordinal() * 6}，与
+     * {@link SimulationVisibility} 读掩码时的算式同源。
+     */
+    private static long farlands$visibility(VisibilitySet set) {
+        long mask = 0L;
+        for (Direction from : DIRECTIONS) {
+            for (Direction to : DIRECTIONS) {
+                if (set.visibilityBetween(from, to)) {
+                    mask |= 1L << (from.ordinal() + to.ordinal() * DIRECTIONS.length);
+                }
+            }
+        }
+        return mask;
     }
 
     /**

@@ -163,6 +163,15 @@ public final class SimulationSection {
     private final int[] stagedVertexCounts = new int[3];
 
     /**
+     * 36 位面可见性掩码，6 面两两可达，供 {@link SimulationVisibility} 的遮挡传播用。缺省 {@link
+     * SimulationVisibility#OPEN}，即全开。
+     *
+     * <p>
+     * 缺省取全开而不是全闭：掩码尚未算出时按开处理只会少剔几段，按闭处理会把真看得见的几何一起删掉。
+     */
+    private long visibility = SimulationVisibility.OPEN;
+
+    /**
      * 每格的 tint 缓存，按 resolver 与「Y 的 quart 带」两级。0 表示未算，tint 恒不透明，所以 0 不会是真值。
      *
      * <p>
@@ -428,6 +437,8 @@ public final class SimulationSection {
         this.slots = nextSlots;
         this.occupied = nextOccupied;
         this.occupiedCount = nextOccupiedCount;
+        // 新内容还没烘出来，上一版掩码属于上一版几何，按它传播会在等烘制的那几 tick 里剔掉本该看得见的段。
+        this.visibility = SimulationVisibility.OPEN;
         this.content = new Content(nextSlots, nextOccupied, nextOccupiedCount, this.blockLight, this.skyLight,
                 this.biomes, this.shapeMode);
     }
@@ -457,6 +468,8 @@ public final class SimulationSection {
         this.clearTints();
         this.blockLight = blockLight == null ? new DataLayer() : blockLight;
         this.skyLight = skyLight == null ? new DataLayer() : skyLight;
+        // 全空气必然看得穿，留着上一版全闭的掩码会把这一段后面的所有段一起剔掉。
+        this.visibility = SimulationVisibility.OPEN;
         this.content = new Content(null, this.occupied, 0, this.blockLight, this.skyLight, this.biomes,
                 this.shapeMode);
     }
@@ -540,6 +553,16 @@ public final class SimulationSection {
     /** 写入烘制这一版几何时缺席的邻位。 */
     void setMissing(int mask) {
         this.missing = mask;
+    }
+
+    /** 36 位面可见性掩码。见 {@link #visibility}。 */
+    long visibility() {
+        return this.visibility;
+    }
+
+    /** 写入烘制期算出的掩码。 */
+    void setVisibility(long mask) {
+        this.visibility = mask;
     }
 
     /**

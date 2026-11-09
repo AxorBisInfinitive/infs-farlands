@@ -38,6 +38,7 @@
     "light.ClientChunkCacheMixin",
     "render.ViewAreaMixin",
     "render.LevelRendererAccessor",
+    "render.SectionRenderDispatcherAccessor",
     "render.LevelRendererMixin",
     "render.SectionRenderDispatcher$RenderSectionMixin",
     "render.SectionCopyMixin",

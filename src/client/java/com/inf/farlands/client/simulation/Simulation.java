@@ -2,9 +2,11 @@ package com.inf.farlands.client.simulation;
 
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.inf.farlands.client.render.AnchoredFrustum;
 import com.inf.farlands.client.render.simulation.SimulationGeometry;
 import com.inf.farlands.simulation.model.SimulationSectionKey;
 import com.inf.farlands.util.pos.ExactPosition;
@@ -51,10 +53,16 @@ public final class Simulation {
 
     private volatile Snapshot snapshot = new Snapshot();
 
+    /** 遮挡剔除的可见集。与段表同线程，只在客户端主线程读写。 */
+    private final SimulationVisibility visibility = new SimulationVisibility();
+
     /**
-     * 渲染列表的版本：段进出列表时自增。渲染批次缓存靠它判「这一段集合还是不是同一批」，不必每帧重比集合内容。
+     * 影响遮挡传播的输入的版本：段集合增删、或某段掩码真的变化时自增。
+     *
+     * <p>
+     * 用计数而不是布尔，是因为烘制完成的次数远多于掩码真变化的次数：同一段重烘出同一张掩码时不该重算。
      */
-    private int snapshotVersion;
+    private int graphVersion = 1;
 
     /** 建段用的群系容器工厂与默认群系，与关卡同一个入口设定，见 {@link #attach}。 */
     private PalettedContainerFactory biomeFactory;
@@ -114,8 +122,9 @@ public final class Simulation {
         this.structureVersion++;
 
         this.snapshot = new Snapshot();
-        this.farlands$touchSnapshot();
         this.generation++;
+        this.visibility.invalidate();
+        this.graphVersion++;
         SimulationMeshPool.discardCompleted();
         SimulationGeometry.instance().clear();
     }
@@ -137,11 +146,14 @@ public final class Simulation {
         SectionKey local = new SectionKey(key.x(), key.y(), key.z());
         if (container.hasOnlyAir()) {
             SimulationSection section = this.section(local);
+            long before = section.visibility();
             SnapSection stale = section.snap();
             section.applyAir(container, blockLight, skyLight);
+            if (before != SimulationVisibility.OPEN) {
+                this.graphVersion++;
+            }
             if (stale != null) {
                 this.snapshot.sectionsMutable().remove(stale);
-                this.farlands$touchSnapshot();
             }
             SimulationGeometry.instance().drop(section);
             this.farlands$clearTintAround(local);
@@ -149,9 +161,13 @@ public final class Simulation {
             return;
         }
         SimulationSection section = this.section(local);
+        long before = section.visibility();
         // 内容与现段逐格相同就什么都不做：不换容器、不标脏、不入待烘，因此也不触发邻段扩散。
         if (!section.applyIfChanged(container, shapeMode, blockLight, skyLight)) {
             return;
+        }
+        if (before != SimulationVisibility.OPEN) {
+            this.graphVersion++;
         }
         this.farlands$clearTintAround(local);
         this.pending.add(local);
@@ -175,6 +191,7 @@ public final class Simulation {
         SimulationSection removed = this.sections.remove(key);
         if (removed != null) {
             this.structureVersion++;
+            this.graphVersion++;
             this.neighborhoods.remove(key);
             SimulationGeometry.instance().drop(removed);
             SnapSection stale = removed.snap();
@@ -182,7 +199,6 @@ public final class Simulation {
                 this.snapshot.sectionsMutable().remove(stale);
                 removed.clearSnap();
             }
-            this.farlands$touchSnapshot();
         }
         this.pending.remove(key);
         this.snapDirty.remove(key);
@@ -314,11 +330,16 @@ public final class Simulation {
                 this.pending.add(key);
                 continue;
             }
-            // 掩码随结果写回：实心段不产四边形，但它的缺席位是邻段重烘的唯一判据，不能跟着网格一起丢。
+            // 掩码随结果写回：实心段不产四边形，但它的缺席位是邻段重烘的唯一判据、面可达矩阵是遮挡传播的输入，
+            // 两者都不能跟着网格一起丢。掩码真的变了才推高图版本，同一张掩码的重烘不重算图。
             section.setMissing(snapshot.missing());
             if (done.build() == null) {
                 SimulationGeometry.instance().drop(section);
             } else {
+                if (section.visibility() != done.build().visibility()) {
+                    section.setVisibility(done.build().visibility());
+                    this.graphVersion++;
+                }
                 this.farlands$stage(section, done.build());
             }
         }
@@ -563,6 +584,7 @@ public final class Simulation {
             this.sections.put(key, section);
 
             this.structureVersion++;
+            this.graphVersion++;
         }
         return section;
     }
@@ -604,8 +626,9 @@ public final class Simulation {
         this.structureVersion++;
 
         this.snapshot = new Snapshot();
-        this.farlands$touchSnapshot();
         this.generation++;
+        this.visibility.invalidate();
+        this.graphVersion++;
         SimulationMeshPool.discardCompleted();
     }
 
@@ -618,14 +641,46 @@ public final class Simulation {
         return this.snapshot;
     }
 
-    /** 渲染列表的版本，见 {@link #snapshotVersion}。 */
-    public int snapshotVersion() {
-        return this.snapshotVersion;
+    /**
+     * 本帧要渲染的段：交给遮挡剔除层，由它按需提交后台传播、按需重裁，返回裁剪集。
+     *
+     * <p>
+     * 入参是相机帧的锚点与局部量：段号与段内偏移都由这里现算，调用方在渲染包里，算完还得原样传回来，不如只给帧表示。
+     *
+     * <p>
+     * 传播跑在后台线程，由「图输入版本变化」或「相机段变化」驱动，所以这里不再有节流：异步本身就是节流，一次只有一个
+     * 任务在途。裁剪在主线程做，只在图发布或相机转动跨 2 度时重跑。
+     */
+    public List<SnapSection> visibleSections(long cameraAnchorX, long cameraAnchorY, long cameraAnchorZ,
+            double cameraLocalX, double cameraLocalY, double cameraLocalZ, float xRot, float yRot,
+            AnchoredFrustum frustum) {
+        long blockX = cameraAnchorX + (long) Math.floor(cameraLocalX);
+        long blockY = cameraAnchorY + (long) Math.floor(cameraLocalY);
+        long blockZ = cameraAnchorZ + (long) Math.floor(cameraLocalZ);
+        long sectionX = blockX >> 4;
+        long sectionY = blockY >> 4;
+        long sectionZ = blockZ >> 4;
+        double inSectionX = cameraLocalX - Math.floor(cameraLocalX) + (double) (blockX - (sectionX << 4));
+        double inSectionY = cameraLocalY - Math.floor(cameraLocalY) + (double) (blockY - (sectionY << 4));
+        double inSectionZ = cameraLocalZ - Math.floor(cameraLocalZ) + (double) (blockZ - (sectionZ << 4));
+        return this.visibility.update(this, new SimulationVisibility.View(sectionX, sectionY, sectionZ, inSectionX,
+                inSectionY, inSectionZ, cameraAnchorX, cameraAnchorY, cameraAnchorZ, cameraLocalX, cameraLocalY,
+                cameraLocalZ, xRot, yRot, frustum));
     }
 
-    /** 渲染列表变过之后调，见 {@link #snapshotVersion}。 */
-    private void farlands$touchSnapshot() {
-        this.snapshotVersion++;
+    /** 图输入的版本，见 {@link #graphVersion}。 */
+    int graphVersion() {
+        return this.graphVersion;
+    }
+
+    /** 裁剪集内容的版本，供渲染批次缓存判重。 */
+    public int visibleVersion() {
+        return this.visibility.culledVersion();
+    }
+
+    /** 段表本体，供 {@link SimulationVisibility} 传播用。同包可见，只在客户端主线程读。 */
+    Map<SectionKey, SimulationSection> sectionMap() {
+        return this.sections;
     }
 
     /** 该 level 的默认群系，缺邻段时群系混合回落到它。 */
@@ -671,7 +726,6 @@ public final class Simulation {
         }
         int reach = Math.max(2, net.minecraft.client.Minecraft.getInstance().options.biomeBlendRadius().get());
         Set<SnapSection> live = this.snapshot.sectionsMutable();
-        boolean changed = false;
         for (SectionKey key : this.snapDirty) {
             SimulationSection section = this.sections.get(key);
             if (section == null || !section.eligible()) {
@@ -686,7 +740,6 @@ public final class Simulation {
                 if (stale != null) {
                     live.remove(stale);
                     section.clearSnap();
-                    changed = true;
                 }
                 continue;
             }
@@ -695,14 +748,10 @@ public final class Simulation {
                 SnapSection fresh = section.snap();
                 if (fresh != null) {
                     live.add(fresh);
-                    changed = true;
                 }
             }
         }
         this.snapDirty.clear();
-        if (changed) {
-            this.farlands$touchSnapshot();
-        }
     }
 
     /**
