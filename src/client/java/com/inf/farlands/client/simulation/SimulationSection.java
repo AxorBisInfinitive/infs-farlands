@@ -7,7 +7,10 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import com.inf.farlands.simulation.model.SimulationSectionData;
 import com.inf.farlands.util.world.WorldBounds;
+import com.mojang.blaze3d.buffers.GpuBuffer;
+import com.mojang.blaze3d.vertex.VertexFormat;
 
+import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import net.minecraft.core.Holder;
 import net.minecraft.world.level.ColorResolver;
 import net.minecraft.world.level.LightLayer;
@@ -147,6 +150,17 @@ public final class SimulationSection {
 
     /** 已发布的内容。构造、应用、单格写与清理都会换一份新的。 */
     private volatile Content content;
+
+    /**
+     * 每层的几何，索引即 {@code ChunkSectionLayer} 的枚举序，没有几何的层为 null。
+     *
+     * <p>
+     * 挂在段对象上而不是挂在一张按段号索引的表里，是为了让渲染侧取几何只是一次字段读。
+     */
+    private final Geometry[] geometries = new Geometry[3];
+
+    /** 待发布几何的顶点数，按层。烘制完成时写下，分配落地时与偏移一起发布，见 {@link #publishGeometry}。 */
+    private final int[] stagedVertexCounts = new int[3];
 
     /**
      * 每格的 tint 缓存，按 resolver 与「Y 的 quart 带」两级。0 表示未算，tint 恒不透明，所以 0 不会是真值。
@@ -526,6 +540,56 @@ public final class SimulationSection {
     /** 写入烘制这一版几何时缺席的邻位。 */
     void setMissing(int mask) {
         this.missing = mask;
+    }
+
+    /**
+     * 一层的几何：共享顶点缓冲、起始顶点序号、顶点数，以及可选的索引缓冲。
+     *
+     * <p>
+     * 顶点缓冲是 uber 缓冲里的一块 heap，很多段共用它；本层的内容从 {@code baseVertex} 个顶点处开始。
+     * {@code indexBuffer} 为 null 时走共享顺序索引，绘制时由 {@code baseVertex} 把零基索引平移到本段；非 null 时是
+     * 透明层排过序的自有索引。
+     */
+    public record Geometry(GpuBuffer buffer, int baseVertex, int vertexCount, GpuBuffer indexBuffer,
+            VertexFormat.IndexType indexType, int indexCount) {
+    }
+
+    /** 该层的几何，没有则为 null。 */
+    public Geometry geometry(ChunkSectionLayer layer) {
+        return this.geometries[layer.ordinal()];
+    }
+
+    /** 记下待发布几何的顶点数，见 {@link #stagedVertexCounts}。 */
+    public void setStagedVertexCount(ChunkSectionLayer layer, int vertexCount) {
+        this.stagedVertexCounts[layer.ordinal()] = vertexCount;
+    }
+
+    /**
+     * 分配落地之后发布该层的几何。缓冲与偏移来自 uber 缓冲的上传回调。
+     *
+     * <p>
+     * 走共享顺序索引的层没有自有索引，索引数由顶点数换算：每四个顶点接六个索引。
+     */
+    public void publishGeometry(ChunkSectionLayer layer, GpuBuffer buffer, int baseVertex, GpuBuffer indexBuffer,
+            VertexFormat.IndexType indexType, int indexCount) {
+        int slot = layer.ordinal();
+        int vertexCount = this.stagedVertexCounts[slot];
+        int count = indexBuffer == null ? vertexCount / 4 * 6 : indexCount;
+        this.geometries[slot] = new Geometry(buffer, baseVertex, vertexCount, indexBuffer, indexType, count);
+    }
+
+    /** 摘掉这一层的几何。段被摘除或该层不再有几何时调。 */
+    public void clearGeometry(ChunkSectionLayer layer) {
+        this.geometries[layer.ordinal()] = null;
+        this.stagedVertexCounts[layer.ordinal()] = 0;
+    }
+
+    /** 摘掉全部层的几何。 */
+    public void clearAllGeometry() {
+        for (int i = 0; i < this.geometries.length; i++) {
+            this.geometries[i] = null;
+            this.stagedVertexCounts[i] = 0;
+        }
     }
 
     /** 该格的 tint，未算返回 0。 */

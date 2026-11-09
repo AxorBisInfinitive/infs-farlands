@@ -1,5 +1,7 @@
 package com.inf.farlands.client.simulation;
 
+import com.mojang.blaze3d.vertex.VertexSorting;
+
 import net.minecraft.client.color.block.BlockColors;
 import net.minecraft.client.renderer.block.BlockStateModelSet;
 import net.minecraft.core.Holder;
@@ -10,8 +12,9 @@ import net.minecraft.world.level.biome.Biome;
  * 一次烘制的输入，全部在主线程取好，工作线程只读。
  *
  * <p>
- * 五个客户端物件必须在这里定住：{@link BlockColors}、{@link BlockStateModelSet}、{@link CardinalLighting}、
- * 环境光遮蔽开关与群系混合半径。它们在资源重载与设置界面里会被换成新实例，工作线程自己去取就会读到一半的替换。
+ * 客户端物件必须在这里定住：{@link BlockColors}、{@link BlockStateModelSet}、{@link CardinalLighting}、环境光遮蔽、
+ * 群系混合半径与 {@code cutoutLeaves}。它们在资源重载与设置界面里会被换成新实例，工作线程自己去取就会读到一半的
+ * 替换。
  *
  * <p>
  * 内容取「已发布的那一份」而不是段本身：{@code content} 与 27 个邻域内容都是 {@link SimulationSection.Content}，
@@ -25,6 +28,10 @@ import net.minecraft.world.level.biome.Biome;
  * <p>
  * {@code missing} 是这份邻域里缺席的那些位的掩码，位序与 {@code neighbors} 的下标同一套。它随烘制结果写回段上，
  * 供邻段到达时判定「这一段当初是不是缺了它」。
+ *
+ * <p>
+ * {@code sorting} 是透明层排四边形用的相机基准，按「相机相对本段原点」构造，与地形在编译期的做法同源。它只反映
+ * 提交那一刻，相机随后移动不会让已烘的段重排。
  *
  * <p>
  * {@code revision} 与 {@code generation} 都在主线程写作与比较，工作线程只从快照里读，靠提交队列的发布关系可见。
@@ -43,5 +50,7 @@ record BakeSnapshot(
         BlockStateModelSet models,
         CardinalLighting cardinalLighting,
         boolean ambientOcclusion,
-        int biomeBlendRadius) {
+        int biomeBlendRadius,
+        boolean cutoutLeaves,
+        VertexSorting sorting) {
 }

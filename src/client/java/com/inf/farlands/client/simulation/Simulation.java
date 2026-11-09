@@ -8,8 +8,10 @@ import java.util.Set;
 import com.inf.farlands.client.render.simulation.SimulationGeometry;
 import com.inf.farlands.simulation.model.SimulationSectionKey;
 import com.inf.farlands.util.pos.ExactPosition;
+import com.mojang.blaze3d.vertex.VertexSorting;
 
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.level.CardinalLighting;
@@ -48,6 +50,11 @@ public final class Simulation {
     private int structureVersion;
 
     private volatile Snapshot snapshot = new Snapshot();
+
+    /**
+     * 渲染列表的版本：段进出列表时自增。渲染批次缓存靠它判「这一段集合还是不是同一批」，不必每帧重比集合内容。
+     */
+    private int snapshotVersion;
 
     /** 建段用的群系容器工厂与默认群系，与关卡同一个入口设定，见 {@link #attach}。 */
     private PalettedContainerFactory biomeFactory;
@@ -107,6 +114,7 @@ public final class Simulation {
         this.structureVersion++;
 
         this.snapshot = new Snapshot();
+        this.farlands$touchSnapshot();
         this.generation++;
         SimulationMeshPool.discardCompleted();
         SimulationGeometry.instance().clear();
@@ -133,8 +141,9 @@ public final class Simulation {
             section.applyAir(container, blockLight, skyLight);
             if (stale != null) {
                 this.snapshot.sectionsMutable().remove(stale);
+                this.farlands$touchSnapshot();
             }
-            SimulationGeometry.instance().release(local);
+            SimulationGeometry.instance().drop(section);
             this.farlands$clearTintAround(local);
             this.farlands$requeueFilledAround(local);
             return;
@@ -167,11 +176,13 @@ public final class Simulation {
         if (removed != null) {
             this.structureVersion++;
             this.neighborhoods.remove(key);
+            SimulationGeometry.instance().drop(removed);
             SnapSection stale = removed.snap();
             if (stale != null) {
                 this.snapshot.sectionsMutable().remove(stale);
                 removed.clearSnap();
             }
+            this.farlands$touchSnapshot();
         }
         this.pending.remove(key);
         this.snapDirty.remove(key);
@@ -288,28 +299,55 @@ public final class Simulation {
             BakeSnapshot snapshot = done.snapshot();
             SectionKey key = snapshot.key();
             if (snapshot.generation() != this.generation) {
-                SimulationMesher.release(done.mesh());
+                SimulationMesher.release(done.build());
                 continue;
             }
             SimulationSection section = this.sections.get(key);
             if (section == null) {
-                SimulationMesher.release(done.mesh());
+                SimulationMesher.release(done.build());
                 continue;
             }
             if (section.revision() != snapshot.revision()) {
                 // 内容在烘制期间变过：结果作废，tint 缓存也可能被那次烘焙写进了旧值，一并清掉再排回待烘。
-                SimulationMesher.release(done.mesh());
+                SimulationMesher.release(done.build());
                 section.clearTints();
                 this.pending.add(key);
                 continue;
             }
             // 掩码随结果写回：实心段不产四边形，但它的缺席位是邻段重烘的唯一判据，不能跟着网格一起丢。
             section.setMissing(snapshot.missing());
-            if (done.mesh() == null) {
-                SimulationGeometry.instance().release(key);
+            if (done.build() == null) {
+                SimulationGeometry.instance().drop(section);
             } else {
-                SimulationGeometry.instance().upload(key, done.mesh());
+                this.farlands$stage(section, done.build());
             }
+        }
+    }
+
+    /**
+     * 把一份烘制结果的三层分别交给显存。
+     *
+     * <p>
+     * 有几何的层直接 stage，它落地时会顶掉同键的旧分配；没有几何的层才 dropLayer。不能反过来先整段 drop 再 stage：
+     * {@code removeAllocation} 会把键记进跳过表，那张表要到下一次整批落地之后才清，期间同一键的 stage 会被静默跳过，
+     * 该层几何于是永不出现。
+     */
+    private void farlands$stage(SimulationSection section, SimulationMesher.Build build) {
+        SimulationGeometry geometry = SimulationGeometry.instance();
+        if (build.solid() != null) {
+            geometry.stage(section, ChunkSectionLayer.SOLID, build.solid());
+        } else {
+            geometry.dropLayer(section, ChunkSectionLayer.SOLID);
+        }
+        if (build.cutout() != null) {
+            geometry.stage(section, ChunkSectionLayer.CUTOUT, build.cutout());
+        } else {
+            geometry.dropLayer(section, ChunkSectionLayer.CUTOUT);
+        }
+        if (build.translucent() != null) {
+            geometry.stage(section, ChunkSectionLayer.TRANSLUCENT, build.translucent());
+        } else {
+            geometry.dropLayer(section, ChunkSectionLayer.TRANSLUCENT);
         }
     }
 
@@ -355,7 +393,7 @@ public final class Simulation {
                 continue;
             }
             if (section.count() == 0) {
-                SimulationGeometry.instance().release(key);
+                SimulationGeometry.instance().drop(section);
                 continue;
             }
             SimulationMeshPool.submit(this.farlands$snapshot(key, section));
@@ -471,7 +509,32 @@ public final class Simulation {
         return new BakeSnapshot(key, this.generation, section.revision(), section, section.content(),
                 neighborhood.contents.clone(), missing, this.defaultBiome, minecraft.getBlockColors(),
                 minecraft.getModelManager().getBlockStateModelSet(), this.cardinalLighting,
-                minecraft.options.ambientOcclusion().get(), minecraft.options.biomeBlendRadius().get());
+                minecraft.options.ambientOcclusion().get(), minecraft.options.biomeBlendRadius().get(),
+                minecraft.options.cutoutLeaves().get(), this.farlands$sorting(key));
+    }
+
+    /**
+     * 透明层排四边形用的相机基准，按「相机相对本段原点」构造，与地形在编译期的做法同源。
+     *
+     * <p>
+     * 基准取自提交那一刻的玩家位置：烘制跑在工作线程上，之后相机移动不会让已烘的段重排。
+     */
+    private VertexSorting farlands$sorting(SectionKey key) {
+        long originX = key.x() << 4;
+        long originY = key.y() << 4;
+        long originZ = key.z() << 4;
+        net.minecraft.world.entity.player.Player player = net.minecraft.client.Minecraft.getInstance().player;
+        if (player == null) {
+            return VertexSorting.byDistance(0.0F, 0.0F, 0.0F);
+        }
+        ExactPosition exact = (ExactPosition) player;
+        return VertexSorting.byDistance(
+                (float) ((double) (exact.farlands$anchor(ExactPosition.POS_X) - originX)
+                        + exact.farlands$local(ExactPosition.POS_X)),
+                (float) ((double) (exact.farlands$anchor(ExactPosition.POS_Y) - originY)
+                        + exact.farlands$local(ExactPosition.POS_Y)),
+                (float) ((double) (exact.farlands$anchor(ExactPosition.POS_Z) - originZ)
+                        + exact.farlands$local(ExactPosition.POS_Z)));
     }
 
     /**
@@ -524,7 +587,6 @@ public final class Simulation {
      */
     public void removeSection(SectionKey key) {
         this.farlands$detach(key);
-        SimulationGeometry.instance().release(key);
     }
 
     /** 摘掉一段。 */
@@ -542,6 +604,7 @@ public final class Simulation {
         this.structureVersion++;
 
         this.snapshot = new Snapshot();
+        this.farlands$touchSnapshot();
         this.generation++;
         SimulationMeshPool.discardCompleted();
     }
@@ -553,6 +616,16 @@ public final class Simulation {
     /** 当前快照，任意线程可读。 */
     public Snapshot snapshot() {
         return this.snapshot;
+    }
+
+    /** 渲染列表的版本，见 {@link #snapshotVersion}。 */
+    public int snapshotVersion() {
+        return this.snapshotVersion;
+    }
+
+    /** 渲染列表变过之后调，见 {@link #snapshotVersion}。 */
+    private void farlands$touchSnapshot() {
+        this.snapshotVersion++;
     }
 
     /** 该 level 的默认群系，缺邻段时群系混合回落到它。 */
@@ -598,6 +671,7 @@ public final class Simulation {
         }
         int reach = Math.max(2, net.minecraft.client.Minecraft.getInstance().options.biomeBlendRadius().get());
         Set<SnapSection> live = this.snapshot.sectionsMutable();
+        boolean changed = false;
         for (SectionKey key : this.snapDirty) {
             SimulationSection section = this.sections.get(key);
             if (section == null || !section.eligible()) {
@@ -612,6 +686,7 @@ public final class Simulation {
                 if (stale != null) {
                     live.remove(stale);
                     section.clearSnap();
+                    changed = true;
                 }
                 continue;
             }
@@ -620,10 +695,14 @@ public final class Simulation {
                 SnapSection fresh = section.snap();
                 if (fresh != null) {
                     live.add(fresh);
+                    changed = true;
                 }
             }
         }
         this.snapDirty.clear();
+        if (changed) {
+            this.farlands$touchSnapshot();
+        }
     }
 
     /**
