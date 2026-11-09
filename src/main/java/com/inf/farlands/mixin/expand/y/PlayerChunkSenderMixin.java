@@ -2,6 +2,8 @@ package com.inf.farlands.mixin.expand.y;
 
 import com.inf.farlands.terrain.pipeline.GenQueue;
 import com.inf.farlands.util.network.ChunkDataSender;
+import com.inf.farlands.util.network.ChunkPayloadPin;
+import com.inf.farlands.util.window.PlayerTable;
 import com.inf.farlands.util.window.WindowSendState;
 import com.inf.farlands.util.window.WindowedChunk;
 
@@ -37,8 +39,14 @@ public class PlayerChunkSenderMixin {
     private static void captureWindow(ServerGamePacketListenerImpl packetListener, ServerLevel level, LevelChunk chunk,
             CallbackInfo ci) {
         ServerPlayer player = packetListener.player;
-        int centerY = Mth.floorDiv(player.getBlockY(), 16);
-        WindowSendState.setWindowMinY(centerY - ((WindowedChunk) chunk).windowHalfBelow());
+        PlayerTable.Entry entry = PlayerTable.entryOf(player);
+        if (entry != null && !entry.inBounds()) {
+            // 界外没有区块：给一个空窗口，sendableSections 的区间判据因此恒假，段包不带任何段。
+            WindowSendState.setWindowMinY(Integer.MAX_VALUE);
+        } else {
+            int centerY = entry != null ? entry.sectionCenterY() : Mth.floorDiv(player.getBlockY(), 16);
+            WindowSendState.setWindowMinY(centerY - ((WindowedChunk) chunk).windowHalfBelow());
+        }
         if (GenQueue.isChunkBusy(chunk) || GenQueue.isBiomeFilling(chunk)) {
             ChunkDataSender.markChunkChanged(chunk);
         }
@@ -48,5 +56,7 @@ public class PlayerChunkSenderMixin {
     private static void clearWindow(ServerGamePacketListenerImpl packetListener, ServerLevel level, LevelChunk chunk,
             CallbackInfo ci) {
         WindowSendState.clear();
+        // 包体 pin 正常在本包的构造器里被取走，这里只是兜底：构造器抛异常时不留残余。
+        ChunkPayloadPin.clear();
     }
 }

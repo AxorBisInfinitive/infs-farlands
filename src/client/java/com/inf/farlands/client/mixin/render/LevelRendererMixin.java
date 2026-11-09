@@ -5,6 +5,7 @@ import com.inf.farlands.util.window.WindowedChunk;
 
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientChunkCache;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.ViewArea;
@@ -12,6 +13,7 @@ import net.minecraft.core.SectionPos;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.EmptyLevelChunk;
 import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 
 import org.spongepowered.asm.mixin.Mixin;
@@ -46,6 +48,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * 为 0，它的注释是不允许分配任何资源，ViewArea.getViewDistance() 因此在 Sodium 下恒为 0，拿它当半径会
  * 把枚举退化成 1x1，只有相机所在的 chunk 被拉正。该选项是 vanilla 与 Sodium 共用的那个值，旧版 Sodium
  * 路径也取自它。
+ *
+ * <p>
+ * 窗口滑动之后还要把差量同步进空段集合。那个集合是遮挡图判断「一段能不能进图」的唯一依据，而它的进账只在
+ * chunk 加入与段包到达两处发生，窗口滑动不在其中。不同步的后果是：滑进来的段即使全是空气也不在集合里，遮挡图把
+ * 它当成有内容的段收进八叉树，随后的视锥访问把它计入可见集，表现为大量看不见却参与编译与遍历的段。
  */
 @Mixin(LevelRenderer.class)
 public class LevelRendererMixin {
@@ -65,12 +72,17 @@ public class LevelRendererMixin {
         int camSecY = camSection.y();
         int radius = Minecraft.getInstance().options.getEffectiveRenderDistance();
         ChunkPos cpos = camSection.chunk();
+        ClientChunkCache chunkCache = this.level.getChunkSource();
         boolean sodium = SodiumWindowSync.beginFrame(this.level);
         for (int cx = cpos.x() - radius; cx <= cpos.x() + radius; cx++) {
             for (int cz = cpos.z() - radius; cz <= cpos.z() + radius; cz++) {
                 LevelChunk chunk = (LevelChunk) this.level.getChunk(cx, cz, ChunkStatus.FULL, false);
                 if (chunk != null && !(chunk instanceof EmptyLevelChunk)) {
-                    ((WindowedChunk) chunk).moveWindowTo(camSecY);
+                    WindowedChunk windowed = (WindowedChunk) chunk;
+                    int oldMin = windowed.getWindowMinY();
+                    int oldMax = windowed.getWindowMaxY();
+                    windowed.moveWindowTo(camSecY);
+                    farlands$syncEmptySections(chunkCache, chunk, oldMin, oldMax);
                     if (sodium) {
                         SodiumWindowSync.onChunk(chunk);
                     }
@@ -79,6 +91,43 @@ public class LevelRendererMixin {
         }
         if (sodium) {
             SodiumWindowSync.endFrame();
+        }
+    }
+
+    /**
+     * 把一次窗口滑动的差量同步进空段集合：滑进来的按 {@code hasOnlyAir} 登记，滑出去的撤销登记。
+     *
+     * <p>
+     * 只做差量，不整窗重扫：整窗是 35 乘以列数，竖直飞行时每 tick 都要重扫一遍，代价大于它修掉的问题。滑进来的段由
+     * {@code getSection} 现取，窗口滑动已经把它们物化过，这一步不新造对象。
+     *
+     * <p>
+     * 滑出用 {@code empty = false}：它同时摘掉可能残留的旧键，并连带 {@code onSectionBecomingNonEmpty}。本方法在窗口
+     * 移动之后调用，那一层已经不在网格带内，该连带因此取不到渲染段，是空操作。这个先后顺序不能反。
+     */
+    private static void farlands$syncEmptySections(ClientChunkCache cache, LevelChunk chunk, int oldMin, int oldMax) {
+        WindowedChunk windowed = (WindowedChunk) chunk;
+        int newMin = windowed.getWindowMinY();
+        int newMax = windowed.getWindowMaxY();
+        if (newMin == oldMin && newMax == oldMax) {
+            return;
+        }
+        ChunkPos pos = chunk.getPos();
+        for (int sy = newMin; sy <= newMax; sy++) {
+            if (sy >= oldMin && sy <= oldMax) {
+                continue;
+            }
+            LevelChunkSection section = chunk.getSection(chunk.getSectionIndexFromSectionY(sy));
+            if (section == null) {
+                continue;
+            }
+            cache.onSectionEmptinessChanged(pos.x(), sy, pos.z(), section.hasOnlyAir());
+        }
+        for (int sy = oldMin; sy <= oldMax; sy++) {
+            if (sy >= newMin && sy <= newMax) {
+                continue;
+            }
+            cache.onSectionEmptinessChanged(pos.x(), sy, pos.z(), false);
         }
     }
 }

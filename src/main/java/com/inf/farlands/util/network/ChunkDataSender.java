@@ -19,6 +19,7 @@ import com.inf.farlands.serialize.SectionSerializer;
 import com.inf.farlands.serialize.SectionStage;
 import com.inf.farlands.serialize.TerrainHooks;
 import com.inf.farlands.terrain.pipeline.GenQueue;
+import com.inf.farlands.util.window.PlayerTable;
 import com.inf.farlands.util.window.WindowedChunk;
 import com.inf.farlands.util.world.WorldBounds;
 
@@ -32,7 +33,6 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ChunkTrackingView;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.util.Mth;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.Level;
@@ -112,28 +112,40 @@ public final class ChunkDataSender {
     /**
      * 服务端每 tick 入口：窗口差量加限量发包。
      * 返回 true 表示任一玩家窗口发生变化，调用方 FarlandsTick 据此驱动 fsa 清理判定。
+     *
+     * <p>入参是驱动玩家表。界外条目直接跳过：那里没有区块，既不入队也不发包，同时会把上一次的窗口状态按
+     * 下面的 roster 清理掉。
      */
-    public static boolean tick(MinecraftServer server) {
-        List<ServerPlayer> players = server.getPlayerList().getPlayers();
+    public static boolean tick(MinecraftServer server, List<PlayerTable.Entry> entries) {
         boolean windowChanged = false;
         playersMoved = false;
         Map<ResourceKey<Level>, Set<Long>> changed = takeChangedChunks();
-        for (ServerPlayer player : players) {
-            if (updatePlayerWindow(player)) {
+        Set<UUID> roster = new HashSet<>();
+        for (int i = 0; i < entries.size(); i++) {
+            PlayerTable.Entry entry = entries.get(i);
+            if (!entry.inBounds()) {
+                continue;
+            }
+            roster.add(entry.player().getUUID());
+            if (updatePlayerWindow(entry)) {
                 windowChanged = true;
             }
         }
-        for (ServerPlayer player : players) {
-            materializeChanged(player, changed);
+        for (int i = 0; i < entries.size(); i++) {
+            PlayerTable.Entry entry = entries.get(i);
+            if (!entry.inBounds()) {
+                continue;
+            }
+            materializeChanged(entry, changed);
         }
-        for (ServerPlayer player : players) {
-            flushPendingSections(player);
+        for (int i = 0; i < entries.size(); i++) {
+            PlayerTable.Entry entry = entries.get(i);
+            if (!entry.inBounds()) {
+                continue;
+            }
+            flushPendingSections(entry);
         }
-        // 玩家退出后清理窗口状态，roster 变化在下一次 tick 体现
-        Set<UUID> roster = new HashSet<>();
-        for (ServerPlayer p : players) {
-            roster.add(p.getUUID());
-        }
+        // 玩家退出或走到界外之后清理窗口状态，roster 变化在下一次 tick 体现
         WINDOW_STATES.keySet().retainAll(roster);
         PENDING_QUEUES.keySet().retainAll(roster);
         return windowChanged;
@@ -168,10 +180,11 @@ public final class ChunkDataSender {
      * <p>
      * 返回 true 表示窗口变化。
      */
-    public static boolean updatePlayerWindow(ServerPlayer player) {
-        ResourceKey<Level> dim = player.level().dimension();
+    public static boolean updatePlayerWindow(PlayerTable.Entry entry) {
+        ServerPlayer player = entry.player();
+        ResourceKey<Level> dim = entry.dimension();
         UUID id = player.getUUID();
-        int centerY = Mth.floorDiv(player.getBlockY(), 16);
+        int centerY = entry.sectionCenterY();
         PlayerWindowState state = WINDOW_STATES.get(id);
 
         if (state == null || !state.dimension.equals(dim)) {
@@ -181,15 +194,14 @@ public final class ChunkDataSender {
             int min = windowMinSection(centerY);
             int max = windowMaxSection(centerY);
             for (int sy = min; sy <= max; sy++) {
-                enqueueForWindow(player, sy);
+                enqueueForWindow(entry, sy);
             }
             return true;
         }
         // 任一玩家跨 chunk 移动时，地形与光照队列按当前距离重排。
-        ChunkPos pc = player.chunkPosition();
-        if (state.lastChunkX != pc.x() || state.lastChunkZ != pc.z()) {
-            state.lastChunkX = pc.x();
-            state.lastChunkZ = pc.z();
+        if (state.lastChunkX != entry.chunkX() || state.lastChunkZ != entry.chunkZ()) {
+            state.lastChunkX = entry.chunkX();
+            state.lastChunkZ = entry.chunkZ();
             playersMoved = true;
         }
         if (state.centerY == centerY) {
@@ -206,7 +218,7 @@ public final class ChunkDataSender {
             if (sy >= oldMin && sy <= oldMax) {
                 continue;
             }
-            enqueueForWindow(player, sy);
+            enqueueForWindow(entry, sy);
         }
         state.centerY = centerY;
         return true;
@@ -219,8 +231,9 @@ public final class ChunkDataSender {
      * fsa 读回要在磁盘有数据时恢复 section、光照与 stage，并补发 section 包，它与这里的发送复用
      * 同一次窗口差量检测。只对 ChunkStatus.FULL 的 chunk 读回。
      */
-    private static void enqueueForWindow(ServerPlayer player, int sectionY) {
+    private static void enqueueForWindow(PlayerTable.Entry entry, int sectionY) {
         int s = sectionY;
+        ServerPlayer player = entry.player();
         ServerLevel level = player.level();
         player.getChunkTrackingView().forEach(cp -> {
             PENDING_QUEUES
@@ -282,18 +295,18 @@ public final class ChunkDataSender {
      * 只按段的键取，不读段内容：内容判定留在 flush 的 {@code isChunkBusy} 门之后，生成线程正在写
      * section 时读 {@code hasOnlyAir} 会撞 vanilla 的 PalettedContainer 多线程检测。
      */
-    private static void materializeChanged(ServerPlayer player, Map<ResourceKey<Level>, Set<Long>> batch) {
-        Set<Long> marked = batch.get(player.level().dimension());
+    private static void materializeChanged(PlayerTable.Entry entry, Map<ResourceKey<Level>, Set<Long>> batch) {
+        ServerPlayer player = entry.player();
+        Set<Long> marked = batch.get(entry.dimension());
         if (marked == null || marked.isEmpty()) {
             return;
         }
         ServerLevel level = (ServerLevel) player.level();
-        ChunkPos playerChunk = player.chunkPosition();
+        ChunkPos playerChunk = new ChunkPos(entry.chunkX(), entry.chunkZ());
         ChunkTrackingView view = player.getChunkTrackingView();
         int viewDistance = view instanceof ChunkTrackingView.Positioned pos ? pos.viewDistance() : 8;
-        int centerY = Mth.floorDiv(player.getBlockY(), 16);
-        int windowMinY = windowMinSection(centerY);
-        int windowMaxY = windowMaxSection(centerY);
+        int windowMinY = windowMinSection(entry.sectionCenterY());
+        int windowMaxY = windowMaxSection(entry.sectionCenterY());
         for (long chunkKey : marked) {
             int cx = ChunkPos.getX(chunkKey);
             int cz = ChunkPos.getZ(chunkKey);
@@ -317,15 +330,16 @@ public final class ChunkDataSender {
     }
 
     /** 限量发送：按距离排序出队，累计不超过 sectionSendBytesPerTick，打包为一个段包。 */
-    private static void flushPendingSections(ServerPlayer player) {
+    private static void flushPendingSections(PlayerTable.Entry entry) {
+        ServerPlayer player = entry.player();
         Map<Long, Set<Integer>> queue = PENDING_QUEUES.get(player.getUUID());
         if (queue == null || queue.isEmpty()) {
             return;
         }
         ServerLevel level = (ServerLevel) player.level();
-        ChunkPos playerChunk = player.chunkPosition();
+        ChunkPos playerChunk = new ChunkPos(entry.chunkX(), entry.chunkZ());
         int budget = FarlandsConfig.sectionSendBytesPerTick;
-        int windowMinY = windowMinSection(Mth.floorDiv(player.getBlockY(), 16));
+        int windowMinY = windowMinSection(entry.sectionCenterY());
 
         List<Map.Entry<Long, Set<Integer>>> sorted = new ArrayList<>(queue.entrySet());
         sorted.sort(Comparator.comparingLong(e -> distSq(e.getKey(), playerChunk)));
@@ -375,18 +389,20 @@ public final class ChunkDataSender {
                 }
                 byte[] data = new byte[tmp.readableBytes()];
                 tmp.readBytes(data);
-                int est = 24 + data.length;
-                if (used + est > budget) {
-                    break outer; // 预算耗尽，剩余留队列
-                }
                 SectionPos spos = SectionPos.of(lc.getPos(), sy);
                 LevelLightEngine le = level.getChunkSource().getLightEngine();
                 DataLayer bl = le.getLayerListener(LightLayer.BLOCK).getDataLayerData(spos);
                 DataLayer sl = le.getLayerListener(LightLayer.SKY).getDataLayerData(spos);
-                batch.add(new ChunkDataPacket.SectionEntry(
+                ChunkDataPacket.SectionEntry sectionEntry = new ChunkDataPacket.SectionEntry(
                         cx, cz, sy, data,
                         ChunkDataPacket.encodeLight(bl),
-                        ChunkDataPacket.encodeLight(sl)));
+                        ChunkDataPacket.encodeLight(sl));
+                // 记账取实际编码长度：光照载荷可能是一字节、原始两千字节或压缩块，按公式估会与实发分叉。
+                int est = ChunkDataPacket.encodedSectionSize(sectionEntry);
+                if (used + est > budget) {
+                    break outer; // 预算耗尽，剩余留队列
+                }
+                batch.add(sectionEntry);
                 it.remove();
                 used += est;
             }

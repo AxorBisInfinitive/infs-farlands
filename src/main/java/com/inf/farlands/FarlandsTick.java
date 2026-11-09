@@ -3,6 +3,9 @@ package com.inf.farlands;
 import com.inf.farlands.light.FarLandsLightEngine;
 import com.inf.farlands.serialize.SectionIO;
 import com.inf.farlands.serialize.SectionLifecycle;
+import com.inf.farlands.simulation.SimulationLifecycle;
+import com.inf.farlands.simulation.SimulationServer;
+import com.inf.farlands.simulation.model.SimulationConfig;
 import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.debug.StageMetrics;
 import com.inf.farlands.terrain.pipeline.NeighborhoodTickets;
@@ -15,7 +18,7 @@ import com.inf.farlands.util.maps.SectionUtil;
 import com.inf.farlands.util.network.ChunkDataSender;
 import com.inf.farlands.util.network.SystemsSender;
 import com.inf.farlands.util.window.EntitySectionWindow;
-import com.inf.farlands.util.window.PlayerSnapshot;
+import com.inf.farlands.util.window.PlayerTable;
 
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -197,27 +200,29 @@ public class FarlandsTick {
     }
 
     /**
-     * 只刷两张表：玩家位置快照与实体 section 窗口并集。
+     * 只刷驱动玩家表与实体 section 窗口并集。
      *
-     * <p>准入的两道门读的就是这两张：{@code isNearPlayer} 读快照，{@code Scheduler.sectionsFor} 的竖直面
+     * <p>准入的两道门读的就是这两张：{@code isNearPlayer} 读表，{@code Scheduler.sectionsFor} 的竖直面
      * 读窗口并集。抽出来的理由是提交点也要能只刷这一层：提交发生在阻塞取数之内，而票据的加减不该跟着
      * 提前到那一处。
+     *
+     * <p>表也在这里重建，因为 {@code refreshTickState} 有三个调用者，其中两个不走
+     * {@code driveWindowAndTerrain}：阻塞取数的泵与换维度时的提交。把它们漏掉，那两个路径就会读到旧表。
      */
     public static void refreshGates(MinecraftServer server) {
-        List<ServerPlayer> players = server.getPlayerList().getPlayers();
-        PlayerSnapshot.capture(players);
-        EntitySectionWindow.update(players);
+        PlayerTable.refresh(server);
+        EntitySectionWindow.update(PlayerTable.entries());
     }
 
     /**
-     * 每 tick 的三步刷新：两张表加驱动面 ±8 的保加载票。
+     * 每 tick 的三步刷新：驱动玩家表、窗口并集，加驱动面 ±8 的保加载票。
      *
      * <p>抽成方法是为了让真 tick 的末尾与阻塞等待期的泵共用同一份顺序。两处各写一份顺序，就会刷出与真
      * tick 不同源的状态，而两边同时被准入读。
      */
     public static void refreshTickState(MinecraftServer server) {
         refreshGates(server);
-        NeighborhoodTickets.tick(server);
+        NeighborhoodTickets.tick(server, PlayerTable.entries());
     }
 
     /** 服务端 tick 末尾统一入口。 */
@@ -245,8 +250,14 @@ public class FarlandsTick {
             SectionLifecycle.flushAllDirty(server);
             SectionIO.flushAllOffsetTables();
         }
+        // 模拟段的周期落盘。与窗口清理同理，是崩溃与强退的兜底；自成一个间隔，不复用 fsa 那条。
+        if (tickCount % SimulationConfig.ssaPersistInterval == 0) {
+            SimulationLifecycle.flushAllDirty(server);
+        }
         // 窗口差量、窗口外清理与派发，与阻塞等待期共用同一段，顺序与理由见 driveWindowAndTerrain。
         driveWindowAndTerrain(server);
+        // 模拟段的下发：读本 tick 已刷新的窗口与玩家表，所以在窗口驱动之后。
+        SimulationServer.tick(server);
         // 兼容层的每 tick 钩子，排在所有核心驱动之后：它只驱动本 port 之外的请求方，例如 Chunky 预生成。
         for (Consumer<MinecraftServer> sink : TICK_SINKS) {
             sink.accept(server);
@@ -274,8 +285,10 @@ public class FarlandsTick {
      * 线程与节奏由调用方负责：只在服务端线程调，等待期的调用按墙钟节流。
      */
     public static void driveWindowAndTerrain(MinecraftServer server) {
+        // 驱动玩家表必须先于窗口差量：差量按表里的段中心算新窗口，读旧表会把界外玩家当成还在界内。
+        PlayerTable.refresh(server);
         // 窗口差量与限量发包；返回值同时驱动 fsa 的窗口清理判定。
-        boolean windowChanged = ChunkDataSender.tick(server);
+        boolean windowChanged = ChunkDataSender.tick(server, PlayerTable.entries());
         // 玩家跨 chunk 移动时，光照队列按当前距离重排。地形侧的候选表在准入时按快照排序，不需要重排。
         if (ChunkDataSender.consumePlayersMoved()) {
             for (ServerLevel level : server.getAllLevels()) {

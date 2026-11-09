@@ -9,12 +9,11 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 import com.inf.farlands.terrain.structure.StructureDriver;
+import com.inf.farlands.util.window.PlayerTable;
 
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ChunkTrackingView;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 
@@ -60,12 +59,16 @@ public final class NeighborhoodTickets {
     }
 
     /** 每 tick 由主线程调用。票操作非线程安全，只能在主线程做。 */
-    public static void tick(MinecraftServer server) {
-        List<ServerPlayer> players = server.getPlayerList().getPlayers();
+    public static void tick(MinecraftServer server, List<PlayerTable.Entry> entries) {
         Set<UUID> roster = new HashSet<>();
-        for (ServerPlayer player : players) {
-            roster.add(player.getUUID());
-            reconcile(server, player);
+        for (int i = 0; i < entries.size(); i++) {
+            PlayerTable.Entry entry = entries.get(i);
+            if (!entry.inBounds()) {
+                // 界外没有区块：不铺票，也不进 roster，于是上一次铺下的票按下面的循环被撤掉。
+                continue;
+            }
+            roster.add(entry.player().getUUID());
+            reconcile(server, entry);
         }
         Iterator<Map.Entry<UUID, State>> it = STATES.entrySet().iterator();
         while (it.hasNext()) {
@@ -79,12 +82,17 @@ public final class NeighborhoodTickets {
     }
 
     /** 位置、维度或半径任一变化就换票：先加新的再撤旧的，重复加同型同级只重置计时。 */
-    private static void reconcile(MinecraftServer server, ServerPlayer player) {
-        ServerLevel level = (ServerLevel) player.level();
-        ChunkPos pos = player.chunkPosition();
-        int radius = radiusFor(player);
-        State state = STATES.get(player.getUUID());
-        if (state != null && state.dimension().equals(level.dimension())
+    private static void reconcile(MinecraftServer server, PlayerTable.Entry entry) {
+        ResourceKey<Level> dimension = entry.dimension();
+        ServerLevel level = server.getLevel(dimension);
+        if (level == null) {
+            return;
+        }
+        ChunkPos pos = new ChunkPos(entry.chunkX(), entry.chunkZ());
+        int radius = entry.viewDistance() + StructureDriver.STRUCTURE_READ_RADIUS + 2;
+        UUID id = entry.player().getUUID();
+        State state = STATES.get(id);
+        if (state != null && state.dimension().equals(dimension)
                 && state.chunkKey() == pos.pack() && state.radius() == radius) {
             return;
         }
@@ -92,7 +100,7 @@ public final class NeighborhoodTickets {
         if (state != null) {
             release(server, state);
         }
-        STATES.put(player.getUUID(), new State(level.dimension(), pos.pack(), radius));
+        STATES.put(id, new State(dimension, pos.pack(), radius));
     }
 
     /** 撤一张票。维度按状态里记的取，换维度时它已经不是玩家的当前维度。 */
@@ -102,13 +110,6 @@ public final class NeighborhoodTickets {
             level.getChunkSource().removeTicketWithRadius(GenQueue.STRUCTURE_PIN_TICKET,
                     ChunkPos.unpack(state.chunkKey()), state.radius());
         }
-    }
-
-    /** 该玩家驱动面的半径加 ±8 与 includeNeighbors 缓冲。 */
-    private static int radiusFor(ServerPlayer player) {
-        ChunkTrackingView view = player.getChunkTrackingView();
-        int viewDistance = view instanceof ChunkTrackingView.Positioned positioned ? positioned.viewDistance() : 8;
-        return viewDistance + StructureDriver.STRUCTURE_READ_RADIUS + 2;
     }
 
     /**

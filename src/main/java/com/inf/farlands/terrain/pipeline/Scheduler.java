@@ -20,7 +20,7 @@ import com.inf.farlands.terrain.debug.StageMetrics;
 import com.inf.farlands.terrain.decorationFiller.DecorationFiller;
 import com.inf.farlands.terrain.structure.StructureDriver;
 import com.inf.farlands.util.window.EntitySectionWindow;
-import com.inf.farlands.util.window.PlayerSnapshot;
+import com.inf.farlands.util.window.PlayerTable;
 import com.inf.farlands.util.world.WorldBounds;
 
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
@@ -574,12 +574,10 @@ public final class Scheduler {
                 continue;
             }
             if (!waited && !GenQueue.isNearPlayer(chunk)) {
-                // 该维度有玩家、窗口表里却没有它的带，说明刷新还没发生：此刻是「还不知道」，不是
-                // 「确实太远」。丢掉等于把活永久丢掉，因为重投与重扫都不在这条路径上。判据取窗口表，
-                // 因为准入的竖直面用它。两条出口都自解：刷新之后按正常路径准入，玩家离开之后判据转假，
-                // 候选按原语义被丢弃。
-                if (!level.players().isEmpty()
-                        && EntitySectionWindow.ranges(level.dimension()).length == 0) {
+                // 判据是「本 tick 刷过这张表没有」。用窗口为空代替会让界外玩家与「还没刷」混同：
+                // 界外玩家不产生窗口，旧写法于是把每一个候选都当成「还不知道」无限重投。
+                // 刷过而没有它，就是确实太远或玩家在界外，一次性移除。
+                if (!PlayerTable.refreshed(level.dimension())) {
                     requeuePersistent(key, candidate);
                     continue;
                 }
@@ -748,9 +746,15 @@ public final class Scheduler {
      * 不让它走泵：泵对被等待的格有确认门槛与一次派发，那一段延迟在实机上就是一次卡顿。
      *
      * <p>
-     * 判据与派发一致，两条支。界内用第七行，所以不会把未就绪的段放出去。界外不用第七行：界外 chunk 的段
+     * 判据与派发一致，三条支。界内用第七行，所以不会把未就绪的段放出去。界外不用第七行：界外 chunk 的段
      * 永不变点亮，第七行对它恒假，而它的 FULL 只有派发的界外支会补；等待点不复制那一条，它的 future 一旦
-     * 被票级变化重建，读的人就永远等。壳不在时两支柱都做不了，那一格只能继续等。
+     * 被票级变化重建，读的人就永远等。壳不在时三条支都做不了，那一格只能继续等。
+     *
+     * <p>
+     * 第三条支是该维度本 tick 没有窗口。此时调度器的准入没有段可派，`sectionsFor` 为空，第七行对界内 chunk
+     * 恒假，那个 future 在本 tick 内不可能被补，等待没有解。按空壳补 FULL：chunk 从此存在且为空，读拿到
+     * 空气，写仍被 {@code ChunkReadiness.isReady} 按段拒掉，所以「FULL 完成但不可写」是既有语义，界外支
+     * 一直在用。判据与 {@code ServerChunkCacheMixin} 的窗口判据同源同形。
      */
     public static void completeIfReady(ServerLevel level, int chunkX, int chunkZ) {
         LevelChunk chunk = SectionLifecycle.latestChunk(level, chunkX, chunkZ);
@@ -758,6 +762,10 @@ public final class Scheduler {
             return;
         }
         if (!WorldBounds.inChunkRange(chunkX, chunkZ)) {
+            ChunkReadiness.completeFull(chunk);
+            return;
+        }
+        if (EntitySectionWindow.ranges(level.dimension()).length == 0) {
             ChunkReadiness.completeFull(chunk);
             return;
         }
@@ -811,11 +819,11 @@ public final class Scheduler {
         CANDIDATES.put(key, candidate);
     }
 
-    /** 距离用快照，避免逐候选遍历玩家。 */
+    /** 距离用驱动玩家表，避免逐候选遍历玩家。 */
     private static long distanceOf(Candidate candidate) {
         LevelChunk chunk = candidate.chunk;
         if (chunk.getLevel() instanceof ServerLevel level) {
-            return PlayerSnapshot.nearestDistance(level.dimension(), chunk.getPos().x(), chunk.getPos().z());
+            return PlayerTable.nearestDistance(level.dimension(), chunk.getPos().x(), chunk.getPos().z());
         }
         return Long.MAX_VALUE;
     }

@@ -48,3 +48,4 @@ repos
 handoff.md
 workspace
 /lib/
+/logs/

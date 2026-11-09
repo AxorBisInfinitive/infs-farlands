@@ -19,9 +19,28 @@ import net.minecraft.client.Minecraft;
  *
  * 聚合 JVM 里集成服务端已经在维护同一批静态表与同一个时钟，客户端不重复这份活，故先按
  * Minecraft.hasSingleplayerServer 跳过，也不去推进那份时钟。
+ *
+ * <p>
+ * 模拟方块层不在这里驱动，它在 {@code Minecraft.setLevel} 的返回处跑一次，见
+ * {@code simulation.MinecraftMixin}。
  */
 public class FarlandsClientTick {
+
     private static final int INTERVAL = 200;
+
+    public static void atEnd(Minecraft minecraft, int tickCount) {
+        if (minecraft.level == null || minecraft.player == null) {
+            return;
+        }
+        if (minecraft.hasSingleplayerServer()) {
+            return;
+        }
+        FarlandsTick.setNow(tickCount);
+        if (tickCount % INTERVAL == 0) {
+            swapBlockLookup();
+            trimSectionLookup(tickCount);
+        }
+    }
 
     private static void swapBlockLookup() {
         int size = BlockUtil.size();
@@ -37,20 +56,6 @@ public class FarlandsClientTick {
         int afterSize = SectionUtil.size();
         if (FarlandsConfig.logSectionLookupTrim) {
             InfsFarlands.LOGGER.info("Trimmed SectionUtil.lookup, before: {}, after: {}", beforeSize, afterSize);
-        }
-    }
-
-    public static void atEnd(Minecraft minecraft, int tickCount) {
-        if (minecraft.level == null || minecraft.player == null) {
-            return;
-        }
-        if (minecraft.hasSingleplayerServer()) {
-            return;
-        }
-        FarlandsTick.setNow(tickCount);
-        if (tickCount % INTERVAL == 0) {
-            swapBlockLookup();
-            trimSectionLookup(tickCount);
         }
     }
 }

@@ -38,6 +38,7 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
@@ -66,6 +67,25 @@ public abstract class GenerationChunkHolderMixin {
 
     @Shadow
     public abstract FullChunkStatus getFullStatus();
+
+    /**
+     * 建 holder 不再受 {@code ChunkPos.isValid} 约束。
+     *
+     * <p>
+     * 同一个谓词有两个身份：{@code Level.isInValidBounds} 的读写门，与这个构造器里的建造型断言。读写门那一侧
+     * 现在按可玩段界判，界外坐标不该发出区块请求；但 holder 本身必须能在 {@code MAX_SECTION} 那一圈建出来，
+     * 因为票圈与窗口都把界夹到那里。两件事混在一个谓词里，窄化就会重演实测过的
+     * {@code Trying to create chunk out of reasonable bounds}，出生区准备失败、登录中止。
+     *
+     * <p>
+     * 所以这里把两个用法拆开：读写的界由 {@code isValid} 判，建 holder 的界不判。javap 核过，本类里
+     * {@code ChunkPos.isValid()} 只有构造器里那一次调用，不会波及别的判据。
+     */
+    @Redirect(method = "<init>(Lnet/minecraft/world/level/ChunkPos;)V",
+            at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/ChunkPos;isValid()Z"))
+    private boolean farlands$allowAnyChunkPos(ChunkPos pos) {
+        return true;
+    }
 
     private static final Method M_SCHEDULE_CHUNK_LOAD;
     private static final Field F_LEVEL;

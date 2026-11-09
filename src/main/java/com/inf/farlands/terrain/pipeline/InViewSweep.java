@@ -4,7 +4,7 @@ import java.util.List;
 
 import com.inf.farlands.serialize.ChunkReadiness;
 import com.inf.farlands.serialize.SectionStage;
-import com.inf.farlands.util.window.PlayerSnapshot;
+import com.inf.farlands.util.window.PlayerTable;
 
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 
@@ -48,15 +48,16 @@ public final class InViewSweep {
         }
     }
 
-    /** 扫一个维度并补提交。该维度没有玩家时扫出来是零格，什么都不做。 */
+    /** 扫一个维度并补提交。该维度没有界内玩家时扫出来是零格，什么都不做。 */
     private static void sweep(ServerLevel level) {
         ResourceKey<Level> dimension = level.dimension();
-        List<PlayerSnapshot.Entry> entries = PlayerSnapshot.entries();
-        int radius = PlayerSnapshot.viewDistance(dimension) + 1;
+        List<PlayerTable.Entry> entries = PlayerTable.entries();
+        int radius = PlayerTable.viewDistance(dimension) + 1;
         LongOpenHashSet seen = new LongOpenHashSet();
         int submitted = 0;
-        for (PlayerSnapshot.Entry entry : entries) {
-            if (!entry.dimension().equals(dimension)) {
+        for (int i = 0; i < entries.size(); i++) {
+            PlayerTable.Entry entry = entries.get(i);
+            if (!entry.inBounds() || !entry.dimension().equals(dimension)) {
                 continue;
             }
             for (int dx = -radius; dx <= radius; dx++) {

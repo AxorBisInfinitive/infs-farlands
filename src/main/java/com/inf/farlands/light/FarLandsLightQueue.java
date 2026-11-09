@@ -18,13 +18,13 @@ import java.util.function.Consumer;
 
 import com.inf.farlands.InfsFarlands;
 import com.inf.farlands.util.map.Long2ObjectStripedMap;
+import com.inf.farlands.util.window.PlayerTable;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.Registry;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.level.TicketType;
 import net.minecraft.world.level.ChunkPos;
 
@@ -167,19 +167,9 @@ public final class FarLandsLightQueue {
         }
     }
 
-    /** 任务 chunk 到本维度最近玩家的 Chebyshev 距离；无玩家 -> 0（FIFO 退化）。 */
+    /** 任务 chunk 到本维度界内最近玩家的 Chebyshev 距离；无界内玩家时给 0，退化成 FIFO。 */
     private static int nearestPlayerDist(ServerLevel level, long chunkKey) {
-        int cx = ChunkPos.getX(chunkKey);
-        int cz = ChunkPos.getZ(chunkKey);
-        int best = Integer.MAX_VALUE;
-        for (ServerPlayer p : level.players()) {
-            ChunkPos pc = p.chunkPosition();
-            int d = Math.max(Math.abs(cx - pc.x()), Math.abs(cz - pc.z()));
-            if (d < best) {
-                best = d;
-            }
-        }
-        return best == Integer.MAX_VALUE ? 0 : best;
+        return PlayerTable.nearestDistance(level.dimension(), ChunkPos.getX(chunkKey), ChunkPos.getZ(chunkKey));
     }
 
     /** 从 map 取走任务并标记执行中。 */

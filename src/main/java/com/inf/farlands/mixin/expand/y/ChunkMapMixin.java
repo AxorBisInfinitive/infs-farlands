@@ -3,6 +3,7 @@ package com.inf.farlands.mixin.expand.y;
 import com.inf.farlands.FarlandsConfig;
 import com.inf.farlands.serialize.ChunkReadiness;
 import com.inf.farlands.serialize.TerrainHooks;
+import com.inf.farlands.util.window.PlayerTable;
 import com.inf.farlands.util.window.WindowSendState;
 
 import java.util.ArrayList;
@@ -64,7 +65,12 @@ public abstract class ChunkMapMixin {
         }
 
         chunksForPlayers.forEach((player, chunkList) -> {
-            int centerY = Mth.floorDiv(player.getBlockY(), 16);
+            // 表在就按表：界外没有区块，不发群系；表里还没有这个玩家时退回读玩家自己的格号。
+            PlayerTable.Entry entry = PlayerTable.entryOf(player);
+            if (entry != null && !entry.inBounds()) {
+                return;
+            }
+            int centerY = entry != null ? entry.sectionCenterY() : Mth.floorDiv(player.getBlockY(), 16);
             WindowSendState.setWindowMinY(centerY - FarlandsConfig.verticalSimulationDistance);
             try {
                 player.connection.send(ClientboundChunksBiomesPacket.forChunks(chunkList));

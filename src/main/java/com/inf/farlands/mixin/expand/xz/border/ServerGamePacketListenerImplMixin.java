@@ -27,6 +27,9 @@ import net.minecraft.server.network.ServerGamePacketListenerImpl;
  * <p>
  * 竖直的两条走 {@code @ModifyConstant}，即只换边界值，保留 {@code clampVertical} 里
  * {@code Mth.clamp} 的形状；该方法体内两个常量互异，各命中一次，无 ordinal 歧义。
+ *
+ * <p>
+ * outside 为真时两端再换成无穷，Mth.clamp 对一切值恒等，含 ±Inf 与 NaN。横向那一处本来就恒等，不受开关影响。
  */
 @Mixin(ServerGamePacketListenerImpl.class)
 public class ServerGamePacketListenerImplMixin {
@@ -38,11 +41,11 @@ public class ServerGamePacketListenerImplMixin {
 
     @ModifyConstant(method = "clampVertical", constant = @Constant(doubleValue = 2.0E7))
     private static double farlands$maxVerticalClamp(double original) {
-        return FarlandsConfig.borderAbsoluteMax;
+        return FarlandsConfig.outside ? Double.POSITIVE_INFINITY : FarlandsConfig.borderAbsoluteMax;
     }
 
     @ModifyConstant(method = "clampVertical", constant = @Constant(doubleValue = -2.0E7))
     private static double farlands$minVerticalClamp(double original) {
-        return ~FarlandsConfig.borderAbsoluteMax;
+        return FarlandsConfig.outside ? Double.NEGATIVE_INFINITY : ~FarlandsConfig.borderAbsoluteMax;
     }
 }
