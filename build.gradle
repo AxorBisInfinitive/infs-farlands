@@ -76,7 +76,7 @@ dependencies {
 	// localRuntime "maven.modrinth:YL57xq9U:sZbVsl2Q"
 
 	// Spark: 1.10.187-fabric
-	// localRuntime "maven.modrinth:l6YH9Als:e3hsPc1o"
+	localRuntime "maven.modrinth:l6YH9Als:e3hsPc1o"
 
     // Forge Config API Port: 26.1.2
     localRuntime "maven.modrinth:ohNO6lps:jUe0ucoE"

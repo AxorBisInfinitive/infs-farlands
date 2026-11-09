@@ -64,7 +64,24 @@ public final class Simulation {
     /** 几何尚未烘的段。每 tick 按到相机的距离取最近的一批。 */
     private final Set<SectionKey> pending = new HashSet<>();
 
-    /** 每 tick 烘几段几何，把建立成本摊开。取最近的那几段。 */
+    /**
+     * 关卡代际，{@link #attach} 与 {@link #clear} 时自增。在途烘焙完成时按它判结果是否还属于这一关。
+     */
+    private int generation;
+
+    /**
+     * 每 tick 烘几段几何，取最近的那几段。
+     *
+     * <p>
+     * 配额按「一次窗口填满要多久」定，不按单段成本。空段在 {@link #farlands$bake} 里走不到烘制，实际成本只由
+     * 稠密段的条数决定，而每 tick 的稠密段数是总非空段除以目标 tick 数，与配额无关。纵向半窗 17、水平半径 16
+     * 的窗口是 28,140 段，320 的配额把它压到 88 tick，即 4.4 秒；同窗口每 tick 的稠密段数是 9.1k 条，k 为
+     * 每列非空段数，k=3 时约 27 条。tick 是 50 毫秒，因此单段成本的上界是 5.5 除以 k 毫秒，k=3 时为 1.8
+     * 毫秒。
+     *
+     * <p>
+     * 不与「空段不占配额」同时使用：空段现在起稀释作用，去掉之后 320 个名额会全落在稠密段上。
+     */
     private static final int BUILD_PER_TICK = 8;
 
     /**
@@ -83,6 +100,8 @@ public final class Simulation {
         this.sections.clear();
         this.structureChanged = true;
         this.snapshot = Snapshot.EMPTY;
+        this.generation++;
+        SimulationMeshPool.discardCompleted();
         SimulationGeometry.instance().clear();
     }
 
@@ -92,12 +111,26 @@ public final class Simulation {
      * <p>
      * 段不存在就建，已存在就整体替换；随后入待烘集合并置结构变更，由下一次 {@link #commit} 发布新快照。
      * 只在客户端主线程调，与服务端那段包的处理点同线程。
+     *
+     * <p>
+     * 全空段保留对象但不烘焙：它的光照是邻段环境光遮蔽的输入，天光 15 与方块光 0 都存在这个段的
+     * {@code DataLayer} 里，删掉对象邻段就会采到 0 光。所以走 {@code applyAir} 只装群系与光照，跳过 4096 格
+     * 方块转换，不进待烘集合，并让邻段重烘一次以拿到新的光。
      */
     public void applySection(SimulationSectionKey key, LevelChunkSection container,
             int shapeMode, DataLayer blockLight, DataLayer skyLight) {
         SectionKey local = new SectionKey(key.x(), key.y(), key.z());
+        if (container.hasOnlyAir()) {
+            this.section(local).applyAir(container, blockLight, skyLight);
+            SimulationGeometry.instance().release(local);
+            this.farlands$clearTintAround(local);
+            this.farlands$requeueNeighbors(local);
+            this.structureChanged = true;
+            return;
+        }
         SimulationSection section = this.section(local);
         section.applyContainer(container, shapeMode, blockLight, skyLight);
+        this.farlands$clearTintAround(local);
         this.pending.add(local);
         this.structureChanged = true;
     }
@@ -121,6 +154,25 @@ public final class Simulation {
         }
         this.pending.remove(key);
         this.farlands$requeueNeighbors(key);
+        this.farlands$clearTintAround(key);
+    }
+
+    /**
+     * 清该段与横向 3x3 邻段的 tint 缓存。
+     *
+     * <p>
+     * 群系混合取样只在本段所在的 Y 平面上做，横向最远七格，所以纵向邻段不参与，横向两侧各一段就够。段内容一换，
+     * 本段与两侧邻段跨边界取样得到的块色就都旧了。
+     */
+    private void farlands$clearTintAround(SectionKey key) {
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                SimulationSection neighbor = this.sectionOrNull(key.x() + dx, key.y(), key.z() + dz);
+                if (neighbor != null) {
+                    neighbor.clearTints();
+                }
+            }
+        }
     }
 
     /**
@@ -150,103 +202,202 @@ public final class Simulation {
     }
 
     /**
-     * 每客户端 tick 一次：按距离限量烘几何、发布快照。
+     * 每客户端 tick 一次：取走完成结果、提交新一批、发布快照。
      *
      * <p>
-     * 绑定与解绑不在这里：段集合完全由服务端的包驱动。这里只负责把待烘的那批烘掉，再按脏段重建快照。
+     * 绑定与解绑不在这里：段集合完全由服务端的包驱动。烘制在工作线程上进行，这里只剩快照、提交与上传三件事，
+     * 上传占的是显存侧那点时间，不再是整段遮蔽计算。
      */
     public void tickSimulation() {
-        net.minecraft.client.Minecraft minecraft = net.minecraft.client.Minecraft.getInstance();
-        net.minecraft.world.entity.player.Player player = minecraft.player;
+        this.farlands$drainCompleted();
+        net.minecraft.world.entity.player.Player player = net.minecraft.client.Minecraft.getInstance().player;
         if (player == null) {
-            this.farlands$buildNearest();
+            this.farlands$submit(0L, 0L, false);
         } else {
             ExactPosition exact = (ExactPosition) player;
-            long centerX = exact.farlands$cellCoord(ExactPosition.POS_X) >> 4;
-            long centerZ = exact.farlands$cellCoord(ExactPosition.POS_Z) >> 4;
-            this.farlands$buildNearest(centerX, centerZ);
+            this.farlands$submit(exact.farlands$cellCoord(ExactPosition.POS_X) >> 4,
+                    exact.farlands$cellCoord(ExactPosition.POS_Z) >> 4, true);
         }
         this.commit();
     }
 
     /**
-     * 从待烘集合里按到中心的平方距离取最近的一批，烘完上传。
+     * 取走完成结果：校验代际与版本，通过则上传，否则丢弃。
      *
      * <p>
-     * 先进先出在半径 32 时会让脚下的草等半分钟，按距离取之后近的先出。距离取平方，与圆盘判据同一把尺，
-     * 不必开方，也不会因为量纲不同把四个斜角排到后面。
+     * 代际不符说明关卡换过，结果没有落点。版本不符说明烘制期间这一段的内容又变了，把键放回待烘等下一轮拿新内容。
+     * 段已不在表里说明它被卸载了，几何由卸载那条路径释放过。
      */
-    private void farlands$buildNearest(long centerX, long centerZ) {
-        if (this.pending.isEmpty()) {
-            return;
-        }
-        int want = Math.min(BUILD_PER_TICK, this.pending.size());
-        SectionKey[] picked = new SectionKey[want];
-        long[] distances = new long[want];
-        int found = 0;
-        for (SectionKey key : this.pending) {
-            long dx = key.x() - centerX;
-            long dz = key.z() - centerZ;
-            long distance = dx * dx + dz * dz;
-            if (found < want) {
-                picked[found] = key;
-                distances[found] = distance;
-                found++;
+    private void farlands$drainCompleted() {
+        SimulationMeshPool.Completed done;
+        while ((done = SimulationMeshPool.take()) != null) {
+            BakeSnapshot snapshot = done.snapshot();
+            SectionKey key = snapshot.key();
+            if (snapshot.generation() != this.generation) {
+                SimulationMesher.release(done.mesh());
                 continue;
             }
-            int worst = 0;
-            for (int i = 1; i < want; i++) {
-                if (distances[i] > distances[worst]) {
-                    worst = i;
-                }
+            SimulationSection section = this.sections.get(key);
+            if (section == null) {
+                SimulationMesher.release(done.mesh());
+                continue;
             }
-            if (distance < distances[worst]) {
-                picked[worst] = key;
-                distances[worst] = distance;
+            if (section.revision() != snapshot.revision()) {
+                // 内容在烘制期间变过：结果作废，tint 缓存也可能被那次烘焙写进了旧值，一并清掉再排回待烘。
+                SimulationMesher.release(done.mesh());
+                section.clearTints();
+                this.pending.add(key);
+                continue;
+            }
+            if (done.mesh() == null) {
+                SimulationGeometry.instance().release(key);
+            } else {
+                SimulationGeometry.instance().upload(key, done.mesh());
             }
         }
-        this.farlands$bake(picked, found);
     }
 
     /**
-     * 无玩家基准时的同一批烘制：按 {@code pending} 的迭代顺序取，不排序。
+     * 选最近的一批提交到烘焙池。
      *
      * <p>
-     * 不拿 {@code (0, 0)} 当中心：段号在模拟之地是两亿级，{@code Math.abs(段号 - 0)} 会溢出成负数，把远处的列排到前面。
+     * 先进先出在半径 32 时会让脚下的草等半分钟，按距离取之后近的先出。距离取平方，与圆盘判据同一把尺，不必开方，
+     * 也不会因为量纲不同把四个斜角排到后面。
+     *
+     * <p>
+     * 每 tick 提交量受两个上限夹住：一段一批的配额，与烘焙池的空余名额。后者存在的理由不是省内存，而是防积压，
+     * 一段的内容在途期间可能又变了。
+     *
+     * <p>
+     * 无玩家基准时不排序，按 {@code pending} 的迭代顺序取：段号在模拟之地是两亿级，拿 {@code (0, 0)} 当中心会把
+     * 远处的列排到前面。
      */
-    private void farlands$buildNearest() {
-        if (this.pending.isEmpty()) {
+    private void farlands$submit(long centerX, long centerZ, boolean positioned) {
+        int quota = Math.min(BUILD_PER_TICK, SimulationMeshPool.freeSlots());
+        if (quota <= 0 || this.pending.isEmpty()) {
             return;
         }
-        int want = Math.min(BUILD_PER_TICK, this.pending.size());
+        int want = Math.min(quota, this.pending.size());
         SectionKey[] picked = new SectionKey[want];
-        int found = 0;
-        for (SectionKey key : this.pending) {
-            if (found == want) {
-                break;
+        int found;
+        if (positioned) {
+            found = this.farlands$pickNearest(picked, centerX, centerZ);
+        } else {
+            found = 0;
+            for (SectionKey key : this.pending) {
+                if (found == want) {
+                    break;
+                }
+                picked[found++] = key;
             }
-            picked[found++] = key;
         }
-        this.farlands$bake(picked, found);
-    }
-
-    /** 烘制并上传选中的列。空段与空网格一并释放旧几何。 */
-    private void farlands$bake(SectionKey[] picked, int found) {
         for (int i = 0; i < found; i++) {
             SectionKey key = picked[i];
             this.pending.remove(key);
             SimulationSection section = this.sections.get(key);
-            if (section == null || section.count() == 0) {
+            if (section == null) {
+                continue;
+            }
+            if (section.count() == 0) {
                 SimulationGeometry.instance().release(key);
                 continue;
             }
-            SimulationMesher.Mesh mesh = SimulationMesher.build(section, this);
-            if (mesh != null) {
-                SimulationGeometry.instance().upload(key, mesh);
-            } else {
-                SimulationGeometry.instance().release(key);
+            SimulationMeshPool.submit(this.farlands$snapshot(key, section));
+        }
+    }
+
+    /**
+     * 把最近的 {@code picked.length} 个待烘段填进 {@code picked}，返回实际填了几个。
+     *
+     * <p>
+     * 选取用容量等于本批配额的固定最大堆，堆顶是已选中最远的一个。候选只与堆顶比一次，近了才替换并下沉。逐候选
+     * 线性找最大在配额上百、待烘上万时是千万次比较，与烘制本身同量级。
+     */
+    private int farlands$pickNearest(SectionKey[] picked, long centerX, long centerZ) {
+        int want = picked.length;
+        long[] distances = new long[want];
+        int size = 0;
+        for (SectionKey key : this.pending) {
+            long dx = key.x() - centerX;
+            long dz = key.z() - centerZ;
+            long distance = dx * dx + dz * dz;
+            if (size < want) {
+                picked[size] = key;
+                distances[size] = distance;
+                farlands$siftUp(picked, distances, size);
+                size++;
+                continue;
+            }
+            if (distance < distances[0]) {
+                picked[0] = key;
+                distances[0] = distance;
+                farlands$siftDown(picked, distances, size);
             }
         }
+        return size;
+    }
+
+    /** 新入堆的元素上浮到它在最大堆里的位置。 */
+    private static void farlands$siftUp(SectionKey[] keys, long[] distances, int index) {
+        while (index > 0) {
+            int parent = (index - 1) >>> 1;
+            if (distances[parent] >= distances[index]) {
+                return;
+            }
+            farlands$swap(keys, distances, parent, index);
+            index = parent;
+        }
+    }
+
+    /** 替换堆顶之后下沉到它在最大堆里的位置。 */
+    private static void farlands$siftDown(SectionKey[] keys, long[] distances, int size) {
+        int index = 0;
+        while (true) {
+            int left = (index << 1) + 1;
+            if (left >= size) {
+                return;
+            }
+            int right = left + 1;
+            int largest = right < size && distances[right] > distances[left] ? right : left;
+            if (distances[index] >= distances[largest]) {
+                return;
+            }
+            farlands$swap(keys, distances, index, largest);
+            index = largest;
+        }
+    }
+
+    private static void farlands$swap(SectionKey[] keys, long[] distances, int a, int b) {
+        SectionKey key = keys[a];
+        keys[a] = keys[b];
+        keys[b] = key;
+        long distance = distances[a];
+        distances[a] = distances[b];
+        distances[b] = distance;
+    }
+
+    /**
+     * 取一份烘焙快照。
+     *
+     * <p>
+     * 27 格邻域在这里解析：工作线程不能查 {@code sections}，那是普通 HashMap。客户端那几样物件也在这里取，
+     * 资源重载与设置界面都会换掉它们。
+     */
+    private BakeSnapshot farlands$snapshot(SectionKey key, SimulationSection section) {
+        SimulationSection[] neighbors = new SimulationSection[27];
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    neighbors[(dx + 1) * 9 + (dy + 1) * 3 + (dz + 1)] =
+                            this.sectionOrNull(key.x() + dx, key.y() + dy, key.z() + dz);
+                }
+            }
+        }
+        net.minecraft.client.Minecraft minecraft = net.minecraft.client.Minecraft.getInstance();
+        return new BakeSnapshot(key, this.generation, section.revision(), section, section.occupiedSnapshot(),
+                section.occupiedCount(), neighbors, this.defaultBiome, minecraft.getBlockColors(),
+                minecraft.getModelManager().getBlockStateModelSet(), this.cardinalLighting,
+                minecraft.options.ambientOcclusion().get(), minecraft.options.biomeBlendRadius().get());
     }
 
     /** 取或建一段。键已在手上时用这一支，省一次键构造。 */
@@ -295,6 +446,8 @@ public final class Simulation {
         this.sections.clear();
         this.structureChanged = true;
         this.snapshot = Snapshot.EMPTY;
+        this.generation++;
+        SimulationMeshPool.discardCompleted();
     }
 
     public int sectionCount() {
