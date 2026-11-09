@@ -389,20 +389,18 @@ public final class ChunkDataSender {
                 }
                 byte[] data = new byte[tmp.readableBytes()];
                 tmp.readBytes(data);
+                int est = 24 + data.length;
+                if (used + est > budget) {
+                    break outer; // 预算耗尽，剩余留队列
+                }
                 SectionPos spos = SectionPos.of(lc.getPos(), sy);
                 LevelLightEngine le = level.getChunkSource().getLightEngine();
                 DataLayer bl = le.getLayerListener(LightLayer.BLOCK).getDataLayerData(spos);
                 DataLayer sl = le.getLayerListener(LightLayer.SKY).getDataLayerData(spos);
-                ChunkDataPacket.SectionEntry sectionEntry = new ChunkDataPacket.SectionEntry(
+                batch.add(new ChunkDataPacket.SectionEntry(
                         cx, cz, sy, data,
                         ChunkDataPacket.encodeLight(bl),
-                        ChunkDataPacket.encodeLight(sl));
-                // 记账取实际编码长度：光照载荷可能是一字节、原始两千字节或压缩块，按公式估会与实发分叉。
-                int est = ChunkDataPacket.encodedSectionSize(sectionEntry);
-                if (used + est > budget) {
-                    break outer; // 预算耗尽，剩余留队列
-                }
-                batch.add(sectionEntry);
+                        ChunkDataPacket.encodeLight(sl)));
                 it.remove();
                 used += est;
             }

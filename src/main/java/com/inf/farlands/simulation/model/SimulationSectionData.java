@@ -51,6 +51,8 @@ public final class SimulationSectionData {
 
     private int shapeMode;
 
+    private boolean dirty;
+
     public SimulationSectionData(LevelChunkSection section) {
         this.section = section;
     }
@@ -81,11 +83,25 @@ public final class SimulationSectionData {
         }
     }
 
+    /** 该段自上次下发以来是否变过。 */
+    public boolean isDirty() {
+        return this.dirty;
+    }
+
+    public void markDirty() {
+        this.dirty = true;
+    }
+
+    public void clearDirty() {
+        this.dirty = false;
+    }
+
     /**
      * 该段自上次落盘以来是否变过。
      *
      * <p>
-     * 下发侧不用这个位：谁该收到、谁还没收到，由 {@code SimulationServer} 的层桶与已发集合管。这里只管落盘。
+     * 与 {@link #dirty} 是两个位，不能合并。那个是「自上次下发以来」，所有想要它的玩家都收到就清，复用它会让
+     * 段在第一次下发成功之后再也不会被写盘。
      *
      * <p>仅主线程读写。
      */

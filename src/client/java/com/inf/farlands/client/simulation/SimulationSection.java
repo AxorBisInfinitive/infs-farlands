@@ -5,13 +5,9 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-import com.mojang.blaze3d.buffers.GpuBuffer;
-import com.mojang.blaze3d.vertex.VertexFormat;
-
 import com.inf.farlands.simulation.model.SimulationSectionData;
 import com.inf.farlands.util.world.WorldBounds;
 
-import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import net.minecraft.core.Holder;
 import net.minecraft.world.level.ColorResolver;
 import net.minecraft.world.level.LightLayer;
@@ -105,40 +101,6 @@ public final class SimulationSection {
      * 内容版本，只在客户端主线程自增。烘焙在工作线程上进行，完成时拿快照里的版本与本字段比，判结果是否已过期。
      */
     private int revision;
-
-    /**
-     * 36 位面可见性掩码，6 面两两可达，供 {@link SimulationVisibility} 的遮挡传播用。缺省 {@link
-     * SimulationVisibility#OPEN}，即全开。
-     *
-     * <p>
-     * 缺省取全开而不是全闭：掩码尚未算出时按开处理只会少剔几段，按闭处理会把真看得见的几何一起删掉。
-     */
-    private long visibility = SimulationVisibility.OPEN;
-
-    /** 27 个邻位的全集。位序见 {@link #missing}。 */
-    static final int ALL_NEIGHBORS_MISSING = (1 << 27) - 1;
-
-    /**
-     * 27 位邻域缺失掩码：烘制当前这一版几何时，哪几个邻位还不存在。
-     *
-     * <p>
-     * 位序与 {@code Simulation.farlands$snapshot} 的邻域数组同一套，即 {@code (dx + 1) * 9 + (dy + 1) * 3 + (dz + 1)}，
-     * 自分位 13 永不参与判定。缺省全 1：没烘过的段按「邻域全缺」算，邻段到达时它一定会被放回待烘，不会留下一版
-     * 在旧邻域下算出的几何。
-     */
-    private int missing = ALL_NEIGHBORS_MISSING;
-
-    /**
-     * 每层的几何，索引即 {@code ChunkSectionLayer} 的枚举序，没有几何的层为 null。
-     *
-     * <p>
-     * 挂段对象上而不是挂在一张按段号索引的表里，是为了让渲染侧取几何只是一次字段读：原版的
-     * {@code section.getSectionMesh()} 走的就是这条路。
-     */
-    private final Geometry[] geometries = new Geometry[3];
-
-    /** 待发布几何的顶点数，按层。烘制完成时写下，分配落地时与偏移一起发布，见 {@link #publishGeometry}。 */
-    private final int[] stagedVertexCounts = new int[3];
 
     /**
      * 每格的 tint 缓存，按 resolver 与「Y 的 quart 带」两级。0 表示未算，tint 恒不透明，所以 0 不会是真值。
@@ -254,56 +216,6 @@ public final class SimulationSection {
                 SimulationSection.SIZE - 1);
     }
 
-    /**
-     * 一层的几何：共享顶点缓冲、起始顶点序号、顶点数，以及可选的索引缓冲。
-     *
-     * <p>
-     * 顶点缓冲是 uber 缓冲里的一块 heap，很多段共用它；本层的内容从 {@code baseVertex} 个顶点处开始。
-     * {@code indexBuffer} 为 null 时走共享顺序索引，绘制时由 {@code baseVertex} 把零基索引平移到本段；
-     * 非 null 时是透明层排过序的自有索引，{@code indexType} 与 {@code indexCount} 随之给出。
-     */
-    public record Geometry(GpuBuffer buffer, int baseVertex, int vertexCount, GpuBuffer indexBuffer,
-            VertexFormat.IndexType indexType, int indexCount) {
-    }
-
-    /** 该层的几何，没有则为 null。 */
-    public Geometry geometry(ChunkSectionLayer layer) {
-        return this.geometries[layer.ordinal()];
-    }
-
-    /** 记下待发布几何的顶点数，见 {@link #stagedVertexCounts}。 */
-    public void setStagedVertexCount(ChunkSectionLayer layer, int vertexCount) {
-        this.stagedVertexCounts[layer.ordinal()] = vertexCount;
-    }
-
-    /**
-     * 分配落地之后发布该层的几何。缓冲与偏移来自 uber 缓冲的上传回调。
-     *
-     * <p>
-     * 走共享顺序索引的层没有自有索引，索引数由顶点数换算：每四个顶点接六个索引。
-     */
-    public void publishGeometry(ChunkSectionLayer layer, GpuBuffer buffer, int baseVertex, GpuBuffer indexBuffer,
-            VertexFormat.IndexType indexType, int indexCount) {
-        int slot = layer.ordinal();
-        int vertexCount = this.stagedVertexCounts[slot];
-        int count = indexBuffer == null ? vertexCount / 4 * 6 : indexCount;
-        this.geometries[slot] = new Geometry(buffer, baseVertex, vertexCount, indexBuffer, indexType, count);
-    }
-
-    /** 摘掉这一层的几何。段被摘除或几何被释放时调，见 {@code SimulationGeometry.drop}。 */
-    public void clearGeometry(ChunkSectionLayer layer) {
-        this.geometries[layer.ordinal()] = null;
-        this.stagedVertexCounts[layer.ordinal()] = 0;
-    }
-
-    /** 摘掉全部层的几何。 */
-    public void clearAllGeometry() {
-        for (int i = 0; i < this.geometries.length; i++) {
-            this.geometries[i] = null;
-            this.stagedVertexCounts[i] = 0;
-        }
-    }
-
     /** 该段是否参与模拟。可玩界内的段为假。 */
     public boolean eligible() {
         return this.eligible;
@@ -314,10 +226,6 @@ public final class SimulationSection {
      *
      * <p>
      * 失效段直接返回：可玩界内的段不参与模拟，服务端也不该发它们。
-     *
-     * <p>
-     * 掩码同时退回全开：新内容还没烘出来，上一版掩码属于上一版几何，按它传播会在等烘制的那几 tick 里剔掉本该看
-     * 得见的 Section。
      *
      * <p>
      * 模拟方块按 {@code BlockState} 建小表复用：同一状态共用一个实例，既省分配，也因为 {@link #set} 的
@@ -334,7 +242,6 @@ public final class SimulationSection {
         this.slots = null;
         this.count = 0;
         this.occupiedCount = 0;
-        this.visibility = SimulationVisibility.OPEN;
         this.biomes = container.getBiomes();
         this.clearTints();
         this.blockLight = blockLight == null ? new DataLayer() : blockLight;
@@ -374,9 +281,6 @@ public final class SimulationSection {
      *
      * <p>
      * {@code snap} 置空：这一段若是从有方块降成全空，旧快照段必须退出渲染列表，几何由调用方释放。
-     *
-     * <p>
-     * 掩码同时置全开：全空气必然看得穿，留着上一版全闭的掩码会把这一段后面的所有 Section 一起剔掉。
      */
     void applyAir(LevelChunkSection container, DataLayer blockLight, DataLayer skyLight) {
         if (!this.eligible) {
@@ -387,7 +291,6 @@ public final class SimulationSection {
         this.count = 0;
         this.occupiedCount = 0;
         this.snap = null;
-        this.visibility = SimulationVisibility.OPEN;
         this.biomes = container.getBiomes();
         this.clearTints();
         this.blockLight = blockLight == null ? new DataLayer() : blockLight;
@@ -455,26 +358,6 @@ public final class SimulationSection {
     /** 当前内容版本。只在客户端主线程读写。 */
     public int revision() {
         return this.revision;
-    }
-
-    /** 36 位面可见性掩码。见 {@link #visibility}。 */
-    long visibility() {
-        return this.visibility;
-    }
-
-    /** 写入烘制期算出的掩码。 */
-    void setVisibility(long mask) {
-        this.visibility = mask;
-    }
-
-    /** 当前这一版几何的邻域缺失掩码。见 {@link #missing}。 */
-    int missing() {
-        return this.missing;
-    }
-
-    /** 写入烘制这一版几何时缺席的邻位。 */
-    void setMissing(int mask) {
-        this.missing = mask;
     }
 
     /**

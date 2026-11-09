@@ -84,7 +84,7 @@ public final class SimulationStore {
      * 走新建实例而不是复用旧对象，因为 {@code section} 是 final 字段，换不了容器。同 key 已有条目时直接替换。
      *
      * <p>
-     * 落盘位不设：内容与盘上一致。下发由调用方经 {@code SimulationServer.noteDirty} 登记。
+     * 两个脏位分开设：内容与盘上一致，所以落盘位是假；它还没发给任何人，所以下发位是真。
      */
     public static SimulationSectionData putDecoded(ResourceKey<Level> dimension, SimulationSectionKey key,
             LevelChunkSection section, int shapeMode, DataLayer blockLight, DataLayer skyLight, int stage) {
@@ -97,6 +97,7 @@ public final class SimulationStore {
             data.skyLight = skyLight;
         }
         data.advanceTo(stage);
+        data.markDirty();
         STORE.computeIfAbsent(dimension, k -> new HashMap<>()).put(key, data);
         return data;
     }

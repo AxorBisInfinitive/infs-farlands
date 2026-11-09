@@ -21,7 +21,6 @@ import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.chunk.PalettedContainerFactory;
 import net.minecraft.world.level.chunk.PalettedContainerRO;
 
-import com.inf.farlands.network.expand.y.ChunkDataPacket;
 import com.inf.farlands.simulation.model.SimulationSectionData;
 import com.inf.farlands.simulation.model.SimulationSectionStage;
 
@@ -85,10 +84,10 @@ public final class SimulationSerializer {
                 containerFactory.biomeContainerCodec().encodeStart(NbtOps.INSTANCE, section.getBiomes())
                         .getOrThrow());
         if (blockLight != null && !blockLight.isEmpty()) {
-            tag.putByteArray("BlockLight", ChunkDataPacket.rawLightBytes(blockLight));
+            tag.putByteArray("BlockLight", blockLight.getData());
         }
         if (skyLight != null && !skyLight.isEmpty()) {
-            tag.putByteArray("SkyLight", ChunkDataPacket.rawLightBytes(skyLight));
+            tag.putByteArray("SkyLight", skyLight.getData());
         }
         tag.putInt("shapeMode", shapeMode);
         tag.putInt("stage", stage);
@@ -166,10 +165,8 @@ public final class SimulationSerializer {
                     .parse(NbtOps.INSTANCE, biomes.get())
                     .getOrThrow();
             LevelChunkSection section = new LevelChunkSection(states, bios);
-            DataLayer bl = tag.getByteArray("BlockLight").map(DataLayer::new)
-                    .map(ChunkDataPacket::foldUniform).orElse(null);
-            DataLayer sl = tag.getByteArray("SkyLight").map(DataLayer::new)
-                    .map(ChunkDataPacket::foldUniform).orElse(null);
+            DataLayer bl = tag.getByteArray("BlockLight").map(DataLayer::new).orElse(null);
+            DataLayer sl = tag.getByteArray("SkyLight").map(DataLayer::new).orElse(null);
             int shapeMode = tag.getIntOr("shapeMode", SimulationSectionData.SHAPE_DERIVED);
             int stage = tag.getIntOr("stage", SimulationSectionStage.UNPROCESSED);
             return new DecodedSection(section, bl, sl, shapeMode, stage);

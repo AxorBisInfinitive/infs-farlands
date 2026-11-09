@@ -9,7 +9,6 @@ import com.inf.farlands.client.simulation.Simulation;
 import com.inf.farlands.client.simulation.SimulationHolder;
 import com.inf.farlands.client.simulation.SimulationMesher;
 import com.inf.farlands.client.simulation.SimulationPick;
-import com.inf.farlands.client.simulation.SimulationTimings;
 import com.inf.farlands.util.pos.ExactPosition;
 
 import net.minecraft.client.Camera;
@@ -150,11 +149,9 @@ public class LevelRendererMixin {
             this.farlands$cameraLocalY = origin.farlands$cameraLocal(ExactPosition.POS_Y);
             this.farlands$cameraLocalZ = origin.farlands$cameraLocal(ExactPosition.POS_Z);
         }
-        long prepareStart = SimulationTimings.begin();
         SimulationRenderPass.INSTANCE.prepare(
                 state.chunkSectionsToRender == null ? null : state.chunkSectionsToRender.textureView(),
                 state.cameraRenderState, origin);
-        SimulationTimings.end(SimulationTimings.PREPARE, prepareStart);
     }
 
     /**
@@ -241,6 +238,5 @@ public class LevelRendererMixin {
     @Inject(method = "endFrame", at = @At("RETURN"))
     private void farlands$endSimulationFrame(CallbackInfo ci) {
         SimulationRenderPass.INSTANCE.endFrame();
-        SimulationTimings.frame();
     }
 }

@@ -1,23 +1,17 @@
 package com.inf.farlands.client.simulation;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Predicate;
 
-import com.inf.farlands.InfsFarlands;
-import com.inf.farlands.client.render.AnchoredFrustum;
 import com.inf.farlands.client.render.simulation.SimulationGeometry;
 import com.inf.farlands.simulation.model.SimulationSectionKey;
 import com.inf.farlands.util.pos.ExactPosition;
-import com.mojang.blaze3d.vertex.VertexSorting;
 
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.level.CardinalLighting;
@@ -46,18 +40,10 @@ public final class Simulation {
 
     private final Map<SectionKey, SimulationSection> sections = new HashMap<>();
 
-    /**
-     * 内容变过、等下一次 {@link #commit} 重建 snap 的段。
-     *
-     * <p>
-     * 只在 {@link #applySection} 的非空分支加入：段容器的写入口全树只有那一条，即 {@code set}、{@code setBiome}、
-     * {@code fillBiomes}、{@code setLight}、{@code fillLight}、{@code clearAll} 都没有外部调用方，所以脏集不必
-     * 给段装回调。空段分支由 {@code applyAir} 直接把 snap 置空，当场通知，不进这张表。
-     */
-    private final Set<SectionKey> snapDirty = new HashSet<>();
+    /** 段集合有增删时置真，提交要换快照。 */
+    private boolean structureChanged;
 
-    /** 已发布的快照。列表随追加变化，实例恒定，见 {@link Snapshot}。 */
-    private final Snapshot snapshot = new Snapshot();
+    private volatile Snapshot snapshot = Snapshot.EMPTY;
 
     /** 建段用的群系容器工厂与默认群系，与关卡同一个入口设定，见 {@link #attach}。 */
     private PalettedContainerFactory biomeFactory;
@@ -82,40 +68,6 @@ public final class Simulation {
      * 关卡代际，{@link #attach} 与 {@link #clear} 时自增。在途烘焙完成时按它判结果是否还属于这一关。
      */
     private int generation;
-
-    /** 遮挡剔除的可见集。与段表同线程，只在客户端主线程读写。 */
-    private final SimulationVisibility visibility = new SimulationVisibility();
-
-    /**
-     * 影响遮挡传播的输入的版本：段集合增删、或某段掩码真的变化时自增。
-     *
-     * <p>
-     * {@link SimulationVisibility} 按它决定要不要再提交一轮后台传播。用计数而不是布尔，是因为烘制完成的次数远多于
-     * 掩码真变化的次数：同一段重烘出同一张掩码时不该重算。
-     */
-    private int graphVersion = 1;
-
-    /** 客户端 tick 计数，供 {@code FLMESH} 那行读数按间隔输出。 */
-    private int tickCount;
-
-    /**
-     * 临时读数，结案即删：一个间隔内的收包、段数、烘制、上传、释放与待烘堆，全在客户端主线程读写。
-     *
-     * <p>
-     * 判两件事：{@code sectionsIn} 与 {@code packets} 的比值即每包段数；{@code pendingNow} 若单调上升，说明到达
-     * 速率大于烘制速率，否则说明到达的是重复内容。
-     */
-    private int probePackets;
-
-    private int probeSectionsIn;
-
-    private int probeBuilds;
-
-    private int probeUploads;
-
-    private int probeReleases;
-
-    private int probePendingPeak;
 
     /**
      * 每 tick 烘几段几何，取最近的那几段。
@@ -146,11 +98,9 @@ public final class Simulation {
         this.cardinalLighting = level.cardinalLighting();
         this.pending.clear();
         this.sections.clear();
-        this.snapDirty.clear();
-        this.snapshot.clear();
+        this.structureChanged = true;
+        this.snapshot = Snapshot.EMPTY;
         this.generation++;
-        this.visibility.invalidate();
-        this.graphVersion++;
         SimulationMeshPool.discardCompleted();
         SimulationGeometry.instance().clear();
     }
@@ -171,27 +121,18 @@ public final class Simulation {
             int shapeMode, DataLayer blockLight, DataLayer skyLight) {
         SectionKey local = new SectionKey(key.x(), key.y(), key.z());
         if (container.hasOnlyAir()) {
-            SimulationSection air = this.section(local);
-            long before = air.visibility();
-            air.applyAir(container, blockLight, skyLight);
-            if (before != SimulationVisibility.OPEN) {
-                this.graphVersion++;
-            }
-            this.snapshot.removeIf(each -> each.section() == air);
-            SimulationGeometry.instance().drop(air);
+            this.section(local).applyAir(container, blockLight, skyLight);
+            SimulationGeometry.instance().release(local);
             this.farlands$clearTintAround(local);
-            this.farlands$requeueFilledAround(local);
+            this.farlands$requeueNeighbors(local);
+            this.structureChanged = true;
             return;
         }
         SimulationSection section = this.section(local);
-        long before = section.visibility();
         section.applyContainer(container, shapeMode, blockLight, skyLight);
-        if (before != SimulationVisibility.OPEN) {
-            this.graphVersion++;
-        }
         this.farlands$clearTintAround(local);
         this.pending.add(local);
-        this.snapDirty.add(local);
+        this.structureChanged = true;
     }
 
     /** 丢掉服务端撤回的一段。 */
@@ -208,14 +149,10 @@ public final class Simulation {
      * {@link SimulationGeometry#releaseAll}。单列删除走 {@link #removeSection}，它在本方法之后补一次释放。
      */
     private void farlands$detach(SectionKey key) {
-        SimulationSection removed = this.sections.remove(key);
-        if (removed != null) {
-            this.graphVersion++;
-            this.snapshot.removeIf(each -> each.section() == removed);
-            SimulationGeometry.instance().drop(removed);
+        if (this.sections.remove(key) != null) {
+            this.structureChanged = true;
         }
         this.pending.remove(key);
-        this.snapDirty.remove(key);
         this.farlands$requeueNeighbors(key);
         this.farlands$clearTintAround(key);
     }
@@ -239,11 +176,14 @@ public final class Simulation {
     }
 
     /**
-     * 邻段消失时的全量重烘。
+     * 邻段重烘：邻段的存在性也是烘制输入。
      *
      * <p>
-     * 一段被摘掉，它周围每一段的几何都可能变：面剔除只跨一格，环境光遮蔽的角采样与群系混合还会落到对角邻段。
-     * 摘除让邻段从「有」变「无」，没有掩码可用，所以这一支把 26 个邻位一律放回待烘。
+     * 剔除跨段查邻块，光与群系也在段边界外采样，所以一段的绑定或解绑会让邻段的烘制结果变旧。数据变更走
+     * {@code farlands$requeueGeometry} 的扩散，这条只补绑定与解绑；不补的话，邻段解绑后边界那一面会缺。
+     *
+     * <p>
+     * 只放回存在的六向邻段，对角不需要：剔除与角采样只沿面方向。存在性变化没有脏范围可判，六个面邻段一律带上。
      */
     private void farlands$requeueNeighbors(SectionKey key) {
         for (int dx = -1; dx <= 1; dx++) {
@@ -262,38 +202,6 @@ public final class Simulation {
     }
 
     /**
-     * 邻段到达时的定向重烘：只放回「烘制那一版几何时确实缺了这一格」的邻段。
-     *
-     * <p>
-     * 判据落在对方的 {@link SimulationSection#missing()} 上。邻段 M 相对自己看，本段位于 {@code M + (-d)}，所以查
-     * 的位是 {@code (-dx + 1) * 9 + (-dy + 1) * 3 + (-dz + 1)}，与快照里的位序同一套。
-     *
-     * <p>
-     * 全量的那一支换来的是正确性，这一支换来的是次数：一段若是等邻域齐了才烘的，它的掩码里没有这一位，后到的邻段
-     * 就不会替它排一次队。实测的每段烘制次数由此从 4.588 次往下走。
-     */
-    private void farlands$requeueFilledAround(SectionKey key) {
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dy = -1; dy <= 1; dy++) {
-                for (int dz = -1; dz <= 1; dz++) {
-                    if (dx == 0 && dy == 0 && dz == 0) {
-                        continue;
-                    }
-                    SectionKey neighborKey = new SectionKey(key.x() + dx, key.y() + dy, key.z() + dz);
-                    SimulationSection neighbor = this.sections.get(neighborKey);
-                    if (neighbor == null) {
-                        continue;
-                    }
-                    int bit = (-dx + 1) * 9 + (-dy + 1) * 3 + (-dz + 1);
-                    if ((neighbor.missing() & (1 << bit)) != 0) {
-                        this.pending.add(neighborKey);
-                    }
-                }
-            }
-        }
-    }
-
-    /**
      * 每客户端 tick 一次：取走完成结果、提交新一批、发布快照。
      *
      * <p>
@@ -301,11 +209,7 @@ public final class Simulation {
      * 上传占的是显存侧那点时间，不再是整段遮蔽计算。
      */
     public void tickSimulation() {
-        this.tickCount++;
-        SimulationTimings.tick();
-        long tickStart = SimulationTimings.begin();
         this.farlands$drainCompleted();
-        long submitStart = SimulationTimings.begin();
         net.minecraft.world.entity.player.Player player = net.minecraft.client.Minecraft.getInstance().player;
         if (player == null) {
             this.farlands$submit(0L, 0L, false);
@@ -314,162 +218,79 @@ public final class Simulation {
             this.farlands$submit(exact.farlands$cellCoord(ExactPosition.POS_X) >> 4,
                     exact.farlands$cellCoord(ExactPosition.POS_Z) >> 4, true);
         }
-        SimulationTimings.end(SimulationTimings.SUBMIT, submitStart);
-        long commitStart = SimulationTimings.begin();
         this.commit();
-        SimulationTimings.end(SimulationTimings.COMMIT, commitStart);
-        SimulationTimings.pending(this.pending.size());
-        SimulationTimings.end(SimulationTimings.TICK, tickStart);
-        this.farlands$reportProbe();
     }
 
     /**
-     * 临时读数，结案即删：记一次收包与它带的段数。
-     *
-     * <p>
-     * 由包处理入口调，与 {@link #applySection} 同线程。
-     */
-    public void notePacket(int sections) {
-        this.probePackets++;
-        this.probeSectionsIn += sections;
-    }
-
-    /** 临时读数，结案即删：每 200 tick 打一行，随后清零。 */
-    private void farlands$reportProbe() {
-        this.probePendingPeak = Math.max(this.probePendingPeak, this.pending.size());
-        if (this.tickCount % 200 != 0) {
-            return;
-        }
-        InfsFarlands.LOGGER.info(
-                "FLMESH packets={} sectionsIn={} builds={} uploads={} releases={} pendingNow={} pendingPeak={}",
-                this.probePackets, this.probeSectionsIn, this.probeBuilds, this.probeUploads, this.probeReleases,
-                this.pending.size(), this.probePendingPeak);
-        this.probePackets = 0;
-        this.probeSectionsIn = 0;
-        this.probeBuilds = 0;
-        this.probeUploads = 0;
-        this.probeReleases = 0;
-        this.probePendingPeak = 0;
-    }
-
-    /**
-     * 取走完成结果：校验代际与版本，通过则写掩码并上传，否则丢弃。
+     * 取走完成结果：校验代际与版本，通过则上传，否则丢弃。
      *
      * <p>
      * 代际不符说明关卡换过，结果没有落点。版本不符说明烘制期间这一段的内容又变了，把键放回待烘等下一轮拿新内容。
      * 段已不在表里说明它被卸载了，几何由卸载那条路径释放过。
-     *
-     * <p>
-     * 掩码在网格之外单独写回：实心 Section 不产四边形，但它的掩码是最强的遮挡输入，不能跟着网格一起丢。
      */
     private void farlands$drainCompleted() {
-        long drainStart = SimulationTimings.begin();
         SimulationMeshPool.Completed done;
         while ((done = SimulationMeshPool.take()) != null) {
             BakeSnapshot snapshot = done.snapshot();
             SectionKey key = snapshot.key();
-            SimulationMesher.Build build = done.build();
             if (snapshot.generation() != this.generation) {
-                SimulationMesher.release(build);
+                SimulationMesher.release(done.mesh());
                 continue;
             }
             SimulationSection section = this.sections.get(key);
             if (section == null) {
-                SimulationMesher.release(build);
+                SimulationMesher.release(done.mesh());
                 continue;
             }
             if (section.revision() != snapshot.revision()) {
                 // 内容在烘制期间变过：结果作废，tint 缓存也可能被那次烘焙写进了旧值，一并清掉再排回待烘。
-                SimulationMesher.release(build);
+                SimulationMesher.release(done.mesh());
                 section.clearTints();
                 this.pending.add(key);
                 continue;
             }
-            if (build == null) {
-                // 烘制抛了异常：几何作废，掩码退回全开，免得一个残缺的遮挡结论留在可见集里。
-                SimulationGeometry.instance().drop(section);
-                if (section.visibility() != SimulationVisibility.OPEN) {
-                    section.setVisibility(SimulationVisibility.OPEN);
-                    this.graphVersion++;
-                }
-                this.probeReleases++;
-                continue;
-            }
-            this.probeBuilds++;
-            section.setMissing(snapshot.missing());
-            long mask = build.visibility();
-            if (section.visibility() != mask) {
-                section.setVisibility(mask);
-                this.graphVersion++;
-            }
-            if (build.solid() == null && build.cutout() == null && build.translucent() == null) {
-                SimulationGeometry.instance().drop(section);
-                this.probeReleases++;
+            if (done.mesh() == null) {
+                SimulationGeometry.instance().release(key);
             } else {
-                this.farlands$stage(section, build);
-                this.probeUploads++;
+                SimulationGeometry.instance().upload(key, done.mesh());
             }
         }
-        SimulationTimings.end(SimulationTimings.DRAIN, drainStart);
     }
 
     /**
-     * 把一份烘制结果的三层分别交给显存。
+     * 选最近的一批提交到烘焙池。
      *
      * <p>
-     * 有几何的层直接 {@code stage}，它落地时会顶掉同键的旧分配；没有几何的层才 {@code dropLayer}。不能反过来先整段
-     * {@code drop} 再 {@code stage}：`removeAllocation` 会把键记进跳过表，那张表要到下一次整批落地之后才清，期间同一键
-     * 的 stage 会被静默跳过，该层几何于是永不出现。
-     */
-    private void farlands$stage(SimulationSection section, SimulationMesher.Build build) {
-        SimulationGeometry geometry = SimulationGeometry.instance();
-        if (build.solid() != null) {
-            geometry.stage(section, ChunkSectionLayer.SOLID, build.solid());
-        } else {
-            geometry.dropLayer(section, ChunkSectionLayer.SOLID);
-        }
-        if (build.cutout() != null) {
-            geometry.stage(section, ChunkSectionLayer.CUTOUT, build.cutout());
-        } else {
-            geometry.dropLayer(section, ChunkSectionLayer.CUTOUT);
-        }
-        if (build.translucent() != null) {
-            geometry.stage(section, ChunkSectionLayer.TRANSLUCENT, build.translucent());
-        } else {
-            geometry.dropLayer(section, ChunkSectionLayer.TRANSLUCENT);
-        }
-    }
-
-    /**
-     * 从待烘集里挑一批提交到烘焙池。
-     *
-     * <p>
-     * 候选只遍历待烘集，可见性用 {@link SimulationVisibility#containsVisible} 现判：待烘集峰值六千量级，而可见集
-     * 是 112,315 段，反着遍历等于每 tick 扫一遍全窗。
-     *
-     * <p>
-     * 选谁烘的判据仍是「会被画」：看不见的段即使烘出来也只会占着显存与带宽。
-     *
-     * <p>
-     * 可见判定来自上一次遮挡传播，有一帧滞后；一帧之内新进的段最多晚一帧加一次烘制出现。
+     * 先进先出在半径 32 时会让脚下的草等半分钟，按距离取之后近的先出。距离取平方，与圆盘判据同一把尺，不必开方，
+     * 也不会因为量纲不同把四个斜角排到后面。
      *
      * <p>
      * 每 tick 提交量受两个上限夹住：一段一批的配额，与烘焙池的空余名额。后者存在的理由不是省内存，而是防积压，
      * 一段的内容在途期间可能又变了。
      *
      * <p>
-     * 无玩家基准时不排序，按待烘集的迭代顺序取：段号在模拟之地是两亿级，拿 {@code (0, 0)} 当中心会把远处的列排到
-     * 前面。
+     * 无玩家基准时不排序，按 {@code pending} 的迭代顺序取：段号在模拟之地是两亿级，拿 {@code (0, 0)} 当中心会把
+     * 远处的列排到前面。
      */
     private void farlands$submit(long centerX, long centerZ, boolean positioned) {
         int quota = Math.min(BUILD_PER_TICK, SimulationMeshPool.freeSlots());
         if (quota <= 0 || this.pending.isEmpty()) {
             return;
         }
-        SectionKey[] picked = new SectionKey[quota];
-        int found = positioned
-                ? this.farlands$pickNearestPending(picked, centerX, centerZ)
-                : this.farlands$takeFirstPending(picked);
+        int want = Math.min(quota, this.pending.size());
+        SectionKey[] picked = new SectionKey[want];
+        int found;
+        if (positioned) {
+            found = this.farlands$pickNearest(picked, centerX, centerZ);
+        } else {
+            found = 0;
+            for (SectionKey key : this.pending) {
+                if (found == want) {
+                    break;
+                }
+                picked[found++] = key;
+            }
+        }
         for (int i = 0; i < found; i++) {
             SectionKey key = picked[i];
             this.pending.remove(key);
@@ -478,7 +299,7 @@ public final class Simulation {
                 continue;
             }
             if (section.count() == 0) {
-                SimulationGeometry.instance().drop(section);
+                SimulationGeometry.instance().release(key);
                 continue;
             }
             SimulationMeshPool.submit(this.farlands$snapshot(key, section));
@@ -486,19 +307,17 @@ public final class Simulation {
     }
 
     /**
-     * 把待烘集里既可见又最近的若干个填进 {@code picked}，返回实际填了几个。
+     * 把最近的 {@code picked.length} 个待烘段填进 {@code picked}，返回实际填了几个。
      *
      * <p>
-     * 选取用容量等于本批配额的固定最大堆，堆顶是已选中最远的一个。候选只与堆顶比一次，近了才替换并下沉。
+     * 选取用容量等于本批配额的固定最大堆，堆顶是已选中最远的一个。候选只与堆顶比一次，近了才替换并下沉。逐候选
+     * 线性找最大在配额上百、待烘上万时是千万次比较，与烘制本身同量级。
      */
-    private int farlands$pickNearestPending(SectionKey[] picked, long centerX, long centerZ) {
+    private int farlands$pickNearest(SectionKey[] picked, long centerX, long centerZ) {
         int want = picked.length;
         long[] distances = new long[want];
         int size = 0;
         for (SectionKey key : this.pending) {
-            if (!this.visibility.containsVisible(key.x(), key.y(), key.z())) {
-                continue;
-            }
             long dx = key.x() - centerX;
             long dz = key.z() - centerZ;
             long distance = dx * dx + dz * dz;
@@ -516,21 +335,6 @@ public final class Simulation {
             }
         }
         return size;
-    }
-
-    /** 没有玩家基准时按待烘集的迭代顺序取，不做距离排序。 */
-    private int farlands$takeFirstPending(SectionKey[] picked) {
-        int want = picked.length;
-        int found = 0;
-        for (SectionKey key : this.pending) {
-            if (found == want) {
-                break;
-            }
-            if (this.visibility.containsVisible(key.x(), key.y(), key.z())) {
-                picked[found++] = key;
-            }
-        }
-        return found;
     }
 
     /** 新入堆的元素上浮到它在最大堆里的位置。 */
@@ -581,42 +385,19 @@ public final class Simulation {
      */
     private BakeSnapshot farlands$snapshot(SectionKey key, SimulationSection section) {
         SimulationSection[] neighbors = new SimulationSection[27];
-        int missing = 0;
         for (int dx = -1; dx <= 1; dx++) {
             for (int dy = -1; dy <= 1; dy++) {
                 for (int dz = -1; dz <= 1; dz++) {
-                    int index = (dx + 1) * 9 + (dy + 1) * 3 + (dz + 1);
-                    SimulationSection neighbor = this.sectionOrNull(key.x() + dx, key.y() + dy, key.z() + dz);
-                    neighbors[index] = neighbor;
-                    if (neighbor == null) {
-                        missing |= 1 << index;
-                    }
+                    neighbors[(dx + 1) * 9 + (dy + 1) * 3 + (dz + 1)] =
+                            this.sectionOrNull(key.x() + dx, key.y() + dy, key.z() + dz);
                 }
             }
         }
         net.minecraft.client.Minecraft minecraft = net.minecraft.client.Minecraft.getInstance();
         return new BakeSnapshot(key, this.generation, section.revision(), section, section.occupiedSnapshot(),
-                section.occupiedCount(), neighbors, missing, this.defaultBiome, minecraft.getBlockColors(),
+                section.occupiedCount(), neighbors, this.defaultBiome, minecraft.getBlockColors(),
                 minecraft.getModelManager().getBlockStateModelSet(), this.cardinalLighting,
-                minecraft.options.ambientOcclusion().get(), minecraft.options.biomeBlendRadius().get(),
-                minecraft.options.cutoutLeaves().get(), this.farlands$sorting(key));
-    }
-
-    /**
-     * 透明层排四边形用的相机基准，按「相机相对本段原点」构造，与地形在编译期的做法同源。
-     *
-     * <p>
-     * 相机位姿来自本帧的 {@link #visibleSections}，烘制在它之后发生，所以基准是提交那一刻的相机。相机随后移动不会
-     * 让已烘的段重排，这一点与地形一致。
-     */
-    private VertexSorting farlands$sorting(SectionKey key) {
-        long originX = key.x() << 4;
-        long originY = key.y() << 4;
-        long originZ = key.z() << 4;
-        return VertexSorting.byDistance(
-                (float) ((double) (this.camAnchorX - originX) + this.camLocalX),
-                (float) ((double) (this.camAnchorY - originY) + this.camLocalY),
-                (float) ((double) (this.camAnchorZ - originZ) + this.camLocalZ));
+                minecraft.options.ambientOcclusion().get(), minecraft.options.biomeBlendRadius().get());
     }
 
     /** 取或建一段。键已在手上时用这一支，省一次键构造。 */
@@ -625,7 +406,7 @@ public final class Simulation {
         if (section == null) {
             section = new SimulationSection(key.x(), key.y(), key.z(), this.biomeFactory, this.defaultBiome);
             this.sections.put(key, section);
-            this.graphVersion++;
+            this.structureChanged = true;
         }
         return section;
     }
@@ -650,6 +431,7 @@ public final class Simulation {
      */
     public void removeSection(SectionKey key) {
         this.farlands$detach(key);
+        SimulationGeometry.instance().release(key);
     }
 
     /** 摘掉一段。 */
@@ -662,74 +444,10 @@ public final class Simulation {
         this.clientLevel = null;
         this.pending.clear();
         this.sections.clear();
-        this.snapDirty.clear();
-        this.snapshot.clear();
+        this.structureChanged = true;
+        this.snapshot = Snapshot.EMPTY;
         this.generation++;
-        this.visibility.invalidate();
-        this.graphVersion++;
         SimulationMeshPool.discardCompleted();
-    }
-
-    /**
-     * 本帧要画的 Section 列表：交给遮挡剔除层，由它按需提交后台传播、按需重裁，返回裁剪集。
-     *
-     * <p>
-     * 入参是相机帧的锚点与局部量，Section 号与段内偏移都由这里现算：调用方在渲染包里，算完还得原样传回来，
-     * 不如只给帧表示。
-     *
-     * <p>
-     * 传播跑在后台线程，由「图输入版本变化」或「相机段变化」驱动，所以这里不再有节流：异步本身就是节流，一次只有
-     * 一个任务在途。裁剪在主线程做，只在图发布或相机转动跨 2 度时重跑。
-     */
-    public List<SnapSection> visibleSections(long cameraAnchorX, long cameraAnchorY, long cameraAnchorZ,
-            double cameraLocalX, double cameraLocalY, double cameraLocalZ, float xRot, float yRot,
-            AnchoredFrustum frustum) {
-        long blockX = cameraAnchorX + (long) Math.floor(cameraLocalX);
-        long blockY = cameraAnchorY + (long) Math.floor(cameraLocalY);
-        long blockZ = cameraAnchorZ + (long) Math.floor(cameraLocalZ);
-        this.camAnchorX = cameraAnchorX;
-        this.camAnchorY = cameraAnchorY;
-        this.camAnchorZ = cameraAnchorZ;
-        this.camLocalX = cameraLocalX;
-        this.camLocalY = cameraLocalY;
-        this.camLocalZ = cameraLocalZ;
-        long sectionX = blockX >> 4;
-        long sectionY = blockY >> 4;
-        long sectionZ = blockZ >> 4;
-        double inSectionX = cameraLocalX - Math.floor(cameraLocalX) + (double) (blockX - (sectionX << 4));
-        double inSectionY = cameraLocalY - Math.floor(cameraLocalY) + (double) (blockY - (sectionY << 4));
-        double inSectionZ = cameraLocalZ - Math.floor(cameraLocalZ) + (double) (blockZ - (sectionZ << 4));
-        return this.visibility.update(this, new SimulationVisibility.View(sectionX, sectionY, sectionZ, inSectionX,
-                inSectionY, inSectionZ, cameraAnchorX, cameraAnchorY, cameraAnchorZ, cameraLocalX, cameraLocalY,
-                cameraLocalZ, xRot, yRot, frustum));
-    }
-
-    /** 图输入的版本，见 {@link #graphVersion}。 */
-    int graphVersion() {
-        return this.graphVersion;
-    }
-
-    /** 本帧的相机位姿，供烘制时排透明层用，写点在 {@link #visibleSections}。 */
-    private long camAnchorX;
-
-    private long camAnchorY;
-
-    private long camAnchorZ;
-
-    private double camLocalX;
-
-    private double camLocalY;
-
-    private double camLocalZ;
-
-    /** 裁剪集内容的版本，供渲染批次缓存判重。 */
-    public int visibleVersion() {
-        return this.visibility.culledVersion();
-    }
-
-    /** 段表本体，供 {@link SimulationVisibility} 传播用。同包可见，只在客户端主线程读。 */
-    Map<SectionKey, SimulationSection> sectionMap() {
-        return this.sections;
     }
 
     public int sectionCount() {
@@ -779,33 +497,28 @@ public final class Simulation {
      * 只在有段变脏或段集合有增删时换快照，其余时候一次也不发布。
      */
     public void commit() {
-        if (this.snapDirty.isEmpty()) {
-            return;
-        }
+        boolean changed = this.structureChanged;
+        this.structureChanged = false;
         int reach = Math.max(2, net.minecraft.client.Minecraft.getInstance().options.biomeBlendRadius().get());
-        for (SectionKey key : this.snapDirty) {
-            SimulationSection section = this.sections.get(key);
-            if (section == null || !section.eligible()) {
+        List<SnapSection> out = new ArrayList<>(this.sections.size());
+        for (SimulationSection section : this.sections.values()) {
+            if (!section.eligible()) {
                 continue;
             }
             SimulationSection.Dirty dirty = section.takeDirty();
-            if (dirty == null) {
-                continue;
+            if (dirty != null) {
+                section.rebuild();
+                changed = true;
+                this.farlands$requeueGeometry(section, dirty, reach);
             }
-            boolean had = section.snap() != null;
-            section.rebuild();
-            SnapSection rebuilt = section.snap();
-            if (had != (rebuilt != null)) {
-                // 只有碰撞用的快照在这里增减；渲染用的可见集由后台传播整体产出，见 SimulationVisibility。
-                if (rebuilt == null) {
-                    this.snapshot.removeIf(each -> each.section() == section);
-                } else {
-                    this.snapshot.add(rebuilt);
-                }
+            SnapSection snap = section.snap();
+            if (snap != null) {
+                out.add(snap);
             }
-            this.farlands$requeueGeometry(section, dirty, reach);
         }
-        this.snapDirty.clear();
+        if (changed) {
+            this.snapshot = new Snapshot(List.copyOf(out));
+        }
     }
 
     /**
@@ -817,14 +530,9 @@ public final class Simulation {
      * 段内部写入只重烘本段。
      *
      * <p>
-     * 邻段还要再过一道掩码：只有当它烘制当前这一版几何时本段还缺席，才值得重烘。本段自己不受这一道约束，它总
-     * 要重烘。这一道把「每到达一段就替 26 个邻段各排一次队」压成「只替当时确实缺了它的那些段排队」。
-     *
-     * <p>
      * 只放回存在的段：未建的段放回去也只会在烘制时被跳过。
      */
     private void farlands$requeueGeometry(SimulationSection section, SimulationSection.Dirty dirty, int reach) {
-        long requeueStart = SimulationTimings.begin();
         long centerX = section.sectionX();
         long centerY = section.sectionY();
         long centerZ = section.sectionZ();
@@ -847,21 +555,12 @@ public final class Simulation {
                         continue;
                     }
                     SectionKey key = new SectionKey(centerX + dx, centerY + dy, centerZ + dz);
-                    SimulationSection neighbor = this.sections.get(key);
-                    if (neighbor == null) {
-                        continue;
+                    if (this.sections.containsKey(key)) {
+                        this.pending.add(key);
                     }
-                    if (dx != 0 || dy != 0 || dz != 0) {
-                        int bit = (-dx + 1) * 9 + (-dy + 1) * 3 + (-dz + 1);
-                        if ((neighbor.missing() & (1 << bit)) == 0) {
-                            continue;
-                        }
-                    }
-                    this.pending.add(key);
                 }
             }
         }
-        SimulationTimings.end(SimulationTimings.REQUEUE, requeueStart);
     }
 
     /**
@@ -873,36 +572,19 @@ public final class Simulation {
     public record SectionKey(long x, long y, long z) {
     }
 
-    /**
-     * 已发布的快照。
-     *
-     * <p>
-     * 列表随追加变化，实例恒定。全树唯一的读点是碰撞注入里的 {@code sections().isEmpty()}，它只判空不遍历，所以
-     * 不必每 tick 复制一份；段增删与 snap 转变在各自的入口当场追加或摘除。
-     */
+    /** 一次发布的不可变快照。 */
     public static final class Snapshot {
 
-        private final List<SnapSection> sections = new ArrayList<>();
+        public static final Snapshot EMPTY = new Snapshot(List.of());
 
-        private final List<SnapSection> published = Collections.unmodifiableList(this.sections);
+        private final List<SnapSection> sections;
 
-        Snapshot() {
+        Snapshot(List<SnapSection> sections) {
+            this.sections = sections;
         }
 
         public List<SnapSection> sections() {
-            return this.published;
-        }
-
-        void add(SnapSection snap) {
-            this.sections.add(snap);
-        }
-
-        void removeIf(Predicate<SnapSection> test) {
-            this.sections.removeIf(test);
-        }
-
-        void clear() {
-            this.sections.clear();
+            return this.sections;
         }
     }
 
