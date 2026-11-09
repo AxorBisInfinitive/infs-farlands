@@ -441,13 +441,14 @@ public final class SimulationServer {
                     dropped.add(key);
                     continue;
                 }
-                int size = SimulationSectionPacket.estimatedSize(data);
+                SimulationSectionPacket.SectionEntry entry = SimulationSectionPacket.encode(key, data);
+                int size = SimulationSectionPacket.encodedSize(entry);
                 if (used > 0 && used + size > budget) {
                     full = true;
                     break;
                 }
                 boolean resent = sent.contains(key);
-                loaded.add(SimulationSectionPacket.encode(key, data));
+                loaded.add(entry);
                 used += size;
                 taken.add(key);
                 if (resent) {

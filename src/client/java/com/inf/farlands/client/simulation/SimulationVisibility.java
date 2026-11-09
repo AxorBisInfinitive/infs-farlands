@@ -52,6 +52,15 @@ final class SimulationVisibility {
     /** 没有来路方向：种子节点用，向六个邻段推进时不判穿面。 */
     private static final int NO_SOURCE = -1;
 
+    /**
+     * 远景门：当前段离相机段超过这个段数就逐候选做直线校验。
+     *
+     * <p>
+     * 判据取自原版 {@code SectionOcclusionGraph.runUpdates} 的 {@code distantFromCamera}，与父段是否全开无关。
+     * 原版这一支受 {@code smartCull} 开关控制，本 port 恒开，没有关掉的路径。
+     */
+    private static final long RAY_GATE_SECTIONS = 4L;
+
     /** 超过这个段数差才做直线校验，取 60 格折成段数，与原版同阈值。 */
     private static final long RAY_MIN_SECTIONS = 3;
 
@@ -87,9 +96,6 @@ final class SimulationVisibility {
      * 与「不在表里」。
      */
     private static final int SOURCES_ABSENT = 0;
-
-    /** 被直线校验判掉的记号。方向集最多 6 位即 64，所以 65 空着。 */
-    private static final int SOURCES_REJECTED = 65;
 
     /** 队列条目里方向所占的位移。低 24 位是打包键，第 32 位起放方向加一。 */
     private static final int QUEUE_SOURCE_SHIFT = 32;
@@ -150,6 +156,11 @@ final class SimulationVisibility {
     /** 上次请求时看到的图输入版本与相机段，用来决定要不要推高请求计数。 */
     private int lastGraphVersion = -1;
 
+    /** 后台传播的累计耗时与单轮峰值，后台线程加，主线程取走。 */
+    private final java.util.concurrent.atomic.AtomicLong propagateSum = new java.util.concurrent.atomic.AtomicLong();
+
+    private final java.util.concurrent.atomic.AtomicLong propagateMax = new java.util.concurrent.atomic.AtomicLong();
+
     private long lastSectionX = Long.MIN_VALUE;
 
     private long lastSectionY = Long.MIN_VALUE;
@@ -158,6 +169,7 @@ final class SimulationVisibility {
 
     /** 每帧调一次：按需提交后台传播、按需重裁，返回裁剪集。 */
     List<Simulation.SnapSection> update(Simulation simulation, View view) {
+        this.farlands$drainPropagate();
         boolean moved = view.sectionX() != this.lastSectionX || view.sectionY() != this.lastSectionY
                 || view.sectionZ() != this.lastSectionZ;
         int version = simulation.graphVersion();
@@ -178,6 +190,20 @@ final class SimulationVisibility {
     /** 裁剪集。没有图时为空表。 */
     List<Simulation.SnapSection> sections() {
         return this.culled;
+    }
+
+    /**
+     * 主线程：把后台累计的传播耗时并进探针。
+     *
+     * <p>
+     * 两个计数器由后台线程加、这里取走，所以取走后清零；没有传播发生的帧不写探针，避免把「没跑」摊成「跑得很快」。
+     */
+    private void farlands$drainPropagate() {
+        long sum = this.propagateSum.getAndSet(0L);
+        long max = this.propagateMax.getAndSet(0L);
+        if (sum > 0L) {
+            SimulationTimings.propagate(sum, max);
+        }
     }
 
     /** 裁剪集内容的版本，供渲染批次缓存判重。 */
@@ -234,6 +260,7 @@ final class SimulationVisibility {
 
     /** 后台：从快照算出一张图并发布。只碰 {@code job} 与局部容器。 */
     private void farlands$propagate(Job job) {
+        long started = System.nanoTime();
         Long2IntOpenHashMap indexOf = new Long2IntOpenHashMap(job.packed().length);
         for (int i = 0; i < job.packed().length; i++) {
             if (job.packed()[i] != PACK_OUT_OF_RANGE) {
@@ -269,6 +296,10 @@ final class SimulationVisibility {
                 continue;
             }
             long mask = job.masks()[at];
+            // 远景门按原版：看当前段离相机段的段数差，与父段是否全开无关。
+            boolean distant = Math.abs(farlands$unpackX(key)) > RAY_GATE_SECTIONS
+                    || Math.abs(farlands$unpackY(key)) > RAY_GATE_SECTIONS
+                    || Math.abs(farlands$unpackZ(key)) > RAY_GATE_SECTIONS;
             for (Direction exit : DIRECTIONS) {
                 if (source != NO_SOURCE && !farlands$passes(mask, source, exit.ordinal())) {
                     continue;
@@ -280,15 +311,14 @@ final class SimulationVisibility {
                 int bit = 1 << exit.ordinal();
                 int have = sources.getOrDefault(next, SOURCES_ABSENT);
                 if (have == SOURCES_ABSENT) {
-                    if (mask == OPEN && !farlands$rayClear(next, indexOf, sources, job.cameraX(), job.cameraY(),
+                    if (distant && !farlands$rayClear(next, indexOf, sources, job.cameraX(), job.cameraY(),
                             job.cameraZ())) {
-                        sources.put(next, SOURCES_REJECTED);
                         continue;
                     }
                     sources.put(next, bit + 1);
                     order.add(next);
                     queue.enqueue(next | ((long) (exit.ordinal() + 1) << QUEUE_SOURCE_SHIFT));
-                } else if (have != SOURCES_REJECTED && (((have - 1) & bit) == 0)) {
+                } else if (((have - 1) & bit) == 0) {
                     sources.put(next, ((have - 1) | bit) + 1);
                     queue.enqueue(next | ((long) (exit.ordinal() + 1) << QUEUE_SOURCE_SHIFT));
                 }
@@ -322,6 +352,9 @@ final class SimulationVisibility {
             this.current = graph;
             this.needsCull = true;
         }
+        long elapsed = System.nanoTime() - started;
+        this.propagateSum.addAndGet(elapsed);
+        this.propagateMax.accumulateAndGet(elapsed, Math::max);
     }
 
     /**
@@ -417,6 +450,10 @@ final class SimulationVisibility {
      * <p>
      * 掩码只答「能不能从某个面穿到某个面」，不答开口在哪，所以一串开口错开的段也能连成通路。它必须跑在入队之前：
      * 一路上「已经到达」的那批节点，正是这个时序给出的约束。缺段不算证据，按穿过处理。
+     *
+     * <p>
+     * 判否只作用于当前这一条边：调用方直接跳过，不写任何记号，所以别的边还能从更近的父段重新尝试并放行。这与原版
+     * 一致，代价是同一节点可能被多条边各判一次，上界是边数乘步进。
      */
     private static boolean farlands$rayClear(long key, Long2IntOpenHashMap indexOf, Long2IntOpenHashMap sources,
             double cameraX, double cameraY, double cameraZ) {
@@ -464,7 +501,7 @@ final class SimulationVisibility {
                 continue;
             }
             int seen = sources.getOrDefault(probed, SOURCES_ABSENT);
-            if (indexOf.getOrDefault(probed, -1) >= 0 && (seen == SOURCES_ABSENT || seen == SOURCES_REJECTED)) {
+            if (indexOf.getOrDefault(probed, -1) >= 0 && seen == SOURCES_ABSENT) {
                 return false;
             }
         }

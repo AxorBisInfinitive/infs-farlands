@@ -14,8 +14,10 @@ import com.inf.farlands.client.render.AnchoredFrustum;
 import com.inf.farlands.client.render.simulation.SimulationGeometry;
 import com.inf.farlands.simulation.model.SimulationSectionKey;
 import com.inf.farlands.util.pos.ExactPosition;
+import com.mojang.blaze3d.vertex.VertexSorting;
 
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.level.CardinalLighting;
@@ -400,15 +402,42 @@ public final class Simulation {
                 section.setVisibility(mask);
                 this.graphVersion++;
             }
-            if (build.mesh() == null) {
+            if (build.solid() == null && build.cutout() == null && build.translucent() == null) {
                 SimulationGeometry.instance().drop(section);
                 this.probeReleases++;
             } else {
-                SimulationGeometry.instance().stage(section, build.mesh());
+                this.farlands$stage(section, build);
                 this.probeUploads++;
             }
         }
         SimulationTimings.end(SimulationTimings.DRAIN, drainStart);
+    }
+
+    /**
+     * 把一份烘制结果的三层分别交给显存。
+     *
+     * <p>
+     * 有几何的层直接 {@code stage}，它落地时会顶掉同键的旧分配；没有几何的层才 {@code dropLayer}。不能反过来先整段
+     * {@code drop} 再 {@code stage}：`removeAllocation` 会把键记进跳过表，那张表要到下一次整批落地之后才清，期间同一键
+     * 的 stage 会被静默跳过，该层几何于是永不出现。
+     */
+    private void farlands$stage(SimulationSection section, SimulationMesher.Build build) {
+        SimulationGeometry geometry = SimulationGeometry.instance();
+        if (build.solid() != null) {
+            geometry.stage(section, ChunkSectionLayer.SOLID, build.solid());
+        } else {
+            geometry.dropLayer(section, ChunkSectionLayer.SOLID);
+        }
+        if (build.cutout() != null) {
+            geometry.stage(section, ChunkSectionLayer.CUTOUT, build.cutout());
+        } else {
+            geometry.dropLayer(section, ChunkSectionLayer.CUTOUT);
+        }
+        if (build.translucent() != null) {
+            geometry.stage(section, ChunkSectionLayer.TRANSLUCENT, build.translucent());
+        } else {
+            geometry.dropLayer(section, ChunkSectionLayer.TRANSLUCENT);
+        }
     }
 
     /**
@@ -569,7 +598,25 @@ public final class Simulation {
         return new BakeSnapshot(key, this.generation, section.revision(), section, section.occupiedSnapshot(),
                 section.occupiedCount(), neighbors, missing, this.defaultBiome, minecraft.getBlockColors(),
                 minecraft.getModelManager().getBlockStateModelSet(), this.cardinalLighting,
-                minecraft.options.ambientOcclusion().get(), minecraft.options.biomeBlendRadius().get());
+                minecraft.options.ambientOcclusion().get(), minecraft.options.biomeBlendRadius().get(),
+                minecraft.options.cutoutLeaves().get(), this.farlands$sorting(key));
+    }
+
+    /**
+     * 透明层排四边形用的相机基准，按「相机相对本段原点」构造，与地形在编译期的做法同源。
+     *
+     * <p>
+     * 相机位姿来自本帧的 {@link #visibleSections}，烘制在它之后发生，所以基准是提交那一刻的相机。相机随后移动不会
+     * 让已烘的段重排，这一点与地形一致。
+     */
+    private VertexSorting farlands$sorting(SectionKey key) {
+        long originX = key.x() << 4;
+        long originY = key.y() << 4;
+        long originZ = key.z() << 4;
+        return VertexSorting.byDistance(
+                (float) ((double) (this.camAnchorX - originX) + this.camLocalX),
+                (float) ((double) (this.camAnchorY - originY) + this.camLocalY),
+                (float) ((double) (this.camAnchorZ - originZ) + this.camLocalZ));
     }
 
     /** 取或建一段。键已在手上时用这一支，省一次键构造。 */
@@ -640,6 +687,12 @@ public final class Simulation {
         long blockX = cameraAnchorX + (long) Math.floor(cameraLocalX);
         long blockY = cameraAnchorY + (long) Math.floor(cameraLocalY);
         long blockZ = cameraAnchorZ + (long) Math.floor(cameraLocalZ);
+        this.camAnchorX = cameraAnchorX;
+        this.camAnchorY = cameraAnchorY;
+        this.camAnchorZ = cameraAnchorZ;
+        this.camLocalX = cameraLocalX;
+        this.camLocalY = cameraLocalY;
+        this.camLocalZ = cameraLocalZ;
         long sectionX = blockX >> 4;
         long sectionY = blockY >> 4;
         long sectionZ = blockZ >> 4;
@@ -655,6 +708,19 @@ public final class Simulation {
     int graphVersion() {
         return this.graphVersion;
     }
+
+    /** 本帧的相机位姿，供烘制时排透明层用，写点在 {@link #visibleSections}。 */
+    private long camAnchorX;
+
+    private long camAnchorY;
+
+    private long camAnchorZ;
+
+    private double camLocalX;
+
+    private double camLocalY;
+
+    private double camLocalZ;
 
     /** 裁剪集内容的版本，供渲染批次缓存判重。 */
     public int visibleVersion() {

@@ -11,6 +11,7 @@ import com.inf.farlands.simulation.model.SimulationSectionKey;
 import io.netty.buffer.Unpooled;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.VarInt;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
@@ -63,11 +64,17 @@ public record SimulationSectionPacket(
         }
     }
 
-    /** 一段在包里的估算字节数，供发送预算用。 */
-    public static int estimatedSize(SimulationSectionData data) {
-        int size = 24 + 1 + 4 + data.section.getSerializedSize();
-        size += data.blockLight.isDefinitelyHomogenous() ? 1 : 2049;
-        size += data.skyLight.isDefinitelyHomogenous() ? 1 : 2049;
+    /**
+     * 一条已编码条目在包里的字节数，供发送预算用。
+     *
+     * <p>
+     * 取实际字节而不是按层是否同质去估：光照载荷可能是 1 字节、原始 2,048 字节或压缩块，估的公式一旦与编码
+     * 分叉，预算就会按大于实发的字节记账，优化发不出去。
+     */
+    public static int encodedSize(SectionEntry entry) {
+        int size = 24 + 1 + VarInt.getByteSize(entry.data().length) + entry.data().length;
+        size += ChunkDataPacket.encodedLightSize(entry.blockLight());
+        size += ChunkDataPacket.encodedLightSize(entry.skyLight());
         return size;
     }
 
