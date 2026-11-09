@@ -116,7 +116,7 @@ public final class SimulationRenderPass {
             return;
         }
         Simulation simulation = ((SimulationHolder) Minecraft.getInstance()).simulation();
-        List<Simulation.SnapSection> sections = simulation.snapshot().sections();
+        java.util.Set<Simulation.SnapSection> sections = simulation.snapshot().sections();
         if (sections.isEmpty()) {
             return;
         }

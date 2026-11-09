@@ -1,9 +1,7 @@
 package com.inf.farlands.client.simulation;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -40,10 +38,16 @@ public final class Simulation {
 
     private final Map<SectionKey, SimulationSection> sections = new HashMap<>();
 
-    /** 段集合有增删时置真，提交要换快照。 */
-    private boolean structureChanged;
+    /** 内容变过、等下一次 {@link #commit} 登记进渲染列表的段。 */
+    private final Set<SectionKey> snapDirty = new HashSet<>();
 
-    private volatile Snapshot snapshot = Snapshot.EMPTY;
+    /** 27 格邻域缓存，按段键存。只有段集合增删时才整份重建，见 {@link Neighborhood}。 */
+    private final Map<SectionKey, Neighborhood> neighborhoods = new HashMap<>();
+
+    /** 段集合的增删代数。邻域缓存的段引用按它判是否还算数。 */
+    private int structureVersion;
+
+    private volatile Snapshot snapshot = new Snapshot();
 
     /** 建段用的群系容器工厂与默认群系，与关卡同一个入口设定，见 {@link #attach}。 */
     private PalettedContainerFactory biomeFactory;
@@ -82,7 +86,7 @@ public final class Simulation {
      * <p>
      * 不与「空段不占配额」同时使用：空段现在起稀释作用，去掉之后 320 个名额会全落在稠密段上。
      */
-    private static final int BUILD_PER_TICK = 8;
+    private static final int BUILD_PER_TICK = 320;
 
     /**
      * 装关卡或退世界时调。客户端不再有生产者：段与它的内容都从服务端的包来。
@@ -98,8 +102,11 @@ public final class Simulation {
         this.cardinalLighting = level.cardinalLighting();
         this.pending.clear();
         this.sections.clear();
-        this.structureChanged = true;
-        this.snapshot = Snapshot.EMPTY;
+        this.snapDirty.clear();
+        this.neighborhoods.clear();
+        this.structureVersion++;
+
+        this.snapshot = new Snapshot();
         this.generation++;
         SimulationMeshPool.discardCompleted();
         SimulationGeometry.instance().clear();
@@ -109,8 +116,8 @@ public final class Simulation {
      * 应用服务端送来的一段。
      *
      * <p>
-     * 段不存在就建，已存在就整体替换；随后入待烘集合并置结构变更，由下一次 {@link #commit} 发布新快照。
-     * 只在客户端主线程调，与服务端那段包的处理点同线程。
+     * 段不存在就建；已有段先与来包逐格比较，内容相同则整条链跳过，不同才替换、标脏、入待烘。比较那一趟同时算出
+     * 差异盒，供 {@link #commit} 只让贴着真差异的邻段失效。只在客户端主线程调，与服务端那段包的处理点同线程。
      *
      * <p>
      * 全空段保留对象但不烘焙：它的光照是邻段环境光遮蔽的输入，天光 15 与方块光 0 都存在这个段的
@@ -121,18 +128,25 @@ public final class Simulation {
             int shapeMode, DataLayer blockLight, DataLayer skyLight) {
         SectionKey local = new SectionKey(key.x(), key.y(), key.z());
         if (container.hasOnlyAir()) {
-            this.section(local).applyAir(container, blockLight, skyLight);
+            SimulationSection section = this.section(local);
+            SnapSection stale = section.snap();
+            section.applyAir(container, blockLight, skyLight);
+            if (stale != null) {
+                this.snapshot.sectionsMutable().remove(stale);
+            }
             SimulationGeometry.instance().release(local);
             this.farlands$clearTintAround(local);
             this.farlands$requeueNeighbors(local);
-            this.structureChanged = true;
             return;
         }
         SimulationSection section = this.section(local);
-        section.applyContainer(container, shapeMode, blockLight, skyLight);
+        // 内容与现段逐格相同就什么都不做：不换容器、不标脏、不入待烘，因此也不触发邻段扩散。
+        if (!section.applyIfChanged(container, shapeMode, blockLight, skyLight)) {
+            return;
+        }
         this.farlands$clearTintAround(local);
         this.pending.add(local);
-        this.structureChanged = true;
+        this.snapDirty.add(local);
     }
 
     /** 丢掉服务端撤回的一段。 */
@@ -149,10 +163,18 @@ public final class Simulation {
      * {@link SimulationGeometry#releaseAll}。单列删除走 {@link #removeSection}，它在本方法之后补一次释放。
      */
     private void farlands$detach(SectionKey key) {
-        if (this.sections.remove(key) != null) {
-            this.structureChanged = true;
+        SimulationSection removed = this.sections.remove(key);
+        if (removed != null) {
+            this.structureVersion++;
+            this.neighborhoods.remove(key);
+            SnapSection stale = removed.snap();
+            if (stale != null) {
+                this.snapshot.sectionsMutable().remove(stale);
+                removed.clearSnap();
+            }
         }
         this.pending.remove(key);
+        this.snapDirty.remove(key);
         this.farlands$requeueNeighbors(key);
         this.farlands$clearTintAround(key);
     }
@@ -384,20 +406,50 @@ public final class Simulation {
      * 资源重载与设置界面都会换掉它们。
      */
     private BakeSnapshot farlands$snapshot(SectionKey key, SimulationSection section) {
-        SimulationSection[] neighbors = new SimulationSection[27];
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dy = -1; dy <= 1; dy++) {
-                for (int dz = -1; dz <= 1; dz++) {
-                    neighbors[(dx + 1) * 9 + (dy + 1) * 3 + (dz + 1)] =
-                            this.sectionOrNull(key.x() + dx, key.y() + dy, key.z() + dz);
+        Neighborhood neighborhood = this.neighborhoods.computeIfAbsent(key, k -> new Neighborhood());
+        if (neighborhood.version != this.structureVersion) {
+            // 段集合增删过：段引用全部重查一次，再记下当时的版本。
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dy = -1; dy <= 1; dy++) {
+                    for (int dz = -1; dz <= 1; dz++) {
+                        int slot = (dx + 1) * 9 + (dy + 1) * 3 + (dz + 1);
+                        SimulationSection neighbor = this.sectionOrNull(key.x() + dx, key.y() + dy, key.z() + dz);
+                        neighborhood.sections[slot] = neighbor;
+                        neighborhood.contents[slot] = neighbor == null ? null : neighbor.content();
+                    }
                 }
+            }
+            neighborhood.version = this.structureVersion;
+        } else {
+            // 结构没变，但邻段内容可能换过：27 次内容引用读，比 27 次查表加键分配便宜。
+            for (int i = 0; i < Neighborhood.SLOTS; i++) {
+                SimulationSection neighbor = neighborhood.sections[i];
+                neighborhood.contents[i] = neighbor == null ? null : neighbor.content();
             }
         }
         net.minecraft.client.Minecraft minecraft = net.minecraft.client.Minecraft.getInstance();
-        return new BakeSnapshot(key, this.generation, section.revision(), section, section.occupiedSnapshot(),
-                section.occupiedCount(), neighbors, this.defaultBiome, minecraft.getBlockColors(),
+        return new BakeSnapshot(key, this.generation, section.revision(), section, section.content(),
+                neighborhood.contents.clone(), this.defaultBiome, minecraft.getBlockColors(),
                 minecraft.getModelManager().getBlockStateModelSet(), this.cardinalLighting,
                 minecraft.options.ambientOcclusion().get(), minecraft.options.biomeBlendRadius().get());
+    }
+
+    /**
+     * 一段的 27 格邻域缓存：段引用与它们最近一次看到的内容。
+     *
+     * <p>
+     * 段引用只在 {@code structureVersion} 变化时重查；内容每次都按引用刷新一遍，因为邻段换内容不会改变段集合。
+     * 这样一次取快照是 27 次字段读，而不是 27 次哈希查表加 27 个键分配。
+     */
+    private static final class Neighborhood {
+
+        static final int SLOTS = 27;
+
+        final SimulationSection[] sections = new SimulationSection[SLOTS];
+
+        final SimulationSection.Content[] contents = new SimulationSection.Content[SLOTS];
+
+        int version = Integer.MIN_VALUE;
     }
 
     /** 取或建一段。键已在手上时用这一支，省一次键构造。 */
@@ -406,7 +458,8 @@ public final class Simulation {
         if (section == null) {
             section = new SimulationSection(key.x(), key.y(), key.z(), this.biomeFactory, this.defaultBiome);
             this.sections.put(key, section);
-            this.structureChanged = true;
+
+            this.structureVersion++;
         }
         return section;
     }
@@ -444,8 +497,11 @@ public final class Simulation {
         this.clientLevel = null;
         this.pending.clear();
         this.sections.clear();
-        this.structureChanged = true;
-        this.snapshot = Snapshot.EMPTY;
+        this.snapDirty.clear();
+        this.neighborhoods.clear();
+        this.structureVersion++;
+
+        this.snapshot = new Snapshot();
         this.generation++;
         SimulationMeshPool.discardCompleted();
     }
@@ -497,28 +553,37 @@ public final class Simulation {
      * 只在有段变脏或段集合有增删时换快照，其余时候一次也不发布。
      */
     public void commit() {
-        boolean changed = this.structureChanged;
-        this.structureChanged = false;
+        if (this.snapDirty.isEmpty()) {
+            return;
+        }
         int reach = Math.max(2, net.minecraft.client.Minecraft.getInstance().options.biomeBlendRadius().get());
-        List<SnapSection> out = new ArrayList<>(this.sections.size());
-        for (SimulationSection section : this.sections.values()) {
-            if (!section.eligible()) {
+        Set<SnapSection> live = this.snapshot.sectionsMutable();
+        for (SectionKey key : this.snapDirty) {
+            SimulationSection section = this.sections.get(key);
+            if (section == null || !section.eligible()) {
                 continue;
             }
             SimulationSection.Dirty dirty = section.takeDirty();
             if (dirty != null) {
-                section.rebuild();
-                changed = true;
                 this.farlands$requeueGeometry(section, dirty, reach);
             }
-            SnapSection snap = section.snap();
-            if (snap != null) {
-                out.add(snap);
+            if (section.count() == 0) {
+                SnapSection stale = section.snap();
+                if (stale != null) {
+                    live.remove(stale);
+                    section.clearSnap();
+                }
+                continue;
+            }
+            if (section.snap() == null) {
+                section.rebuild();
+                SnapSection fresh = section.snap();
+                if (fresh != null) {
+                    live.add(fresh);
+                }
             }
         }
-        if (changed) {
-            this.snapshot = new Snapshot(List.copyOf(out));
-        }
+        this.snapDirty.clear();
     }
 
     /**
@@ -572,18 +637,26 @@ public final class Simulation {
     public record SectionKey(long x, long y, long z) {
     }
 
-    /** 一次发布的不可变快照。 */
+    /**
+     * 渲染列表。内容按段存在，列表只记「哪些段有内容」，所以只随段的空与非空转换增删，不随内容变化重建。
+     *
+     * <p>
+     * 客户端 tick 与渲染抽取在同一个线程（都是 Render thread），所以这里用可变集合而不发布不可变副本：一次增删是
+     * O(1)，而重建一份两万多元素的列表是每 tick 一次 O(段数)。
+     */
     public static final class Snapshot {
 
-        public static final Snapshot EMPTY = new Snapshot(List.of());
+        private final Set<SnapSection> sections = new java.util.LinkedHashSet<>();
 
-        private final List<SnapSection> sections;
-
-        Snapshot(List<SnapSection> sections) {
-            this.sections = sections;
+        Snapshot() {
         }
 
-        public List<SnapSection> sections() {
+        /** 渲染与碰撞读它；只在主线程上读写。 */
+        public Set<SnapSection> sections() {
+            return this.sections;
+        }
+
+        Set<SnapSection> sectionsMutable() {
             return this.sections;
         }
     }

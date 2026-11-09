@@ -70,9 +70,9 @@ public final class SimulationMesher {
 
     /** 烘一段。没有可画的四边形时返回 null。 */
     public static Mesh build(BakeSnapshot snapshot) {
-        int occupied = snapshot.occupiedCount();
-        int[] occupiedIndexes = snapshot.occupied();
-        SimulationSection section = snapshot.section();
+        SimulationSection.Content content = snapshot.content();
+        int occupied = content.occupiedCount();
+        int[] occupiedIndexes = content.occupied();
         int quads = 0;
         SectionGetter getter = new SectionGetter(snapshot);
         BlockModelLighter lighter = new BlockModelLighter();
@@ -91,7 +91,7 @@ public final class SimulationMesher {
                 int x = (index >> 8) & 15;
                 int y = (index >> 4) & 15;
                 int z = index & 15;
-                SimulationBlock block = section.blockAt(x, y, z);
+                SimulationBlock block = content.blockAt(index);
                 if (block == null) {
                     continue;
                 }

@@ -28,8 +28,8 @@ import net.minecraft.world.level.material.Fluids;
  *
  * <p>
  * 两种模式。**实时模式**由碰撞与拾取使用，跑在客户端主线程上，邻段随时从 {@code Simulation} 查，方块色表与混合半径
- * 随时从 {@code Minecraft} 取。**快照模式**由烘焙使用，跑在工作线程上，邻域与那几样客户端物件全部来自
- * {@link BakeSnapshot}，本类因此一个 {@code Minecraft} 单例都不碰。
+ * 随时从 {@code Minecraft} 取。**快照模式**由烘焙使用，跑在工作线程上，数据来自 {@link BakeSnapshot} 带进来的已发布
+ * 内容，邻域也是内容而不是活段，本类因此不读任何会被主线程改写的东西，也不碰 {@code Minecraft} 单例。
  *
  * <p>
  * 光走 {@link #getBrightness}，它必须覆写：接口默认实现读 {@code getLightEngine()}，而这里返回空引擎，不覆写会让整层
@@ -37,10 +37,23 @@ import net.minecraft.world.level.material.Fluids;
  */
 public final class SectionGetter implements BlockAndTintGetter {
 
+    /** 实时模式下的活段；快照模式为 null。 */
     private final SimulationSection section;
     private final Simulation simulation;
+
+    /** tint 缓存挂在段上，快照模式借快照带的宿主段；只调它的 tint 那两个方法。 */
+    private final SimulationSection tintOwner;
+
+    /** 快照模式下的本段内容与 27 格邻域内容；实时模式为 null。 */
+    private final SimulationSection.Content content;
+    private final SimulationSection.Content[] neighborContents;
+
+    /** 段坐标。快照模式下活段不存在，色温采样要的段原点从这里算。 */
+    private final long sectionX;
+    private final long sectionY;
+    private final long sectionZ;
+
     private final BakeSnapshot snapshot;
-    private final SimulationSection[] neighbors;
     private final BlockPos.MutableBlockPos unused = new BlockPos.MutableBlockPos();
 
     private int localX;
@@ -56,16 +69,26 @@ public final class SectionGetter implements BlockAndTintGetter {
     public SectionGetter(SimulationSection section, Simulation simulation) {
         this.section = section;
         this.simulation = simulation;
+        this.tintOwner = section;
         this.snapshot = null;
-        this.neighbors = null;
+        this.content = null;
+        this.neighborContents = null;
+        this.sectionX = section.sectionX();
+        this.sectionY = section.sectionY();
+        this.sectionZ = section.sectionZ();
     }
 
     /** 快照模式：工作线程，全部输入由快照定住。 */
     SectionGetter(BakeSnapshot snapshot) {
-        this.section = snapshot.section();
+        this.section = null;
         this.simulation = null;
+        this.tintOwner = snapshot.owner();
         this.snapshot = snapshot;
-        this.neighbors = snapshot.neighbors();
+        this.content = snapshot.content();
+        this.neighborContents = snapshot.neighbors();
+        this.sectionX = snapshot.key().x();
+        this.sectionY = snapshot.key().y();
+        this.sectionZ = snapshot.key().z();
     }
 
     /** 切到该块并算好它的 tint 色。每个块一次，同一块的多个 quad 复用。 */
@@ -93,33 +116,47 @@ public final class SectionGetter implements BlockAndTintGetter {
         return tintIndex < this.colorCount ? this.colors[tintIndex] : -1;
     }
 
-    /**
-     * 段内局部坐标解析到段；同段返回本段，缺段返回 null。
-     *
-     * <p>
-     * 格号用算术右移取，与 {@code Math.floorDiv} 在 int 上同值；格内坐标用 {@code & 15} 取。快照模式只备了 27 格，
-     * 落在其外的采样按缺段处理。
-     */
-    private SimulationSection sectionFor(int sampleX, int sampleY, int sampleZ) {
-        int cellX = sampleX >> 4;
-        int cellY = sampleY >> 4;
-        int cellZ = sampleZ >> 4;
-        if (cellX == 0 && cellY == 0 && cellZ == 0) {
-            return this.section;
+    /** 格号是否就是本段。 */
+    private static boolean sameCell(int cellX, int cellY, int cellZ) {
+        return cellX == 0 && cellY == 0 && cellZ == 0;
+    }
+
+    /** 27 格里是否备了这一格。 */
+    private static boolean inNeighborhood(int cellX, int cellY, int cellZ) {
+        return cellX >= -1 && cellX <= 1 && cellY >= -1 && cellY <= 1 && cellZ >= -1 && cellZ <= 1;
+    }
+
+    /** 快照模式下该格所属的内容；缺邻段返回 null。 */
+    private SimulationSection.Content contentAt(int cellX, int cellY, int cellZ) {
+        if (sameCell(cellX, cellY, cellZ)) {
+            return this.content;
         }
-        if (this.neighbors == null) {
-            return this.simulation.sectionOrNull(this.section.sectionX() + cellX, this.section.sectionY() + cellY,
-                    this.section.sectionZ() + cellZ);
-        }
-        if (cellX < -1 || cellX > 1 || cellY < -1 || cellY > 1 || cellZ < -1 || cellZ > 1) {
+        if (!inNeighborhood(cellX, cellY, cellZ)) {
             return null;
         }
-        return this.neighbors[(cellX + 1) * 9 + (cellY + 1) * 3 + (cellZ + 1)];
+        return this.neighborContents[(cellX + 1) * 9 + (cellY + 1) * 3 + (cellZ + 1)];
+    }
+
+    /** 实时模式下该格所属的活段；缺邻段返回 null。 */
+    private SimulationSection sectionAt(int cellX, int cellY, int cellZ) {
+        if (sameCell(cellX, cellY, cellZ)) {
+            return this.section;
+        }
+        return this.simulation.sectionOrNull(this.sectionX + cellX, this.sectionY + cellY,
+                this.sectionZ + cellZ);
     }
 
     /** 局部坐标折回 0 到 15。 */
     private static int fold(int localCoord) {
         return localCoord & 15;
+    }
+
+    private long originX() {
+        return this.sectionX * SimulationSection.SIZE;
+    }
+
+    private long originZ() {
+        return this.sectionZ * SimulationSection.SIZE;
     }
 
     private net.minecraft.client.color.block.BlockColors blockColors() {
@@ -146,15 +183,19 @@ public final class SectionGetter implements BlockAndTintGetter {
      * <p>
      * 缓存键是 resolver、Y 的 quart 带与格内水平坐标；混合取样把 Y 固定在方块自己的 Y 上，而群系按四立方 quart
      * 取值，所以同一带内各 Y 同值。一次命中是一次数组读，未命中是 (2r+1)² 次群系查询。
+     *
+     * <p>
+     * 缓存挂在段上而不是内容上：它按格缓存，与具体哪一代内容无关，清空由主线程在群系变化时统一做。
      */
     @Override
     public int getBlockTint(BlockPos pos, ColorResolver resolver) {
-        int cached = this.section.cachedTint(resolver, this.localX, this.localY, this.localZ);
+        SimulationSection owner = this.tintOwner;
+        int cached = owner.cachedTint(resolver, this.localX, this.localY, this.localZ);
         if (cached != 0) {
             return cached;
         }
         int color = this.farlands$computeTint(resolver);
-        this.section.putTint(resolver, this.localX, this.localY, this.localZ, color);
+        owner.putTint(resolver, this.localX, this.localY, this.localZ, color);
         return color;
     }
 
@@ -163,7 +204,7 @@ public final class SectionGetter implements BlockAndTintGetter {
         int dist = this.biomeBlendRadius();
         if (dist == 0) {
             return resolver.getColor(biomeAt(this.localX, this.localZ).value(),
-                    this.section.originX() + this.localX, this.section.originZ() + this.localZ);
+                    originX() + this.localX, originZ() + this.localZ);
         }
         int count = (dist * 2 + 1) * (dist * 2 + 1);
         int red = 0;
@@ -174,7 +215,7 @@ public final class SectionGetter implements BlockAndTintGetter {
                 int sampleX = this.localX + dx;
                 int sampleZ = this.localZ + dz;
                 int color = resolver.getColor(biomeAt(sampleX, sampleZ).value(),
-                        this.section.originX() + sampleX, this.section.originZ() + sampleZ);
+                        originX() + sampleX, originZ() + sampleZ);
                 red += ARGB.red(color);
                 green += ARGB.green(color);
                 blue += ARGB.blue(color);
@@ -190,7 +231,17 @@ public final class SectionGetter implements BlockAndTintGetter {
      * 半径最大 7，段边长 16，所以最多跨一列；折回段内后的局部坐标仍在 0 到 15。
      */
     private Holder<Biome> biomeAt(int sampleX, int sampleZ) {
-        SimulationSection target = sectionFor(sampleX, this.localY, sampleZ);
+        int cellX = sampleX >> 4;
+        int cellY = this.localY >> 4;
+        int cellZ = sampleZ >> 4;
+        if (this.content != null) {
+            SimulationSection.Content target = contentAt(cellX, cellY, cellZ);
+            if (target == null) {
+                return this.defaultBiome();
+            }
+            return target.biomes().get(fold(sampleX) >> 2, this.localY >> 2, fold(sampleZ) >> 2);
+        }
+        SimulationSection target = sectionAt(cellX, cellY, cellZ);
         if (target == null) {
             return this.defaultBiome();
         }
@@ -199,21 +250,42 @@ public final class SectionGetter implements BlockAndTintGetter {
 
     @Override
     public int getBrightness(LightLayer layer, BlockPos pos) {
-        SimulationSection target = sectionFor(pos.getX(), pos.getY(), pos.getZ());
+        int sx = pos.getX();
+        int sy = pos.getY();
+        int sz = pos.getZ();
+        if (this.content != null) {
+            SimulationSection.Content target = contentAt(sx >> 4, sy >> 4, sz >> 4);
+            if (target == null) {
+                return 0;
+            }
+            return target.light(layer, fold(sx), fold(sy), fold(sz));
+        }
+        SimulationSection target = sectionAt(sx >> 4, sy >> 4, sz >> 4);
         if (target == null) {
             return 0;
         }
-        return target.getLight(layer, fold(pos.getX()), fold(pos.getY()), fold(pos.getZ()));
+        return target.getLight(layer, fold(sx), fold(sy), fold(sz));
     }
 
     /** 按段内局部坐标取块状态。缺段与空格按空气。 */
     @Override
     public BlockState getBlockState(BlockPos pos) {
-        SimulationSection target = sectionFor(pos.getX(), pos.getY(), pos.getZ());
+        int sx = pos.getX();
+        int sy = pos.getY();
+        int sz = pos.getZ();
+        if (this.content != null) {
+            SimulationSection.Content target = contentAt(sx >> 4, sy >> 4, sz >> 4);
+            if (target == null) {
+                return Blocks.AIR.defaultBlockState();
+            }
+            SimulationBlock block = target.blockAt(fold(sx) << 8 | fold(sy) << 4 | fold(sz));
+            return block == null ? Blocks.AIR.defaultBlockState() : block.state();
+        }
+        SimulationSection target = sectionAt(sx >> 4, sy >> 4, sz >> 4);
         if (target == null) {
             return Blocks.AIR.defaultBlockState();
         }
-        SimulationBlock block = target.blockAt(fold(pos.getX()), fold(pos.getY()), fold(pos.getZ()));
+        SimulationBlock block = target.blockAt(fold(sx), fold(sy), fold(sz));
         return block == null ? Blocks.AIR.defaultBlockState() : block.state();
     }
 

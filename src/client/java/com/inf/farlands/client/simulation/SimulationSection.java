@@ -36,8 +36,9 @@ import net.minecraft.world.level.chunk.PalettedContainerRO;
  * 不占数组；它只存不算是既定契约，传播与发包都不经过这里。
  *
  * <p>
- * 写入只在客户端主线程发生；读的一侧是提交之后发布的 {@link Simulation.SnapSection}，本类自身不被渲染
- * 线程触碰。
+ * 内容以 {@link Content} 发布：一次应用建一份新的、发布之后不再改。烘焙线程只读它，主线程换它，因此工作线程
+ * 拿到的永远是某一代的完整内容，不会看到写了一半的数组。本类自己的字段只是同一份内容的活视图，供碰撞与拾取在
+ * 主线程上按需读取。
  */
 public final class SimulationSection {
 
@@ -46,6 +47,32 @@ public final class SimulationSection {
 
     /** 每轴 quart 格数，即群系网格的边长。 */
     public static final int QUART = SIZE / 4;
+
+    /**
+     * 一份已发布的内容。发布后各字段不再改：方块槽位数组与占用表都是新建的，两层光照与群系容器都是换引用。
+     *
+     * <p>
+     * 烘焙线程持它算几何，因此它必须自足：所有需要的数据都在这里，不必回头读 {@link SimulationSection}。
+     * {@code occupied} 与 {@code occupiedCount} 一起发布，数组尾部可能有未用槽位。
+     */
+    record Content(SimulationBlock[] slots, int[] occupied, int occupiedCount, DataLayer blockLight,
+            DataLayer skyLight, PalettedContainerRO<Holder<Biome>> biomes, int shapeMode) {
+
+        /** 第 i 个非空格的状态，空位返回 null。 */
+        SimulationBlock blockAt(int index) {
+            SimulationBlock[] array = this.slots;
+            return array == null ? null : array[index];
+        }
+
+        /** 单通道的光，0 到 15。 */
+        int light(LightLayer layer, int localX, int localY, int localZ) {
+            return (layer == LightLayer.SKY ? this.skyLight : this.blockLight).get(localX, localY, localZ);
+        }
+
+        boolean isEmpty() {
+            return this.occupiedCount == 0;
+        }
+    }
 
     private final long sectionX;
     private final long sectionY;
@@ -73,6 +100,9 @@ public final class SimulationSection {
     private SimulationBlock[] slots;
 
     private int count;
+
+    /** 段级形状模式，来自服务端，取值见 {@link SimulationSectionData}。 */
+    private int shapeMode = SimulationSectionData.SHAPE_DERIVED;
 
     private boolean dirty;
 
@@ -102,6 +132,9 @@ public final class SimulationSection {
      */
     private int revision;
 
+    /** 已发布的内容。构造、应用、单格写与清理都会换一份新的。 */
+    private volatile Content content;
+
     /**
      * 每格的 tint 缓存，按 resolver 与「Y 的 quart 带」两级。0 表示未算，tint 恒不透明，所以 0 不会是真值。
      *
@@ -123,6 +156,8 @@ public final class SimulationSection {
         this.eligible = !(farlands$playable(sectionX) && farlands$playable(sectionY)
                 && farlands$playable(sectionZ));
         this.biomes = new PalettedContainer<>(defaultBiome, biomeFactory.biomeStrategy());
+        this.content = new Content(null, new int[0], 0, this.blockLight, this.skyLight, this.biomes,
+                this.shapeMode);
     }
 
     public long sectionX() {
@@ -150,6 +185,11 @@ public final class SimulationSection {
         return this.sectionZ * SIZE;
     }
 
+    /** 已发布的内容，工作线程读它。 */
+    Content content() {
+        return this.content;
+    }
+
     /** 该 quart 格的群系，三轴是 0 到 3。与 {@code LevelChunkSection.getNoiseBiome} 同口径。 */
     public Holder<Biome> getNoiseBiome(int quartX, int quartY, int quartZ) {
         return this.biomes.get(quartX, quartY, quartZ);
@@ -168,6 +208,7 @@ public final class SimulationSection {
         this.biomes = next;
         this.clearTints();
         this.revision++;
+        this.farlands$publish();
         this.farlands$markDirty(quartX * 4, quartY * 4, quartZ * 4);
         this.farlands$markDirty(quartX * 4 + 3, quartY * 4 + 3, quartZ * 4 + 3);
     }
@@ -185,6 +226,7 @@ public final class SimulationSection {
         this.biomes = next;
         this.clearTints();
         this.revision++;
+        this.farlands$publish();
         this.farlands$markDirty(0, 0, 0);
         this.farlands$markDirty(SimulationSection.SIZE - 1, SimulationSection.SIZE - 1,
                 SimulationSection.SIZE - 1);
@@ -202,15 +244,22 @@ public final class SimulationSection {
 
     /** 写一格的两通道光。值域由 {@code DataLayer.set} 掩到 0 到 15。 */
     public void setLight(int localX, int localY, int localZ, int block, int sky) {
+        // 换一份层再改：已发布的 Content 持有旧的层对象，工作线程可能在读它。
+        this.blockLight = this.blockLight.copy();
+        this.skyLight = this.skyLight.copy();
         this.blockLight.set(localX, localY, localZ, block);
         this.skyLight.set(localX, localY, localZ, sky);
+        this.farlands$publish();
         this.farlands$markDirty(localX, localY, localZ);
     }
 
     /** 整层同值。 */
     public void fillLight(int block, int sky) {
+        this.blockLight = new DataLayer();
+        this.skyLight = new DataLayer();
         this.blockLight.fill(block);
         this.skyLight.fill(sky);
+        this.farlands$publish();
         this.farlands$markDirty(0, 0, 0);
         this.farlands$markDirty(SimulationSection.SIZE - 1, SimulationSection.SIZE - 1,
                 SimulationSection.SIZE - 1);
@@ -222,7 +271,83 @@ public final class SimulationSection {
     }
 
     /**
-     * 用服务端送来的一份内容整体替换本段：块、群系、两层光照与形状模式。
+     * 与当前内容比较，不同才应用。返回是否真的换了内容。
+     *
+     * <p>
+     * 比较一趟同时办两件事：判「要不要换」，以及算出方块差异的段内包围盒，供 {@code Simulation.commit} 只让贴着
+     * 真差异的邻段失效。光与群系没有位置可言——它们在段边界外被邻段采样——所以只要光或群系变了，整段打脏。
+     *
+     * <p>
+     * 比较的代价是 4096 次容器读取加 64 次群系比较，约几十微秒；它换来的是跳过一整遍内容转换，以及避免下游
+     * 27 段重烘。
+     */
+    public boolean applyIfChanged(LevelChunkSection container, int shapeMode, DataLayer blockLight,
+            DataLayer skyLight) {
+        if (!this.eligible) {
+            return false;
+        }
+        DataLayer newBlockLight = blockLight == null ? new DataLayer() : blockLight;
+        DataLayer newSkyLight = skyLight == null ? new DataLayer() : skyLight;
+        SimulationBlock[] current = this.slots;
+        int diffMinX = Integer.MAX_VALUE;
+        int diffMaxX = Integer.MIN_VALUE;
+        int diffMinY = Integer.MAX_VALUE;
+        int diffMaxY = Integer.MIN_VALUE;
+        int diffMinZ = Integer.MAX_VALUE;
+        int diffMaxZ = Integer.MIN_VALUE;
+        boolean blocksDiffer = false;
+        for (int y = 0; y < SIZE; y++) {
+            for (int z = 0; z < SIZE; z++) {
+                for (int x = 0; x < SIZE; x++) {
+                    BlockState incoming = container.getBlockState(x, y, z);
+                    SimulationBlock have = current == null ? null : current[farlands$index(x, y, z)];
+                    boolean same = have == null ? incoming.isAir() : have.state() == incoming;
+                    if (same) {
+                        continue;
+                    }
+                    blocksDiffer = true;
+                    if (x < diffMinX) {
+                        diffMinX = x;
+                    }
+                    if (x > diffMaxX) {
+                        diffMaxX = x;
+                    }
+                    if (y < diffMinY) {
+                        diffMinY = y;
+                    }
+                    if (y > diffMaxY) {
+                        diffMaxY = y;
+                    }
+                    if (z < diffMinZ) {
+                        diffMinZ = z;
+                    }
+                    if (z > diffMaxZ) {
+                        diffMaxZ = z;
+                    }
+                }
+            }
+        }
+        boolean lightSame = farlands$sameLight(this.blockLight, newBlockLight)
+                && farlands$sameLight(this.skyLight, newSkyLight);
+        boolean shapeSame = this.shapeMode == shapeMode;
+        boolean biomeSame = farlands$sameBiomes(this.biomes, container.getBiomes());
+        if (!blocksDiffer && lightSame && shapeSame && biomeSame) {
+            return false;
+        }
+        this.applyContainer(container, shapeMode, newBlockLight, newSkyLight);
+        if (blocksDiffer) {
+            this.farlands$markDirty(diffMinX, diffMinY, diffMinZ);
+            this.farlands$markDirty(diffMaxX, diffMaxY, diffMaxZ);
+        }
+        if (!lightSame || !biomeSame || !shapeSame) {
+            this.farlands$markDirty(0, 0, 0);
+            this.farlands$markDirty(SIZE - 1, SIZE - 1, SIZE - 1);
+        }
+        return true;
+    }
+
+    /**
+     * 用给定的一份内容整体替换本段：块、群系、两层光照与形状模式。
      *
      * <p>
      * 失效段直接返回：可玩界内的段不参与模拟，服务端也不该发它们。
@@ -232,20 +357,23 @@ public final class SimulationSection {
      * {@code previous == block} 是引用比较。
      *
      * <p>
+     * 不打脏标记：调用方 {@link #applyIfChanged} 按差异盒自己打。直接调用本方法等于声明「整段都算变了」。
+     *
+     * <p>
      * 只在客户端主线程调，与包的分发点同线程。
      */
-    public void applyContainer(LevelChunkSection container, int shapeMode, DataLayer blockLight, DataLayer skyLight) {
-        if (!this.eligible) {
-            return;
-        }
+    private void applyContainer(LevelChunkSection container, int shapeMode, DataLayer blockLight,
+            DataLayer skyLight) {
         this.revision++;
-        this.slots = null;
+        SimulationBlock[] nextSlots = null;
+        int[] nextOccupied = new int[256];
+        int nextOccupiedCount = 0;
         this.count = 0;
-        this.occupiedCount = 0;
         this.biomes = container.getBiomes();
         this.clearTints();
-        this.blockLight = blockLight == null ? new DataLayer() : blockLight;
-        this.skyLight = skyLight == null ? new DataLayer() : skyLight;
+        this.blockLight = blockLight;
+        this.skyLight = skyLight;
+        this.shapeMode = shapeMode;
         Map<BlockState, SimulationBlock> cache = new HashMap<>(8);
         for (int y = 0; y < SIZE; y++) {
             for (int z = 0; z < SIZE; z++) {
@@ -258,17 +386,23 @@ public final class SimulationSection {
                             s -> shapeMode == SimulationSectionData.SHAPE_FULL ? SimulationBlock.full(s)
                                     : SimulationBlock.of(s));
                     int index = farlands$index(x, y, z);
-                    if (this.slots == null) {
-                        this.slots = new SimulationBlock[SIZE * SIZE * SIZE];
+                    if (nextSlots == null) {
+                        nextSlots = new SimulationBlock[SIZE * SIZE * SIZE];
                     }
-                    this.slots[index] = block;
-                    this.count++;
-                    this.farlands$occupy(index);
+                    nextSlots[index] = block;
+                    if (nextOccupiedCount == nextOccupied.length) {
+                        nextOccupied = Arrays.copyOf(nextOccupied, nextOccupied.length * 2);
+                    }
+                    nextOccupied[nextOccupiedCount++] = index;
                 }
             }
         }
-        this.farlands$markDirty(0, 0, 0);
-        this.farlands$markDirty(SIZE - 1, SIZE - 1, SIZE - 1);
+        this.count = nextOccupiedCount;
+        this.slots = nextSlots;
+        this.occupied = nextOccupied;
+        this.occupiedCount = nextOccupiedCount;
+        this.content = new Content(nextSlots, nextOccupied, nextOccupiedCount, this.blockLight, this.skyLight,
+                this.biomes, this.shapeMode);
     }
 
     /**
@@ -289,12 +423,15 @@ public final class SimulationSection {
         this.revision++;
         this.slots = null;
         this.count = 0;
+        this.occupied = new int[0];
         this.occupiedCount = 0;
         this.snap = null;
         this.biomes = container.getBiomes();
         this.clearTints();
         this.blockLight = blockLight == null ? new DataLayer() : blockLight;
         this.skyLight = skyLight == null ? new DataLayer() : skyLight;
+        this.content = new Content(null, this.occupied, 0, this.blockLight, this.skyLight, this.biomes,
+                this.shapeMode);
     }
 
     public int count() {
@@ -312,25 +449,33 @@ public final class SimulationSection {
         if (previous == block) {
             return;
         }
+        // 换新数组而不是原地改：已发布的 Content 持有旧数组，工作线程可能在读它。
+        SimulationBlock[] nextSlots = current == null ? new SimulationBlock[SIZE * SIZE * SIZE] : current.clone();
+        int[] nextOccupied;
+        int nextCount;
         if (block == null) {
             if (current == null) {
                 return;
             }
-            current[index] = null;
-            this.count--;
-            this.farlands$vacate(index);
+            nextSlots[index] = null;
+            nextCount = this.count - 1;
+            nextOccupied = farlands$without(index, this.occupied, this.occupiedCount);
         } else {
-            if (current == null) {
-                current = new SimulationBlock[SIZE * SIZE * SIZE];
-                this.slots = current;
-            }
             if (previous == null) {
-                this.count++;
-                this.farlands$occupy(index);
+                nextCount = this.count + 1;
+                nextOccupied = farlands$with(index, this.occupied, this.occupiedCount);
+            } else {
+                nextCount = this.count;
+                nextOccupied = Arrays.copyOf(this.occupied, this.occupiedCount);
             }
-            current[index] = block;
+            nextSlots[index] = block;
         }
+        this.slots = nextSlots;
+        this.count = nextCount;
+        this.occupied = nextOccupied;
+        this.occupiedCount = nextOccupied.length;
         this.revision++;
+        this.farlands$publish();
         this.farlands$markDirty(localX, localY, localZ);
     }
 
@@ -339,7 +484,7 @@ public final class SimulationSection {
         this.set(localX, localY, localZ, null);
     }
 
-    /** 读一格，供烘几何与命中用。局部坐标必须在 0 到 15 内。 */
+    /** 读一格，供碰撞、拾取与命中用。局部坐标必须在 0 到 15 内。 */
     public SimulationBlock blockAt(int localX, int localY, int localZ) {
         SimulationBlock[] current = this.slots;
         return current == null ? null : current[farlands$index(localX, localY, localZ)];
@@ -358,16 +503,6 @@ public final class SimulationSection {
     /** 当前内容版本。只在客户端主线程读写。 */
     public int revision() {
         return this.revision;
-    }
-
-    /**
-     * 非空格下标的拷贝，供烘焙快照用。
-     *
-     * <p>
-     * {@link #occupied} 在原数组上增删，工作线程共享引用会读到写了一半的计数与下标，所以快照必须拷前缀。
-     */
-    int[] occupiedSnapshot() {
-        return Arrays.copyOf(this.occupied, this.occupiedCount);
     }
 
     /** 该格的 tint，未算返回 0。 */
@@ -405,27 +540,41 @@ public final class SimulationSection {
         this.revision++;
         this.slots = null;
         this.count = 0;
+        this.occupied = new int[0];
         this.occupiedCount = 0;
+        this.farlands$publish();
         this.farlands$markDirty(0, 0, 0);
         this.farlands$markDirty(SimulationSection.SIZE - 1, SimulationSection.SIZE - 1,
                 SimulationSection.SIZE - 1);
     }
 
-    private void farlands$occupy(int index) {
-        if (this.occupiedCount == this.occupied.length) {
-            this.occupied = Arrays.copyOf(this.occupied, this.occupied.length * 2);
-        }
-        this.occupied[this.occupiedCount++] = index;
+    /**
+     * 把活的字段发布成一份新的 {@link Content}。数组与光照层都取当前引用，因此调用方必须保证「当前引用之后
+     * 不再被原地改」：{@link #set} 与 {@link #clear} 换新数组，{@link #setLight} 换新层。
+     */
+    private void farlands$publish() {
+        int[] published = Arrays.copyOf(this.occupied, this.occupiedCount);
+        this.content = new Content(this.slots, published, this.occupiedCount, this.blockLight, this.skyLight,
+                this.biomes, this.shapeMode);
     }
 
-    /** 摘除用尾元素顶上，不保序，省一次搬移。 */
-    private void farlands$vacate(int index) {
-        for (int i = 0; i < this.occupiedCount; i++) {
-            if (this.occupied[i] == index) {
-                this.occupied[i] = this.occupied[--this.occupiedCount];
-                return;
+    /** 占用表追加一项，返回新数组。 */
+    private static int[] farlands$with(int index, int[] occupied, int count) {
+        int[] next = Arrays.copyOf(occupied, count + 1);
+        next[count] = index;
+        return next;
+    }
+
+    /** 占用表摘掉一项，返回新数组。 */
+    private static int[] farlands$without(int index, int[] occupied, int count) {
+        int[] next = new int[Math.max(0, count - 1)];
+        int written = 0;
+        for (int i = 0; i < count; i++) {
+            if (occupied[i] != index) {
+                next[written++] = occupied[i];
             }
         }
+        return next;
     }
 
     /** 取走脏标记与它的局部范围；干净时返回 null。 */
@@ -476,6 +625,11 @@ public final class SimulationSection {
         return this.snap;
     }
 
+    /** 摘掉已发布的快照段，供段变空时从渲染列表里移除。 */
+    void clearSnap() {
+        this.snap = null;
+    }
+
     /**
      * 重建快照段：只带本段的引用与键，不再算包围盒。
      *
@@ -490,6 +644,54 @@ public final class SimulationSection {
         }
         this.snap = new Simulation.SnapSection(this.sectionX, this.sectionY, this.sectionZ,
                 new Simulation.SectionKey(this.sectionX, this.sectionY, this.sectionZ), this);
+    }
+
+    /**
+     * 两层光照是否同值。{@code DataLayer} 没有 {@code equals}，而「同质」层用默认值表示、不占数组，所以两侧
+     * 都可能是 {@code null} 数组而默认值不同。这里先走同质层的判据，只有两侧都有数组时才逐字节比。
+     */
+    private static boolean farlands$sameLight(DataLayer a, DataLayer b) {
+        if (a == b) {
+            return true;
+        }
+        if (a == null || b == null) {
+            DataLayer other = a == null ? b : a;
+            return other == null || other.isEmpty();
+        }
+        boolean aEmpty = a.isEmpty();
+        boolean bEmpty = b.isEmpty();
+        if (aEmpty || bEmpty) {
+            return aEmpty && bEmpty;
+        }
+        for (int value = 1; value < 16; value++) {
+            boolean aFilled = a.isDefinitelyFilledWith(value);
+            boolean bFilled = b.isDefinitelyFilledWith(value);
+            if (aFilled || bFilled) {
+                return aFilled && bFilled;
+            }
+        }
+        return Arrays.equals(a.getData(), b.getData());
+    }
+
+    /** 两份群系容器是否逐格同值。64 格引用比较。 */
+    private static boolean farlands$sameBiomes(PalettedContainerRO<Holder<Biome>> a,
+            PalettedContainerRO<Holder<Biome>> b) {
+        if (a == b) {
+            return true;
+        }
+        if (a == null || b == null) {
+            return false;
+        }
+        for (int x = 0; x < QUART; x++) {
+            for (int y = 0; y < QUART; y++) {
+                for (int z = 0; z < QUART; z++) {
+                    if (a.get(x, y, z) != b.get(x, y, z)) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
     }
 
     private static int farlands$index(int localX, int localY, int localZ) {
