@@ -3,10 +3,8 @@ package com.inf.farlands.simulation.int64.terrainFiller;
 import com.inf.farlands.simulation.SimulationSystem;
 import com.inf.farlands.simulation.int64.SimulationNoiseSystem;
 import com.inf.farlands.simulation.int64.noise.Aquifer;
-import com.inf.farlands.simulation.int64.noise.CellSampler;
 import com.inf.farlands.simulation.int64.noise.Density;
 import com.inf.farlands.simulation.int64.noise.FluidPicker;
-import com.inf.farlands.simulation.int64.noise.InterpolatedDensity;
 import com.inf.farlands.simulation.int64.noise.Router;
 import com.inf.farlands.simulation.int64.noise.Sampler;
 import com.inf.farlands.simulation.int64.noise.Settings;
@@ -27,12 +25,8 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
  * 段填充的全部逻辑，与 terrain 的 {@code AbstractTerrainFiller} 同形。
  *
  * <p>一次填充五步：按段换出 {@code Settings}，取系统给的路由，取液面查询与含水层并在返回 null 时落到默认件，
- * 遍历求值，最后由材质规则定方块。材质规则照抄 vanilla：含水层返回 {@code null} 表示实方块，取
+ * 按盒遍历，最后由材质规则定方块。材质规则照抄 vanilla：含水层返回 {@code null} 表示实方块，取
  * {@code defaultBlock}；空气不写。
- *
- * <p>遍历有两条路径，由密度自己声明：实现 {@link InterpolatedDensity} 的走 {@link CellSampler}，
- * 先按 cell 网格算角点、再块内三线性插值；其余走 {@link Sampler} 的逐块求值。两条路径喂同一个
- * {@code SectionSink}，写入面完全相同。cell 路径要求 cell 边长整除一段，不成立时退回逐块。
  *
  * <p>系统从 {@link SimulationSystem} 现取，本类不认识当前是哪一个。terrain 那边从 {@code LevelSystems}
  * 取，这边从硬编码枚举取；将来系统按 level 分化时只改这一个取数点，接口不动。
@@ -66,21 +60,14 @@ public abstract class AbstractSimulationFiller implements SimulationFiller {
         if (picker == null) {
             picker = FluidPickers.standard(settings.seaLevel(), settings.defaultFluid());
         }
-        // Random 传 null：现有两个系统都不读它。接真实含水层时补一个实现。
+        // Random 传 null：当前唯一的系统不读它。接真实含水层时补一个实现。
         Aquifer aquifer = system.createAquifer(settings, key.x(), key.y(), key.z(), router, null, picker);
         if (aquifer == null) {
             aquifer = Aquifers.disabled(picker);
         }
         BlockState fallback = system.defaultBlock(settings);
-        LongBox box = LongBox.ofSection(key.x(), key.y(), key.z());
-        SectionSink sink = new SectionSink(data.section, aquifer, fallback);
-        int cellWidth = settings.cellWidth();
-        int cellHeight = settings.cellHeight();
-        if (density instanceof InterpolatedDensity && CellSampler.supports(cellWidth, cellHeight)) {
-            CellSampler.forEach(density, box.minX(), box.minY(), box.minZ(), cellWidth, cellHeight, sink);
-        } else {
-            Sampler.forEach(density, box, sink);
-        }
+        Sampler.forEach(density, LongBox.ofSection(key.x(), key.y(), key.z()),
+                new SectionSink(data.section, aquifer, fallback));
     }
 
     /** 世界级原型，段范围每段换出。方块与液位是这一层自己的口径，与维度设置无关，因此每次现建不缓存。 */
@@ -89,7 +76,7 @@ public abstract class AbstractSimulationFiller implements SimulationFiller {
                 Blocks.STONE.defaultBlockState(), Blocks.WATER.defaultBlockState(), BASE_ROUTER, 63L, true, false);
     }
 
-    /** 0 表示用原型那一份。非 0 时它是 cell 网格的分量，cell 边长等于它乘 4。 */
+    /** 0 表示用原型那一份。格宽当前无消费者，逐块填不需要它。 */
     private static int resolveSize(int declared) {
         return declared != 0 ? declared : 1;
     }

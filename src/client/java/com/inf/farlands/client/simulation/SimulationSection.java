@@ -3,13 +3,11 @@ package com.inf.farlands.client.simulation;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 import com.inf.farlands.simulation.model.SimulationSectionData;
 import com.inf.farlands.util.world.WorldBounds;
 
 import net.minecraft.core.Holder;
-import net.minecraft.world.level.ColorResolver;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.state.BlockState;
@@ -97,24 +95,6 @@ public final class SimulationSection {
 
     private int occupiedCount;
 
-    /**
-     * 内容版本，只在客户端主线程自增。烘焙在工作线程上进行，完成时拿快照里的版本与本字段比，判结果是否已过期。
-     */
-    private int revision;
-
-    /**
-     * 每格的 tint 缓存，按 resolver 与「Y 的 quart 带」两级。0 表示未算，tint 恒不透明，所以 0 不会是真值。
-     *
-     * <p>
-     * 按带折一是精确的，不是近似：块色的混合取样把 Y 固定在方块自己的 Y 上，而群系按四立方 quart 取值，所以带内
-     * 各 Y 的结果相同。缓存跨烘制保留，所以群系一变就必须清，见 {@link #clearTints()}。
-     *
-     * <p>
-     * 并发：烘制在工作线程写它，主线程在段内容变化时清它，所以用并发容器。清发生在烘焙期间时，那一次烘焙的结果会
-     * 因版本不符被丢弃，重烘前再清一次，见 {@code Simulation.farlands$drainCompleted}。
-     */
-    private final Map<ColorResolver, int[][]> tints = new ConcurrentHashMap<>();
-
     SimulationSection(long sectionX, long sectionY, long sectionZ, PalettedContainerFactory biomeFactory,
             Holder<Biome> defaultBiome) {
         this.sectionX = sectionX;
@@ -166,8 +146,6 @@ public final class SimulationSection {
         PalettedContainer<Holder<Biome>> next = this.biomes.copy();
         next.getAndSetUnchecked(quartX, quartY, quartZ, biome);
         this.biomes = next;
-        this.clearTints();
-        this.revision++;
         this.farlands$markDirty(quartX * 4, quartY * 4, quartZ * 4);
         this.farlands$markDirty(quartX * 4 + 3, quartY * 4 + 3, quartZ * 4 + 3);
     }
@@ -183,8 +161,6 @@ public final class SimulationSection {
             }
         }
         this.biomes = next;
-        this.clearTints();
-        this.revision++;
         this.farlands$markDirty(0, 0, 0);
         this.farlands$markDirty(SimulationSection.SIZE - 1, SimulationSection.SIZE - 1,
                 SimulationSection.SIZE - 1);
@@ -238,12 +214,10 @@ public final class SimulationSection {
         if (!this.eligible) {
             return;
         }
-        this.revision++;
         this.slots = null;
         this.count = 0;
         this.occupiedCount = 0;
         this.biomes = container.getBiomes();
-        this.clearTints();
         this.blockLight = blockLight == null ? new DataLayer() : blockLight;
         this.skyLight = skyLight == null ? new DataLayer() : skyLight;
         Map<BlockState, SimulationBlock> cache = new HashMap<>(8);
@@ -269,32 +243,6 @@ public final class SimulationSection {
         }
         this.farlands$markDirty(0, 0, 0);
         this.farlands$markDirty(SIZE - 1, SIZE - 1, SIZE - 1);
-    }
-
-    /**
-     * 应用一段全空的段：只装群系与两层光照，不扫方块。
-     *
-     * <p>
-     * 空段本身没有几何，但它的光照是邻段环境光遮蔽的输入：模拟层的天光 15 与方块光 0 都存在这个段的
-     * {@code DataLayer} 里。整段不留对象，邻段朝空气的角点就会采到 0 光，表现为成片纯黑。所以这里保留对象，
-     * 只跳过 4096 格方块转换与脏标记。
-     *
-     * <p>
-     * {@code snap} 置空：这一段若是从有方块降成全空，旧快照段必须退出渲染列表，几何由调用方释放。
-     */
-    void applyAir(LevelChunkSection container, DataLayer blockLight, DataLayer skyLight) {
-        if (!this.eligible) {
-            return;
-        }
-        this.revision++;
-        this.slots = null;
-        this.count = 0;
-        this.occupiedCount = 0;
-        this.snap = null;
-        this.biomes = container.getBiomes();
-        this.clearTints();
-        this.blockLight = blockLight == null ? new DataLayer() : blockLight;
-        this.skyLight = skyLight == null ? new DataLayer() : skyLight;
     }
 
     public int count() {
@@ -330,7 +278,6 @@ public final class SimulationSection {
             }
             current[index] = block;
         }
-        this.revision++;
         this.farlands$markDirty(localX, localY, localZ);
     }
 
@@ -355,54 +302,11 @@ public final class SimulationSection {
         return this.occupied[i];
     }
 
-    /** 当前内容版本。只在客户端主线程读写。 */
-    public int revision() {
-        return this.revision;
-    }
-
-    /**
-     * 非空格下标的拷贝，供烘焙快照用。
-     *
-     * <p>
-     * {@link #occupied} 在原数组上增删，工作线程共享引用会读到写了一半的计数与下标，所以快照必须拷前缀。
-     */
-    int[] occupiedSnapshot() {
-        return Arrays.copyOf(this.occupied, this.occupiedCount);
-    }
-
-    /** 该格的 tint，未算返回 0。 */
-    int cachedTint(ColorResolver resolver, int localX, int localY, int localZ) {
-        int[][] bands = this.tints.get(resolver);
-        if (bands == null) {
-            return 0;
-        }
-        int[] band = bands[localY >> 2];
-        return band == null ? 0 : band[(localZ << 4) | localX];
-    }
-
-    /** 记一格的 tint。按需建带，每条带 256 个 int。 */
-    void putTint(ColorResolver resolver, int localX, int localY, int localZ, int color) {
-        int[][] bands = this.tints.computeIfAbsent(resolver, key -> new int[4][]);
-        int bandIndex = localY >> 2;
-        int[] band = bands[bandIndex];
-        if (band == null) {
-            band = new int[256];
-            bands[bandIndex] = band;
-        }
-        band[(localZ << 4) | localX] = color;
-    }
-
-    /** 群系或段内容变化后清空 tint 缓存。本段的 biomes 换了、或横向邻段的 biomes 换了，都要调。 */
-    void clearTints() {
-        this.tints.clear();
-    }
-
     /** 清整段。 */
     public void clearAll() {
         if (!this.eligible || this.count == 0) {
             return;
         }
-        this.revision++;
         this.slots = null;
         this.count = 0;
         this.occupiedCount = 0;

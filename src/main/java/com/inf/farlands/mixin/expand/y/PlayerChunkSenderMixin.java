@@ -2,7 +2,6 @@ package com.inf.farlands.mixin.expand.y;
 
 import com.inf.farlands.terrain.pipeline.GenQueue;
 import com.inf.farlands.util.network.ChunkDataSender;
-import com.inf.farlands.util.network.ChunkPayloadPin;
 import com.inf.farlands.util.window.PlayerTable;
 import com.inf.farlands.util.window.WindowSendState;
 import com.inf.farlands.util.window.WindowedChunk;
@@ -56,7 +55,5 @@ public class PlayerChunkSenderMixin {
     private static void clearWindow(ServerGamePacketListenerImpl packetListener, ServerLevel level, LevelChunk chunk,
             CallbackInfo ci) {
         WindowSendState.clear();
-        // 包体 pin 正常在本包的构造器里被取走，这里只是兜底：构造器抛异常时不留残余。
-        ChunkPayloadPin.clear();
     }
 }

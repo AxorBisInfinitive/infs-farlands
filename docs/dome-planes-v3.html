@@ -158,40 +158,6 @@
           border-color 0.2s,
           box-shadow 0.2s;
       }
-      .domain-control {
-        display: flex;
-        align-items: center;
-        gap: 3px;
-        padding: 3px;
-        background: #0c1016;
-        border: 1px solid #303946;
-        border-radius: 8px;
-      }
-      .domain-control button {
-        height: 31px;
-        min-width: 42px;
-        padding: 0 8px;
-        border: 0;
-        border-radius: 5px;
-        color: #8695a9;
-        font: 11px var(--mono);
-        letter-spacing: 0.4px;
-      }
-      .domain-control button:hover {
-        color: #e0e9f6;
-        background: #263347;
-      }
-      .domain-control button[aria-pressed="true"] {
-        color: #d8e6fa;
-        background: #29394f;
-      }
-      #domain-readout {
-        padding: 0 7px 0 4px;
-        color: #7e8ca0;
-        font: 10px var(--mono);
-        white-space: nowrap;
-        font-variant-numeric: tabular-nums;
-      }
       .seed-control:focus-within {
         border-color: #8aa9d7;
         box-shadow: 0 0 0 3px #8aa9d712;
@@ -305,39 +271,6 @@
         justify-content: space-between;
         align-items: center;
         gap: 10px;
-      }
-      /* 「平面 N」与右侧的筛选按钮同组，靠左；容纳不下时整体不换行，按内容收缩。 */
-      .head-left {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        min-width: 0;
-      }
-      .filter-control {
-        display: flex;
-        gap: 2px;
-        padding: 2px;
-        background: #161c24;
-        border: 1px solid #262d37;
-        border-radius: 6px;
-        flex-shrink: 0;
-      }
-      .filter-control button {
-        padding: 2px 6px;
-        border: 0;
-        border-radius: 4px;
-        color: #7e8ca0;
-        font: 10px var(--mono);
-        letter-spacing: 0.2px;
-        line-height: 1.6;
-      }
-      .filter-control button:hover {
-        color: #e0e9f6;
-        background: #232b35;
-      }
-      .filter-control button[aria-pressed="true"] {
-        color: #142034;
-        background: #c6d5e9;
       }
       .section-head h2 {
         margin: 0;
@@ -467,13 +400,6 @@
         padding: 2px 5px;
         border-color: #3b495c;
         color: #b1c7e5;
-      }
-      /* 开关与复制上下叠，复制在开关下面。 */
-      .head-right-col {
-        display: flex;
-        flex-direction: column;
-        gap: 3px;
-        flex-shrink: 0;
       }
       .plane.off .head-right button {
         border-color: #303947;
@@ -1196,27 +1122,6 @@
               <path d="M4 10h12m-5-5 5 5-5 5" />
             </svg>
           </button>
-          <div class="domain-control" role="group" aria-label="渲染域">
-            <button
-              type="button"
-              data-domain="int32"
-              aria-pressed="true"
-              title="int32 域：半跨度 2^31"
-              aria-label="int32 域"
-            >
-              2³¹
-            </button>
-            <button
-              type="button"
-              data-domain="int64"
-              aria-pressed="false"
-              title="int64 域：半跨度 2^63"
-              aria-label="int64 域"
-            >
-              2⁶³
-            </button>
-            <span id="domain-readout"></span>
-          </div>
         </div>
       </header>
       <div class="workspace">
@@ -1232,43 +1137,7 @@
           </section>
           <section id="rows-section">
             <div class="section-head">
-              <div class="head-left">
-                <h2>平面 <span class="count" id="row-count">40</span></h2>
-                <div class="filter-control" role="group" aria-label="按族筛选">
-                  <button
-                    type="button"
-                    data-filter="low"
-                    aria-pressed="false"
-                    title="只看 low 族"
-                  >
-                    low
-                  </button>
-                  <button
-                    type="button"
-                    data-filter="high"
-                    aria-pressed="false"
-                    title="只看 high 族"
-                  >
-                    high
-                  </button>
-                  <button
-                    type="button"
-                    data-filter="selector"
-                    aria-pressed="false"
-                    title="只看 selector 族"
-                  >
-                    selector
-                  </button>
-                  <button
-                    type="button"
-                    data-filter="all"
-                    aria-pressed="true"
-                    title="显示全部三族"
-                  >
-                    all
-                  </button>
-                </div>
-              </div>
+              <h2>平面 <span class="count" id="row-count">15</span></h2>
               <button id="toggle-all" class="mini" type="button" disabled>
                 全部禁用
               </button>
@@ -1298,17 +1167,17 @@
                     <tr>
                       <td>low</td>
                       <td>蓝</td>
-                      <td>0 到 15</td>
+                      <td>9 到 15</td>
                     </tr>
                     <tr>
                       <td>high</td>
                       <td>橙</td>
-                      <td>0 到 15</td>
+                      <td>9 到 15</td>
                     </tr>
                     <tr>
                       <td>selector</td>
                       <td>紫</td>
-                      <td>0 到 7</td>
+                      <td>7</td>
                     </tr>
                   </tbody>
                 </table>
@@ -1504,10 +1373,8 @@
         var TWO_31 = 2147483648.0;
         var JAVA_INT_MAX = 2147483647;
         var JAVA_INT_MIN = -2147483648;
-        // 渲染域的半跨度（方块）。默认 int32，由 setDomain 换档。
-        // 它与 JAVA_INT_MAX / JAVA_INT_MIN 是两件事：那三个常量刻画噪声的 int32 语义（穹顶成因），
-        // 域只决定平面画到多远，改域不改任何一个系数或门槛。
-        var DOMAIN_HALF = 2147483648.0;
+        var MAX_BLOCK = 2147483647;
+        var MIN_BLOCK = -2147483648;
 
         // Java 的 (int) double：越界饱和、向零截断。与 JS 的 ToInt32 回绕是两回事。
         function toInt(v) {
@@ -1681,9 +1548,7 @@
           return family.c * Math.pow(2.0, family.kMax - k);
         }
 
-        // 全放开：三族各按自己的阶数枚举到底（low 与 high 各 16 阶、selector 8 阶），
-        // 共 40 行。某行在某一档里没有落点由 planePolygons 判，列表上标「无落点」，
-        // 不在这里提前筛掉——筛选会把「该阶在这一档能不能成立」这件事藏起来。
+        // low 与 high 各 7 阶，加 selector 顶阶，共十五行。偏移 0。
         function buildRows(seeds) {
           var rows = [];
           var index = 0;
@@ -1694,7 +1559,7 @@
           for (var p = 0; p < pairs.length; p++) {
             var family = pairs[p][0];
             var intSeed = pairs[p][1];
-            for (var k = family.kMax; k >= 0; k--) {
+            for (var k = family.kMax; k >= family.kMax - 6; k--) {
               index++;
               var seedEff = (intSeed + k) | 0;
               rows.push({
@@ -1707,18 +1572,16 @@
               });
             }
           }
-          for (var s = FAMILIES.selector.kMax; s >= 0; s--) {
-            index++;
-            var selSeedEff = (seeds.selector + s) | 0;
-            rows.push({
-              index: index,
-              family: FAMILIES.selector,
-              k: s,
-              seedEff: selSeedEff,
-              abcd: coefficients(selSeedEff),
-              t: threshold(FAMILIES.selector, s),
-            });
-          }
+          index++;
+          var selSeedEff = (seeds.selector + FAMILIES.selector.kMax) | 0;
+          rows.push({
+            index: index,
+            family: FAMILIES.selector,
+            k: FAMILIES.selector.kMax,
+            seedEff: selSeedEff,
+            abcd: coefficients(selSeedEff),
+            t: threshold(FAMILIES.selector, FAMILIES.selector.kMax),
+          });
           return rows;
         }
 
@@ -1885,95 +1748,6 @@
           };
         }
 
-        // ================= 远处单阶的直接核 =================
-        // 与 directCheck 同形，只是把取样点放到门槛 T_k 之外的尺子上：那一带三轴都已冻结，
-        // 混叠式的零集应当就是这张平面。量的是平面解出的零点与单阶真实零点差多少格。
-
-        /**
-         * 取「系数最大的那一轴求解、另外两轴固定成 4T 与 8T」的点，沿求解轴二分单阶零点。
-         * 三轴都必须在饱和区内，否则这一行在该尺度下没有可核的点。
-         */
-        function farOrderCheck(family, k, seedEff, abcd, t) {
-          var sigma = family.sigmaXZ * Math.pow(2.0, k - family.kMax);
-          var coef = [abcd[0], abcd[1] / 2.0, abcd[2]];
-          var vary = 0;
-          for (var i = 1; i < 3; i++) {
-            if (Math.abs(coef[i]) > Math.abs(coef[vary])) vary = i;
-          }
-          if (coef[vary] === 0.0) {
-            return { verdict: "无系数", deviation: Number.NaN };
-          }
-          var point = [0.0, 0.0, 0.0];
-          var free = 0;
-          for (var a = 0; a < 3; a++) {
-            if (a === vary) continue;
-            point[a] = (free === 0 ? 4.0 : 8.0) * t;
-            free++;
-          }
-          var sum = 0.0;
-          for (var b = 0; b < 3; b++) {
-            if (b !== vary) sum += coef[b] * point[b];
-          }
-          point[vary] = -(sum + t * abcd[3]) / coef[vary];
-          for (var c = 0; c < 3; c++) {
-            if (saturation(point[c], sigma, c === 1 ? 0.5 : 1.0) < 1.0) {
-              return { verdict: "结构不可达", deviation: Number.NaN };
-            }
-          }
-          var planeAt = point[vary];
-          var lo = planeAt - 8.0;
-          var hi = planeAt + 8.0;
-          var flo = directValue(
-            family,
-            k,
-            seedEff,
-            vary,
-            lo,
-            point[0],
-            point[1],
-            point[2],
-          );
-          var fhi = directValue(
-            family,
-            k,
-            seedEff,
-            vary,
-            hi,
-            point[0],
-            point[1],
-            point[2],
-          );
-          if (flo > 0 === fhi > 0) {
-            return { verdict: "未过", deviation: Number.NaN };
-          }
-          for (var step = 0; step < 200 && hi - lo > 1.0e-9; step++) {
-            var mid = 0.5 * (lo + hi);
-            var fm = directValue(
-              family,
-              k,
-              seedEff,
-              vary,
-              mid,
-              point[0],
-              point[1],
-              point[2],
-            );
-            if (fm > 0 === flo > 0) {
-              lo = mid;
-              flo = fm;
-            } else {
-              hi = mid;
-            }
-          }
-          var zero = 0.5 * (lo + hi);
-          var deviation = Math.abs(zero - planeAt);
-          return {
-            verdict: deviation <= 1.0 ? "过" : "未过",
-            deviation: deviation,
-            axis: vary,
-          };
-        }
-
         // ================= 平面与角块求交 =================
 
         // 平面 a*x + b*y + c*z + k = 0 与轴对齐盒的交多边形，按绕质心的极角排序。
@@ -2023,9 +1797,7 @@
               Math.abs(q[1]),
               Math.abs(q[2]),
             );
-            // 容差按 ulp 取：原来那个 1e-9 的绝对值写法在 9e18 处放大成 9e9 格，
-            // 会把该平面上真实存在的相邻顶点判成同一个点，多边形可能退化到不足三点。
-            var tol = 32 * scale * Number.EPSILON;
+            var tol = 1e-9 * scale;
             for (var u = 0; u < unique.length; u++) {
               var r = unique[u];
               if (
@@ -2120,17 +1892,11 @@
             for (var sj = 0; sj < 2; sj++) {
               for (var sk = 0; sk < 2; sk++) {
                 var bx =
-                  signs[si] > 0
-                    ? [row.t, DOMAIN_HALF - 1]
-                    : [-DOMAIN_HALF, -row.t];
+                  signs[si] > 0 ? [row.t, MAX_BLOCK] : [MIN_BLOCK, -row.t];
                 var by =
-                  signs[sj] > 0
-                    ? [yLimit, DOMAIN_HALF - 1]
-                    : [-DOMAIN_HALF, -yLimit];
+                  signs[sj] > 0 ? [yLimit, MAX_BLOCK] : [MIN_BLOCK, -yLimit];
                 var bz =
-                  signs[sk] > 0
-                    ? [row.t, DOMAIN_HALF - 1]
-                    : [-DOMAIN_HALF, -row.t];
+                  signs[sk] > 0 ? [row.t, MAX_BLOCK] : [MIN_BLOCK, -row.t];
                 if (bx[0] > bx[1] || by[0] > by[1] || bz[0] > bz[1]) continue;
                 var poly = clipPlaneToBox(a, halfB, c, k, bx, by, bz);
                 if (poly.length >= 3) polys.push(poly);
@@ -2138,14 +1904,6 @@
             }
           }
           return polys;
-        }
-
-        /**
-         * 换渲染域的半跨度（方块）。只影响平面画到多远与角块的边界，
-         * 不改任何系数、门槛或噪声语义。
-         */
-        function setDomain(half) {
-          DOMAIN_HALF = half;
         }
 
         // ================= 方程文本 =================
@@ -2196,15 +1954,6 @@
             [1, 5, 4, 2],
             [5, 0, 1, 4],
             [3, -4, -1, 4],
-            [4, 0, 0, 2],
-            [0, 1, 5, -2],
-            [2, -2, 2, -2],
-            [0, -3, -3, 4],
-            [-1, 3, -4, -8],
-            [1, 2, 3, 2],
-            [-1, -1, 2, -2],
-            [3, -3, 2, -4],
-            [1, -1, 0, 4],
             [-4, 4, 2, -6],
             [0, 1, -3, 2],
             [-3, 0, -1, 0],
@@ -2212,27 +1961,9 @@
             [-2, 3, 1, 4],
             [-1, -2, -5, 0],
             [0, -5, 3, -2],
-            [2, -1, 5, -4],
-            [2, 5, -3, 2],
-            [-3, -2, 1, 0],
-            [1, 0, 1, 6],
-            [1, 4, -1, 2],
-            [-3, -3, 0, 0],
-            [1, -2, -1, 2],
-            [-1, 3, 2, -6],
-            [1, -2, -1, -4],
             [0, -1, 1, 2],
-            [-1, 4, 3, -2],
-            [4, -2, -2, -8],
-            [-1, -3, 0, 6],
-            [3, -1, 2, -4],
-            [-1, -1, -2, -2],
-            [-2, 2, 0, -2],
-            [-1, 0, 3, 6],
           ],
-          // 40 行里 skip selector 的 8 行 → 32 行参检；深阶的点在 int32 的候选界外，
-          // 判「结构不可达」，所以过的是 12 行，与 15 行版本同值。
-          direct: { checked: 32, passed: 12, worstText: "0.1496" },
+          direct: { checked: 14, passed: 12, worstText: "0.1496" },
         };
 
         function sameInts(a, b) {
@@ -2285,7 +2016,7 @@
             }
           }
           items.push({
-            label: "seed=0 四十行系数",
+            label: "seed=0 十五行系数",
             ok: rowsOk,
             got: rowsOk
               ? rows.length + " 行一致"
@@ -2318,36 +2049,6 @@
               EXPECTED.direct.worstText,
           });
 
-          // 第五项固定用 selector 顶阶那一行；全放开后 rows 的末行是 selector k=0，
-          // 那一阶的平面可能落在阈值内的洞里，拿它当核点会得到"结构不可达"。
-          var selectorTop = null;
-          for (var si = 0; si < rows.length; si++) {
-            if (
-              rows[si].family === FAMILIES.selector &&
-              rows[si].k === FAMILIES.selector.kMax
-            ) {
-              selectorTop = rows[si];
-              break;
-            }
-          }
-          var far = farOrderCheck(
-            FAMILIES.selector,
-            FAMILIES.selector.kMax,
-            selectorTop.seedEff,
-            selectorTop.abcd,
-            selectorTop.t,
-          );
-          items.push({
-            label: "selector 顶阶的远处直接核",
-            ok: far.verdict === "过",
-            got:
-              far.verdict +
-              (Number.isNaN(far.deviation)
-                ? ""
-                : "／偏差 " + far.deviation.toFixed(4) + " 格"),
-            want: "过（偏差 ≤ 1 格）",
-          });
-
           var ok = true;
           for (var j = 0; j < items.length; j++) if (!items[j].ok) ok = false;
           return { ok: ok, items: items };
@@ -2366,7 +2067,6 @@
           threshold: threshold,
           equationText: equationText,
           planePolygons: planePolygons,
-          setDomain: setDomain,
           selfCheck: selfCheck,
           FAMILIES: FAMILIES,
           EXPECTED: EXPECTED,
@@ -2424,11 +2124,6 @@ SOFTWARE.
           tip: document.getElementById("tip"),
         };
 
-        /** 族筛选的四个按钮，顺序即声明顺序：low、high、selector、all。 */
-        var filterButtons = Array.prototype.slice.call(
-          document.querySelectorAll("[data-filter]"),
-        );
-
         var state = {
           rows: null,
           fatal: null,
@@ -2437,12 +2132,6 @@ SOFTWARE.
           hasGeom: {},
           buttons: {},
           eqNodes: {},
-          /** 最近一次渲染用的 seed 文本，换域时据此重建同一批行。 */
-          seedText: null,
-          /** 族筛选：low / high / selector / all。只影响列出与渲染哪几族，不改行本身。 */
-          filter: "all",
-          /** 当前列出几张卡，供表头计数。 */
-          listed: 0,
         };
 
         // ---- 状态与错误面 ----
@@ -2618,46 +2307,15 @@ SOFTWARE.
           }
           document.getElementById("visible-count").innerHTML =
             "<b>" + visible + "</b> / " + total + " 可见";
-          document.getElementById("row-count").textContent = state.listed;
+          document.getElementById("row-count").textContent = state.rows
+            ? state.rows.length
+            : 0;
         }
 
         function applyVisible(index) {
           if (window.DomeGL && window.DomeGL.setVisible) {
             window.DomeGL.setVisible(index, isEnabled(index));
           }
-        }
-
-        /**
-         * 把筛选落到三维：不在筛选内的行整组隐藏，在的按逐行开关恢复。
-         * 必须对全部行都写一次，否则换筛选时上一族会把 show 留在场景里。
-         */
-        function applyFilterToScene() {
-          if (!state.rows) return;
-          for (var i = 0; i < state.rows.length; i++) {
-            var row = state.rows[i];
-            var visible = matchesFilter(row) && isEnabled(row.index);
-            if (window.DomeGL && window.DomeGL.setVisible) {
-              window.DomeGL.setVisible(row.index, visible);
-            }
-          }
-        }
-
-        /** 换筛选：只重建列表与三维可见性，不重算行、不重新随机开关。 */
-        function setFilter(name) {
-          state.filter = name;
-          for (var i = 0; i < filterButtons.length; i++) {
-            filterButtons[i].setAttribute(
-              "aria-pressed",
-              String(filterButtons[i].dataset.filter === name),
-            );
-          }
-          if (state.rows) {
-            fillRows(state.rows);
-            markCard(-1);
-            showInfo(-1);
-          }
-          applyFilterToScene();
-          syncButtons();
         }
 
         function toggleRow(index) {
@@ -2675,72 +2333,27 @@ SOFTWARE.
           syncButtons();
         }
 
-        /** 一行的可复制文本：seed、编号、族、阶与压掉空格的方程。 */
-        function rowCopyText(row) {
-          var eq = math.equationText(row.abcd, row.t).replace(/\s+/g, "");
-          return (
-            "seed=" +
-            (state.seedText === null ? "" : state.seedText) +
-            " #" +
-            row.index +
-            " " +
-            row.family.name +
-            " k=" +
-            row.k +
-            " " +
-            eq
-          );
-        }
-
-        function copyToClipboard(text, onOk, onFail) {
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(text).then(onOk, function () {
-              legacyCopyText(text, onOk, onFail);
-            });
-            return;
+        // 从有落点的行里随机开 count 张，其余关掉。候选不足 count 时全开。
+        function enableRandomSome(count) {
+          var candidates = [];
+          for (var key in state.hasGeom) {
+            if (state.hasGeom[key]) candidates.push(Number(key));
           }
-          legacyCopyText(text, onOk, onFail);
-        }
-
-        /** 剪贴板 API 在 file:// 与非安全上下文里不可用，退回 textarea + execCommand。 */
-        function legacyCopyText(text, onOk, onFail) {
-          var area = document.createElement("textarea");
-          area.value = text;
-          area.style.position = "fixed";
-          area.style.left = "-9999px";
-          document.body.appendChild(area);
-          area.select();
-          var ok = false;
-          try {
-            ok = document.execCommand("copy");
-          } catch (err) {
-            ok = false;
+          if (candidates.length === 0) return;
+          for (var i = candidates.length - 1; i > 0; i--) {
+            var j = Math.floor(Math.random() * (i + 1));
+            var swap = candidates[i];
+            candidates[i] = candidates[j];
+            candidates[j] = swap;
           }
-          document.body.removeChild(area);
-          if (ok) onOk();
-          else onFail();
-        }
-
-        /** 复制该行并回写按钮文案。行从 dataset 取，避免闭包吃到循环末值。 */
-        function copyRow(button) {
-          var target = state.rows
-            ? state.rows[Number(button.dataset.row) - 1]
-            : null;
-          if (!target) return;
-          function restore() {
-            button.textContent = "复制";
+          var picked = {};
+          var take = Math.min(count, candidates.length);
+          for (var k = 0; k < take; k++) picked[candidates[k]] = true;
+          for (var m = 0; m < candidates.length; m++) {
+            state.enabled[candidates[m]] = picked[candidates[m]] === true;
+            applyVisible(candidates[m]);
           }
-          copyToClipboard(
-            rowCopyText(target),
-            function () {
-              button.textContent = "已复制";
-              setTimeout(restore, 800);
-            },
-            function () {
-              button.textContent = "复制失败";
-              setTimeout(restore, 1200);
-            },
-          );
+          syncButtons();
         }
 
         // 右下角固定的信息框：内容随悬停更新，位置不动。
@@ -2784,21 +2397,13 @@ SOFTWARE.
           }
         }
 
-        /** 该行是否落在当前族筛选内。all 表示全收。 */
-        function matchesFilter(row) {
-          return state.filter === "all" || row.family.name === state.filter;
-        }
-
         function fillRows(rows) {
           el.rowsHost.innerHTML = "";
           state.hasGeom = {};
           state.buttons = {};
           state.eqNodes = {};
-          state.listed = 0;
           for (var i = 0; i < rows.length; i++) {
             var row = rows[i];
-            if (!matchesFilter(row)) continue;
-            state.listed++;
             var polys = math.planePolygons(row);
             var card = document.createElement("div");
             card.className = "plane" + (polys.length === 0 ? " gone" : "");
@@ -2835,13 +2440,8 @@ SOFTWARE.
 
             var right = document.createElement("span");
             right.className = "head-right";
-            // 开关与复制叠成一列，复制在开关下面；没有落点的行只有复制。
-            var buttonCol = document.createElement("span");
-            buttonCol.className = "head-right-col";
             if (polys.length === 0) {
-              var none = document.createElement("span");
-              none.textContent = "无落点";
-              right.appendChild(none);
+              right.textContent = "无落点";
             } else {
               state.hasGeom[row.index] = true;
               var blocks = document.createElement("span");
@@ -2855,20 +2455,9 @@ SOFTWARE.
               toggle.addEventListener("click", function (e) {
                 toggleRow(Number(e.currentTarget.dataset.row));
               });
-              buttonCol.appendChild(toggle);
+              right.appendChild(toggle);
               state.buttons[row.index] = toggle;
             }
-            var copyBtn = document.createElement("button");
-            copyBtn.type = "button";
-            copyBtn.className = "mini";
-            copyBtn.textContent = "复制";
-            copyBtn.dataset.row = String(row.index);
-            copyBtn.title = "复制一行：seed、编号、族、阶与方程";
-            copyBtn.addEventListener("click", function (e) {
-              copyRow(e.currentTarget);
-            });
-            buttonCol.appendChild(copyBtn);
-            right.appendChild(buttonCol);
             head.appendChild(right);
             card.appendChild(head);
 
@@ -3074,25 +2663,18 @@ SOFTWARE.
           var rows = math.buildRows(seeds);
           state.rows = rows;
           state.enabled = {};
-          state.seedText = parsed.text;
-          // 默认全部关闭：不随机开面，要看的行由用户自己开。
-          // 必须在 fillRows 之前落，否则卡片与按钮的初始态会跟三维不一致。
-          for (var off = 0; off < rows.length; off++) {
-            state.enabled[rows[off].index] = false;
-          }
 
           fillSeedTable(parsed.text, seeds);
           fillRows(rows);
           showInfo(-1);
+          // 初次进入与每次点渲染一样：随机开 3 到 5 张有落点的面。
+          enableRandomSome(3 + Math.floor(Math.random() * 3));
 
           el.seedInput.value = parsed.text;
           el.seedError.hidden = true;
           el.seedInput.removeAttribute("aria-invalid");
 
           if (window.DomeGL) window.DomeGL.enqueue(rows);
-          // enqueue 是同步的（三维就绪时），它按逐行开关落了可见性；筛选要在它之后收一次，
-          // 把不在当前筛选内的行整组藏掉。
-          applyFilterToScene();
         }
 
         el.renderBtn.addEventListener("click", function () {
@@ -3104,11 +2686,6 @@ SOFTWARE.
         el.toggleAll.addEventListener("click", function () {
           setAllRows(anyDisabled());
         });
-        for (var fb = 0; fb < filterButtons.length; fb++) {
-          filterButtons[fb].addEventListener("click", function (e) {
-            setFilter(e.currentTarget.dataset.filter);
-          });
-        }
 
         window.DomeUI = {
           setStatus: setStatus,
@@ -3118,26 +2695,8 @@ SOFTWARE.
           showInfo: showInfo,
           pinCard: pinCard,
           isEnabled: isEnabled,
-          /** 该行是否落在当前族筛选内。三维首次渲染时也要按它落一次可见性。 */
-          passesFilter: function (row) {
-            return !row || matchesFilter(row);
-          },
           getRows: function () {
             return state.rows;
-          },
-          /**
-           * 换域后重建同一批行：重算多边形（角块边界变了），重画列表与三维，
-           * 但保留逐行开关的选择，不重新随机。
-           */
-          reloadPreservingSelection: function () {
-            if (state.seedText === null) return;
-            var kept = state.enabled;
-            submit(state.seedText);
-            state.enabled = kept;
-            syncButtons();
-            for (var id in state.hasGeom) {
-              if (state.hasGeom[id]) applyVisible(Number(id));
-            }
           },
           setHighlight: function (fn) {
             state.highlight = fn;
@@ -3179,9 +2738,7 @@ SOFTWARE.
         "use strict";
 
         var ui = window.DomeUI;
-        // 渲染域：根坐标系的半跨度（方块）。两档由顶栏控件切换，见 applyDomain。
-        var DOMAIN = 2147483648.0;
-        var UNIT = 1.0 / DOMAIN;
+        var UNIT = 1.0 / 2147483648.0;
 
         // 全局 UMD 构建，走普通 script 标签，不经过模块系统，file:// 下可用。
         var UMD_SOURCES = [
@@ -3430,7 +2987,7 @@ SOFTWARE.
             // 近远平面必须整段跟着视距等比走。近平面留固定下限，原来那个 1e-8 相当于二十多个
             // 方块，会把亚方块尺度下的整个场景切掉；远平面留固定加数，原来那个 +4 会让远近比
             // 到 1e11 量级，深度精度全丢。两者都按 radius 等比取，比例恒定在 1:400 上下。
-            camera.near = radius * 0.02;
+            camera.near = Math.max(radius * 0.02, 1e-14);
             camera.far = radius * 8;
             camera.updateProjectionMatrix();
             // 渲染相机只同步朝向与投影，位置留在原点。lookAt 写的是朝向，复制四元数即可。
@@ -3533,7 +3090,7 @@ SOFTWARE.
           }
 
           /** 半块方块，世界单位。焦点收敛的下限：比它小就认为已经落到位。 */
-          var HALF_BLOCK = 0.5 * UNIT;
+          var HALF_BLOCK = 0.5 / 2147483648.0;
 
           // ---- 坐标系 ----
           // 一个坐标系是一套轴柱、刻度、标签与立方体框。全域坐标系覆盖 int32 全域，
@@ -3589,17 +3146,6 @@ SOFTWARE.
               pairs: [
                 [268435455, -268435456],
                 [2147483647, -2147483648],
-                // int64 档的地标。前三对在 double 里精确；2^63-1 会舍成 2^63，
-                // 所以它的两个标签必须写成字符串，见 makeTick 的取法。
-                [4398046511104, -4398046511105],
-                [9007199254740992, -9007199254740993],
-                [576460752303423488, -576460752303423489],
-                [
-                  9223372036854775807,
-                  -9223372036854775808,
-                  "9223372036854775807",
-                  "-9223372036854775808",
-                ],
               ],
             },
             {
@@ -3632,8 +3178,8 @@ SOFTWARE.
             }
             return out;
           }
-          var BLOCKS_MAX = DOMAIN - 1;
-          var BLOCKS_MIN = -DOMAIN;
+          var BLOCKS_MAX = 2147483647;
+          var BLOCKS_MIN = ~BLOCKS_MAX;
           var BLOCKS_UNIT = 1 / UNIT;
 
           var AXIS_DEFS = [
@@ -3798,9 +3344,6 @@ SOFTWARE.
                 for (var s = 0; s < 2; s++) {
                   var blocks = pairsOnAxis[e][s];
                   if (!emphasisExpressible(frame, d, blocks)) continue;
-                  // 第四、五项是给 2^63-1 这类不能靠 Number 打印的值的显式标签。
-                  var blocksText = pairsOnAxis[e][2 + s];
-                  if (blocksText === undefined) blocksText = fmtBlocks(blocks);
                   var m = makeTick(def, MARK_PIXELS, true);
                   m.blocks = blocks;
                   m.local = blocks - frameCenterOn(frame, d);
@@ -3817,11 +3360,11 @@ SOFTWARE.
                   m.el = makeLabel(
                     "axis-label tick-label tick-mark",
                     def.css,
-                    blocksText,
+                    String(blocks),
                   );
                   m.el.style.opacity = "0";
                   m.el.dataset.axis = def.key;
-                  m.el.dataset.blocks = blocksText;
+                  m.el.dataset.blocks = String(blocks);
                   m.el.dataset.frame = frame.id;
                   m.frame = frame;
                   m.order = frame.root ? 0 : 1;
@@ -3905,13 +3448,12 @@ SOFTWARE.
             return frame;
           }
 
-          // 全域坐标系：中心原点，半跨度等于当前渲染域，归一化后恒为 1，
-          // 所以两档的画面布局相同，变的只有刻度的量级。
+          // 全域坐标系：中心原点，归一化半跨度 1，方块单位就是 2^31，即 BLOCKS_MAX 的取反。
           makeFrame({
             id: "root",
             root: true,
             center: [0, 0, 0],
-            half: DOMAIN,
+            half: BLOCKS_MAX + 1,
           });
 
           /**
@@ -3992,7 +3534,7 @@ SOFTWARE.
               (2 * radius * Math.tan((camera.fov * Math.PI) / 360)) / UNIT;
             var pxPerBlock = stage.clientHeight / spanBlocks;
             var best = null;
-            for (var k = -3; k <= 18; k++) {
+            for (var k = -3; k <= 12; k++) {
               for (var m = 0; m < 3; m++) {
                 var n = Math.pow(10, k) * (m === 0 ? 1 : m === 1 ? 2 : 5);
                 var px = n * pxPerBlock;
@@ -4003,27 +3545,15 @@ SOFTWARE.
               }
             }
             if (!best) return;
-            var text = fmtBlocks(best.n) + " 方块";
+            var text = formatBlocks(best.n) + " 方块";
             if (scaleText.textContent !== text) scaleText.textContent = text;
             var width = best.px.toFixed(0) + "px";
             if (scaleBar.style.width !== width) scaleBar.style.width = width;
           }
 
-          /**
-           * 方块数的十进制文本。≥2^53 之后 Number 已经存不下每一位，直接 String 会打印出
-           * 舍入后的数字（例如 2^63 打印成 9223372036854776000）；那一段改走 BigInt，
-           * 打印的是这个 double 的精确整数值。不做万、亿这类换算。
-           */
-          function fmtBlocks(v) {
-            if (!isFinite(v)) return String(v);
-            if (Math.abs(v) >= 9007199254740992) {
-              try {
-                return BigInt(Math.trunc(v)).toString();
-              } catch (e) {
-                return String(v);
-              }
-            }
-            return String(v);
+          /** 标尺读数就是平铺的数字，不做万、亿这类量级换算。 */
+          function formatBlocks(n) {
+            return String(n);
           }
 
           function updateLabels() {
@@ -4149,7 +3679,7 @@ SOFTWARE.
                   t.line.position.set(lw[0], lw[1], lw[2]);
                   var sw = t.pixels * pixelScale;
                   t.line.scale.set(sw, sw, sw);
-                  var text = fmtBlocks(value);
+                  var text = String(value);
                   if (t.el.textContent !== text) {
                     t.el.textContent = text;
                     t.el.dataset.blocks = text;
@@ -4224,13 +3754,9 @@ SOFTWARE.
                 if (axisOK) {
                   // 第 0 格是屏幕原点那一格，它只为全域坐标系自己的读数让位。
                   var from = it.frame.root ? 0 : 1;
-                  // 横向间距按文本长度等比放宽：int32 档最多 11 位，int64 档是 19 位，
-                  // 固定 29px 会让长数字压在一起。竖向是行高，不随长度变。
-                  var labelLen = (it.el.textContent || "").length;
-                  var gapX = labelLen > 11 ? (29 * labelLen) / 11 : 29;
                   for (var j = from; j < occupiedCount; j++) {
                     if (
-                      Math.abs(x - occupiedPoints[j].x) < gapX &&
+                      Math.abs(x - occupiedPoints[j].x) < 29 &&
                       Math.abs(y - occupiedPoints[j].y) < 17
                     ) {
                       collOK = false;
@@ -4252,7 +3778,6 @@ SOFTWARE.
               }
             }
             updateScaleBar();
-            updateDomainReadout();
           }
 
           // ---- 平面 ----
@@ -4667,14 +4192,11 @@ SOFTWARE.
               var object = buildPlane(rows[j]);
               if (object) planes.add(object);
             }
-            // 按界面当前的开关状态与族筛选落一次可见性。
+            // 按界面当前的开关状态落一次可见性。
             for (var k = 0; k < rows.length; k++) {
               var entry = rowObjects[rows[k].index];
               if (entry) {
-                entry.targetVisibility =
-                  ui.isEnabled(rows[k].index) && ui.passesFilter(rows[k])
-                    ? 1
-                    : 0;
+                entry.targetVisibility = ui.isEnabled(rows[k].index) ? 1 : 0;
                 entry.object.visible = !!entry.targetVisibility;
               }
             }
@@ -4876,31 +4398,16 @@ SOFTWARE.
             if (pinnedCount > 0) ui.markCard(-1);
             invalidate();
           }
-          var BLOCK_UNIT = 1.0 / UNIT;
+          var BLOCK_UNIT = 2147483648.0;
+          var BLOCK_MIN = -2147483648;
+          var BLOCK_MAX = 2147483647;
 
-          /**
-           * 夹到当前渲染域。界限直接读 DOMAIN，不缓存：缓存的那一份不会随换域更新，
-           * 表现就是 int64 档里 /tp 坐标被静默夹到 ±2^31。
-           */
           function clampBlock(v) {
             var r = Math.round(v);
             if (!isFinite(r)) return 0;
-            if (r > DOMAIN - 1) return DOMAIN - 1;
-            if (r < -DOMAIN) return -DOMAIN;
+            if (r > BLOCK_MAX) return BLOCK_MAX;
+            if (r < BLOCK_MIN) return BLOCK_MIN;
             return r;
-          }
-
-          /** 块的十进制文本。≥2^53 时 Number 已分不清相邻整数，那一段打印它作为 double 的精确整数值。 */
-          function blockText(v) {
-            var a = Math.abs(v);
-            if (a >= 9007199254740992) {
-              try {
-                return BigInt(Math.trunc(v)).toString();
-              } catch (e) {
-                return String(Math.round(v));
-              }
-            }
-            return String(Math.round(v));
           }
 
           /** 相机射线与平面方程 a x + (b/2) y + c z + T_k d = 0 的交点，方块坐标。 */
@@ -5239,15 +4746,7 @@ SOFTWARE.
                   frame: owner,
                 };
               }
-              // 标签上的数字是精确字符串（2^63-1 这类），先按 long 解析再落到 Number，
-              // 直接用 Number() 会把 2^63-1 读成 2^63。
-              var vBig;
-              try {
-                vBig = BigInt(el.dataset.blocks);
-              } catch (err) {
-                continue;
-              }
-              var v = Number(vBig);
+              var v = Number(el.dataset.blocks);
               if (!isFinite(v)) continue;
               var axis = el.dataset.axis;
               var block =
@@ -5420,11 +4919,11 @@ SOFTWARE.
 
             ctxTarget =
               "/tp @s " +
-              blockText(clampBlock(block[0])) +
+              clampBlock(block[0]) +
               " " +
-              blockText(clampBlock(block[1])) +
+              clampBlock(block[1]) +
               " " +
-              blockText(clampBlock(block[2]));
+              clampBlock(block[2]);
             ctxCopy.textContent = "复制坐标";
             ctxCopy.hidden = false;
             ctxFrame.hidden = false;
@@ -5537,18 +5036,8 @@ SOFTWARE.
           function parseBlock(text) {
             var s = String(text).trim();
             if (!/^[+-]?[0-9]+$/.test(s)) return null;
-            // 先按 long 判范围：Number 在 2^53 以上已经分不清相邻整数。
-            var big;
-            try {
-              big = BigInt(s);
-            } catch (e) {
-              return null;
-            }
-            if (big < -9223372036854775808n || big > 9223372036854775807n) {
-              return null;
-            }
-            var v = Number(big);
-            if (!isFinite(v) || v < -DOMAIN || v > DOMAIN - 1) return null;
+            var v = Number(s);
+            if (!isFinite(v) || v < BLOCK_MIN || v > BLOCK_MAX) return null;
             return Math.round(v);
           }
 
@@ -5600,11 +5089,7 @@ SOFTWARE.
             var bz = parseBlock(gotoZ.value);
             if (bx === null || by === null || bz === null) {
               gotoError.textContent =
-                "三个坐标都要是 [" +
-                blockText(-DOMAIN) +
-                ", " +
-                blockText(DOMAIN - 1) +
-                "] 内的整数。";
+                "三个坐标都要是 [-2147483648, 2147483647] 内的整数。";
               gotoError.hidden = false;
               return;
             }
@@ -5631,86 +5116,6 @@ SOFTWARE.
             }
           });
           window.addEventListener("blur", hideMenu);
-
-          // ---- 渲染域 ----
-
-          /**
-           * 两档渲染域。根坐标系的半跨度、刻度的量级、标尺的换挡都跟着它走；
-           * 噪声的 int32 语义（JAVA_INT_*、TWO_31）与门槛 T_k 不随它变。
-           */
-          var DOMAIN_PRESETS = {
-            int32: 2147483648.0,
-            int64: 9223372036854775808.0,
-          };
-          var domainName = "int32";
-          var domainReadout = document.getElementById("domain-readout");
-          var domainButtons = Array.prototype.slice.call(
-            document.querySelectorAll("[data-domain]"),
-          );
-
-          /** 顶栏读数：当前视野跨度。两档差 2^32，大数走指数写法。 */
-          function updateDomainReadout() {
-            if (!domainReadout || !(radius > 0)) return;
-            var halfFov = Math.tan((camera.fov * Math.PI) / 360);
-            var span = (2 * radius * halfFov) / UNIT;
-            var text =
-              "视野 " +
-              (Math.abs(span) >= 1e15
-                ? span.toExponential(2).replace("+", "")
-                : String(Math.round(span))) +
-              " 格";
-            if (domainReadout.textContent !== text) {
-              domainReadout.textContent = text;
-            }
-          }
-
-          /**
-           * 换档。顺序是契约：先换域与派生常量，再让数学层换角块边界并重建行与几何，
-           * 然后重建坐标系（makeFrame 把 centerVec、标签坐标与立方体尺寸按当时的 UNIT 烘死），
-           * 最后把相机放回该档的初始视距。
-           */
-          function applyDomain(name) {
-            var preset = DOMAIN_PRESETS[name];
-            if (preset === undefined) return;
-            domainName = name;
-            DOMAIN = preset;
-            UNIT = 1.0 / DOMAIN;
-            BLOCK_UNIT = 1.0 / UNIT;
-            BLOCKS_MAX = DOMAIN - 1;
-            BLOCKS_MIN = -DOMAIN;
-            BLOCKS_UNIT = 1 / UNIT;
-            HALF_BLOCK = 0.5 * UNIT;
-            MIN_RADIUS = UNIT / (2 * Math.tan((42 * Math.PI) / 360));
-            window.DomeMath.setDomain(DOMAIN);
-            ui.reloadPreservingSelection();
-            while (frames.length > 0) {
-              removeFrame(frames[frames.length - 1]);
-            }
-            makeFrame({
-              id: "root",
-              root: true,
-              center: [0, 0, 0],
-              half: DOMAIN,
-            });
-            attachedId = "root";
-            targetFocus.set(0, 0, 0);
-            radius = targetRadius = fitRadius();
-            for (var i = 0; i < domainButtons.length; i++) {
-              domainButtons[i].setAttribute(
-                "aria-pressed",
-                String(domainButtons[i].dataset.domain === name),
-              );
-            }
-            refreshHighlight();
-            resize();
-            invalidate();
-          }
-
-          for (var db = 0; db < domainButtons.length; db++) {
-            domainButtons[db].addEventListener("click", function (e) {
-              applyDomain(e.currentTarget.dataset.domain);
-            });
-          }
 
           // ---- 尺寸与渲染循环 ----
 

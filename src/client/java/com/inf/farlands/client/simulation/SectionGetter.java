@@ -23,24 +23,21 @@ import net.minecraft.world.level.material.Fluids;
  * 段上的取数入口：一个可复用的 {@link BlockAndTintGetter}，把位置当作段内局部坐标。
  *
  * <p>
- * 不读世界坐标：模拟之地的坐标在 {@code BlockPos} 上已饱和。局部坐标落在 0 到 15，越出本段的采样点按算术右移求格、
- * {@code & 15} 折回段内，再查邻段。缺邻段按空气、光 0、群系取默认值。
+ * 不读世界坐标：模拟之地的坐标在 {@code BlockPos} 上已饱和。局部坐标落在 0 到 15，越出本段的采样点按
+ * {@code floorDiv} 求格、查邻段，折回段内后交给容器。缺邻段按空气、光 0、群系取该 level 的默认值。
  *
  * <p>
- * 两种模式。**实时模式**由碰撞与拾取使用，跑在客户端主线程上，邻段随时从 {@code Simulation} 查，方块色表与混合半径
- * 随时从 {@code Minecraft} 取。**快照模式**由烘焙使用，跑在工作线程上，邻域与那几样客户端物件全部来自
- * {@link BakeSnapshot}，本类因此一个 {@code Minecraft} 单例都不碰。
+ * 三个消费者共用：烘几何时的剔除、光与群系采样，碰撞与拾取时的方块状态与形状派生。`at` 只服务需要「当前块」
+ * 的那一侧，即 tint 颜色；形状派生只用 {@code getBlockState}，不依赖 `at`。
  *
  * <p>
- * 光走 {@link #getBrightness}，它必须覆写：接口默认实现读 {@code getLightEngine()}，而这里返回空引擎，不覆写会让整层
- * 的光恒为 0 且不报错。
+ * 光走 {@link #getBrightness}，它必须覆写：接口默认实现读 {@code getLightEngine()}，而这里返回空引擎，不覆写会
+ * 让整层的光恒为 0 且不报错。
  */
 public final class SectionGetter implements BlockAndTintGetter {
 
     private final SimulationSection section;
     private final Simulation simulation;
-    private final BakeSnapshot snapshot;
-    private final SimulationSection[] neighbors;
     private final BlockPos.MutableBlockPos unused = new BlockPos.MutableBlockPos();
 
     private int localX;
@@ -52,20 +49,9 @@ public final class SectionGetter implements BlockAndTintGetter {
     private int[] colors = new int[4];
     private int colorCount;
 
-    /** 实时模式：主线程，邻段与客户端物件按需取。 */
     public SectionGetter(SimulationSection section, Simulation simulation) {
         this.section = section;
         this.simulation = simulation;
-        this.snapshot = null;
-        this.neighbors = null;
-    }
-
-    /** 快照模式：工作线程，全部输入由快照定住。 */
-    SectionGetter(BakeSnapshot snapshot) {
-        this.section = snapshot.section();
-        this.simulation = null;
-        this.snapshot = snapshot;
-        this.neighbors = snapshot.neighbors();
     }
 
     /** 切到该块并算好它的 tint 色。每个块一次，同一块的多个 quad 复用。 */
@@ -74,7 +60,7 @@ public final class SectionGetter implements BlockAndTintGetter {
         this.localY = y;
         this.localZ = z;
         this.state = blockState;
-        List<BlockTintSource> sources = this.blockColors().getTintSources(blockState);
+        List<BlockTintSource> sources = Minecraft.getInstance().getBlockColors().getTintSources(blockState);
         if (this.colors.length < sources.size()) {
             this.colors = new int[sources.size()];
         }
@@ -93,74 +79,31 @@ public final class SectionGetter implements BlockAndTintGetter {
         return tintIndex < this.colorCount ? this.colors[tintIndex] : -1;
     }
 
-    /**
-     * 段内局部坐标解析到段；同段返回本段，缺段返回 null。
-     *
-     * <p>
-     * 格号用算术右移取，与 {@code Math.floorDiv} 在 int 上同值；格内坐标用 {@code & 15} 取。快照模式只备了 27 格，
-     * 落在其外的采样按缺段处理。
-     */
+    /** 段内局部坐标解析到段；同段直接返回本段，缺段返回 null。三轴同形。 */
     private SimulationSection sectionFor(int sampleX, int sampleY, int sampleZ) {
-        int cellX = sampleX >> 4;
-        int cellY = sampleY >> 4;
-        int cellZ = sampleZ >> 4;
+        int cellX = Math.floorDiv(sampleX, SimulationSection.SIZE);
+        int cellY = Math.floorDiv(sampleY, SimulationSection.SIZE);
+        int cellZ = Math.floorDiv(sampleZ, SimulationSection.SIZE);
         if (cellX == 0 && cellY == 0 && cellZ == 0) {
             return this.section;
         }
-        if (this.neighbors == null) {
-            return this.simulation.sectionOrNull(this.section.sectionX() + cellX, this.section.sectionY() + cellY,
-                    this.section.sectionZ() + cellZ);
-        }
-        if (cellX < -1 || cellX > 1 || cellY < -1 || cellY > 1 || cellZ < -1 || cellZ > 1) {
-            return null;
-        }
-        return this.neighbors[(cellX + 1) * 9 + (cellY + 1) * 3 + (cellZ + 1)];
+        return this.simulation.sectionOrNull(this.section.sectionX() + cellX, this.section.sectionY() + cellY,
+                this.section.sectionZ() + cellZ);
     }
 
     /** 局部坐标折回 0 到 15。 */
     private static int fold(int localCoord) {
-        return localCoord & 15;
-    }
-
-    private net.minecraft.client.color.block.BlockColors blockColors() {
-        return this.snapshot != null ? this.snapshot.blockColors() : Minecraft.getInstance().getBlockColors();
-    }
-
-    private Holder<Biome> defaultBiome() {
-        return this.snapshot != null ? this.snapshot.defaultBiome() : this.simulation.defaultBiome();
-    }
-
-    private int biomeBlendRadius() {
-        return this.snapshot != null ? this.snapshot.biomeBlendRadius()
-                : Minecraft.getInstance().options.biomeBlendRadius().get();
+        return localCoord - Math.floorDiv(localCoord, SimulationSection.SIZE) * SimulationSection.SIZE;
     }
 
     @Override
     public CardinalLighting cardinalLighting() {
-        return this.snapshot != null ? this.snapshot.cardinalLighting() : this.simulation.cardinalLighting();
+        return this.simulation.cardinalLighting();
     }
 
-    /**
-     * 该格的块色。先查段上的缓存，未算才做混合取样。
-     *
-     * <p>
-     * 缓存键是 resolver、Y 的 quart 带与格内水平坐标；混合取样把 Y 固定在方块自己的 Y 上，而群系按四立方 quart
-     * 取值，所以同一带内各 Y 同值。一次命中是一次数组读，未命中是 (2r+1)² 次群系查询。
-     */
     @Override
     public int getBlockTint(BlockPos pos, ColorResolver resolver) {
-        int cached = this.section.cachedTint(resolver, this.localX, this.localY, this.localZ);
-        if (cached != 0) {
-            return cached;
-        }
-        int color = this.farlands$computeTint(resolver);
-        this.section.putTint(resolver, this.localX, this.localY, this.localZ, color);
-        return color;
-    }
-
-    /** 混合取样，与 {@code ClientLevel.calculateBlockTint} 同式。 */
-    private int farlands$computeTint(ColorResolver resolver) {
-        int dist = this.biomeBlendRadius();
+        int dist = Minecraft.getInstance().options.biomeBlendRadius().get();
         if (dist == 0) {
             return resolver.getColor(biomeAt(this.localX, this.localZ).value(),
                     this.section.originX() + this.localX, this.section.originZ() + this.localZ);
@@ -184,7 +127,7 @@ public final class SectionGetter implements BlockAndTintGetter {
     }
 
     /**
-     * 样本点的群系。样本跨出本段时查邻段，邻段不在快照里回落到默认群系。
+     * 样本点的群系。样本跨出本段时查邻段，邻段不在圆盘里回落到默认群系。
      *
      * <p>
      * 半径最大 7，段边长 16，所以最多跨一列；折回段内后的局部坐标仍在 0 到 15。
@@ -192,7 +135,7 @@ public final class SectionGetter implements BlockAndTintGetter {
     private Holder<Biome> biomeAt(int sampleX, int sampleZ) {
         SimulationSection target = sectionFor(sampleX, this.localY, sampleZ);
         if (target == null) {
-            return this.defaultBiome();
+            return this.simulation.defaultBiome();
         }
         return target.getNoiseBiome(fold(sampleX) >> 2, this.localY >> 2, fold(sampleZ) >> 2);
     }
