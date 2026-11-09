@@ -8,49 +8,40 @@
 ![@Inject](https://img.shields.io/endpoint?url=https%3A%2F%2Fgist.githubusercontent.com%2FAxorBisInfinitive%2Fdc5cf49ced449ef6cda0c106718f8e53%2Fraw%2Finject.json)
 ![@Mixin](https://img.shields.io/endpoint?url=https%3A%2F%2Fgist.githubusercontent.com%2FAxorBisInfinitive%2Fdc5cf49ced449ef6cda0c106718f8e53%2Fraw%2Fmixin.json)
 
-[Wiki](docs/wiki.EN_US/wiki.md)
+[中文](README.md) / [Wiki](docs/wiki.EN_US/wiki.md)
 
-## Building
-
-```bash
-./gradlew build
-```
+> [!WARNING]
+>
+> This mod is experimental. Some bugs may cause the following:
+>
+> - Game crash
+> - Process freeze
+> - Data corruption
 
 ## Features
 
-- Extends the game's X/Y/Z coordinate limits to [-2147483648, 2147483647].
-- Implements an independent **lighting engine** and **terrain generation pipeline** for the entire Y-axis.
-- Fixes some abnormal game behavior at high coordinates.
+- Changes `Vanilla`'s X/Y/Z axis limits to [-2147483648, 2147483647].
+- Implements an independent **lighting engine** and **terrain pipeline** for the entire Y axis.
+- Fixes some abnormal `Vanilla` behavior at high coordinates.
+- Uses the `Simulation` architecture to explore the world within the `int64` range.
 
-## Notes
+<details>
+<summary>Simulation</summary>
+<br>
 
-This mod does not depend on `Fabric API`.
+The simulation architecture supports regions outside `int32` but within `int64`.
 
-The configuration file is located at `config/infs-farlands.json`.
+**Implemented**: simulation rendering pipeline, simulation terrain pipeline, simulation `AABB` collision.
 
-The lighting engine and terrain generation pipeline are currently still in the **experimental stage**.
+**Technical details**:
 
-## Warnings
+- Entity coordinates are stored as `Binary256`, and **non-finite coordinates** are allowed.
+- Fixes some abnormal game behavior at extremely high coordinates.
 
-This mod is experimental.
+**Not planned**, including but not limited to: interaction, `tick`.
 
-Certain bugs may cause the following:
+</details>
 
-- CTD
-- OOM
-- Game freezes
-- Data corruption
-
-If you find a bug or would like to make a suggestion, please create an Issue or Pull Request.
-
-## Compatibility
-
-### Known Incompatible Mods
-
-- **C2ME**
-- **ScalableLux**
-
-### Known Compatible Mods
-
-- **Sodium 0.9.2**
-- **Chunky 1.5.3**
+> [!IMPORTANT]
+>
+> If you find a bug or would like to make a suggestion, please create an Issue and a Pull Request.
