@@ -245,6 +245,7 @@ public final class SimulationLifecycle {
             }
             SimulationStore.putDecoded(dimension, key, entry.decoded().section(), entry.decoded().shapeMode(),
                     entry.decoded().blockLight(), entry.decoded().skyLight(), entry.decoded().stage());
+            SimulationServer.noteDirty(dimension, key);
             return;
         }
         produce(level, key);
@@ -272,7 +273,7 @@ public final class SimulationLifecycle {
      * 生产收尾，主线程。失败不升档，段停在 {@code NOISE}，等它离开视距时由 {@link #release} 丢弃。
      *
      * <p>
-     * 顺序是契约：判身份、写光、升档、置两个脏位。判身份在前，否则会往已经被替换掉的旧对象上白写一份；写光
+     * 顺序是契约：判身份、写光、升档、置落盘位与待下发登记。判身份在前，否则会往已经被替换掉的旧对象上白写一份；写光
      * 在升档之前，因为唯一读光的两处都以终态为前置，反过来就会漏出「已终态而光是空的」的窗口。
      */
     private static void finishProduction(ServerLevel level, SimulationSectionKey key, SimulationSectionData data,
@@ -286,7 +287,7 @@ public final class SimulationLifecycle {
         applyLight(data);
         data.advanceTo(SimulationSectionStage.LIGHTED);
         data.markPersistDirty();
-        data.markDirty();
+        SimulationServer.noteDirty(level.dimension(), key);
     }
 
     /**
