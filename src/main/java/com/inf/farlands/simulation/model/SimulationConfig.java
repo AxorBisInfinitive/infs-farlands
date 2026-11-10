@@ -2,8 +2,8 @@ package com.inf.farlands.simulation.model;
 
 import java.util.Map;
 
-import com.inf.farlands.util.config.Config;
-import com.inf.farlands.util.config.ConfigEntry;
+import com.inf.config.util.config.Config;
+import com.inf.config.util.config.ConfigEntry;
 
 /**
  * 服务端模拟层的配置，独立一份文件 {@code config/infs-farlands-simulation.json}。

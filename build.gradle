@@ -27,6 +27,13 @@ repositories {
 			includeGroup "com.inf.long2"
 		}
 	}
+	maven {
+		name = "Config"
+		url = "https://axorbisinfinitive.github.io/Config/maven/"
+		content {
+			includeGroup "com.inf.config"
+		}
+	}
 }
 
 loom {
@@ -60,6 +67,11 @@ dependencies {
 	compileOnly "com.inf.long2:Long2:${project.long2_version}"
 	localRuntime "com.inf.long2:Long2:${project.long2_version}"
 	include "com.inf.long2:Long2:${project.long2_version}"
+
+	// Config: 0.1.0
+	compileOnly "com.inf.config:Config:${project.config_version}"
+	localRuntime "com.inf.config:Config:${project.config_version}"
+	include "com.inf.config:Config:${project.config_version}"
 
 	// Sodium: mc26.1.2-0.9.2-fabric
 	compileOnly "maven.modrinth:AANobbMI:tZQ3jqnf"

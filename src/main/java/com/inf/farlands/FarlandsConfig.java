@@ -2,8 +2,8 @@ package com.inf.farlands;
 
 import java.util.Map;
 
-import com.inf.farlands.util.config.Config;
-import com.inf.farlands.util.config.ConfigEntry;
+import com.inf.config.util.config.Config;
+import com.inf.config.util.config.ConfigEntry;
 
 /**
  * 本 mod 的全部配置项，分两份文件：主配置与调试配置。逐项 builder 声明，见 {@link Config}。
