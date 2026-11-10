@@ -41,7 +41,7 @@ import java.util.function.Supplier;
  */
 public final class Config {
 
-    /** 该实例的文件路径，构造时由 user.dir/config/<fileName>.json 拼出。 */
+    /** 该实例的文件路径，由 filePath 经 {@link #resolve(String)} 解析，见构造器。 */
     private final Path file;
 
     /** 该文件顶层的 note，落盘时写进根对象的 note 键。 */
@@ -53,10 +53,34 @@ public final class Config {
     /** 幂等标志：init() 只读一次本实例的文件；持有它的类重复调用无害。 */
     private boolean initialized;
 
-    /** fileName 不带扩展名，路径在本类内拼成 user.dir/config/<fileName>.json。 */
-    public Config(String fileName, Map<String, String> fileNotes) {
-        this.file = Path.of(System.getProperty("user.dir"), "config", "%s.json".formatted(fileName));
+    /**
+     * 文件路径相对 {@code ${user.dir}/config} 解释，永远追加 {@code .json}。
+     *
+     * <p>
+     * 空串、绝对路径、归一化后越出 config 目录，都在这里抛：越出的路径若拖到写盘期，
+     * {@code Files.createDirectories} 会在 config 之外建目录。
+     */
+    public Config(String filePath, Map<String, String> fileNotes) {
+        this.file = resolve(filePath);
         this.fileNotes = Map.copyOf(fileNotes);
+    }
+
+    /** 解析 filePath 并夹在 config 目录内，判据见构造器。 */
+    private static Path resolve(String filePath) {
+        if (filePath == null || filePath.isBlank()) {
+            throw new IllegalArgumentException("farlands: config path must not be blank");
+        }
+        Path raw = Path.of(filePath);
+        if (raw.isAbsolute() || raw.getRoot() != null) {
+            throw new IllegalArgumentException("farlands: config path must be relative: " + filePath);
+        }
+        Path base = Path.of(System.getProperty("user.dir"), "config").normalize();
+        Path resolved = base.resolve(filePath + ".json").normalize();
+        if (!resolved.startsWith(base)) {
+            throw new IllegalArgumentException(
+                    "farlands: config path escapes the config directory: " + filePath + " -> " + resolved);
+        }
+        return resolved;
     }
 
     // ---- 工厂：9 种值类型 ----
