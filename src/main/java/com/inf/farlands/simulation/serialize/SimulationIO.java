@@ -115,9 +115,18 @@ public final class SimulationIO {
         return id == null ? null : dimensionDir(level).resolve(fileName(id));
     }
 
-    /** 该段的文件路径，必要时分配编号并落盘。只在写路调用。 */
+    /**
+     * 该段的文件路径，必要时分配编号并落盘。只在写路调用。
+     *
+     * <p>
+     * 映射表这一轮没写出去时返回 null：调用方跳过这一段，不建文件、不读盘，等下一次周期刷盘重新分配。
+     * 不在这里抛，是因为这个失败点落在服务端 tick 里，一次瞬时的文件拒绝不该终止服务器。
+     */
     public static Path pathForWrite(ServerLevel level, long sectionX, long sectionY, long sectionZ) {
         String id = SimulationFileIndex.of(level).ensure(regionOf(sectionX, sectionY, sectionZ));
+        if (id == null) {
+            return null;
+        }
         return dimensionDir(level).resolve(fileName(id));
     }
 

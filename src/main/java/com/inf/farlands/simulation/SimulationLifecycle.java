@@ -97,8 +97,17 @@ public final class SimulationLifecycle {
         }
         List<SimulationIO.SlotKey> keys = List
                 .of(new SimulationIO.SlotKey(key.x(), key.y(), key.z(), ref));
-        SimulationIO.submitRead(level, path, keys, level.palettedContainerFactory(),
-                decoded -> finishRead(level, key, pending, decoded));
+        try {
+            SimulationIO.submitRead(level, path, keys, level.palettedContainerFactory(),
+                    decoded -> finishRead(level, key, pending, decoded));
+        } catch (RuntimeException e) {
+            // 开文件失败按未命中处理，重跑生产者。代价是盘上那一份会被生成结果覆盖，
+            // 与上面槽位落空那一支同形：宁可重生成，也不留一个此后 ensure 不到的段。
+            InfsFarlands.LOGGER.error("farlands: ssa read submit failed section={},{},{}", key.x(), key.y(),
+                    key.z(), e);
+            LOADING.remove(pending);
+            produce(level, key);
+        }
     }
 
     /**
@@ -130,10 +139,25 @@ public final class SimulationLifecycle {
      * 编码在主线程做。这样做是为了免掉一把与下发争同一容器的锁：下发侧的 {@code LevelChunkSection.write} 与
      * 这边的 codec 打包都会取容器自己的线程检测器，同线程串行就没有这个问题。代价是一整条带释放时编码都在
      * 主线程上，见类注释的未结项。
+     *
+     * <p>
+     * 文件侧的失败不抛：解析路径与开文件都可能被一次瞬时拒绝打断，而本方法跑在服务端 tick 里。命中时清掉
+     * releasing 标记、保留 persistDirty，段留在表里，由下一次 {@link #flushAllDirty} 重试。
      */
     public static boolean persistSection(ServerLevel level, SimulationSectionKey key, SimulationSectionData data) {
         ResourceKey<Level> dimension = level.dimension();
-        Path path = SimulationIO.pathForWrite(level, key.x(), key.y(), key.z());
+        Path path;
+        try {
+            path = SimulationIO.pathForWrite(level, key.x(), key.y(), key.z());
+        } catch (RuntimeException e) {
+            InfsFarlands.LOGGER.error("farlands: ssa path failed section={},{},{}", key.x(), key.y(), key.z(), e);
+            data.clearReleasing();
+            return false;
+        }
+        if (path == null) {
+            data.clearReleasing();
+            return false;
+        }
         PalettedContainerFactory factory = level.palettedContainerFactory();
         byte[] entry;
         try {
@@ -144,21 +168,41 @@ public final class SimulationLifecycle {
             data.clearReleasing();
             return false;
         }
-        SimulationStorage storage = SimulationIO.getOrOpen(path);
-        SimulationStorage.PendingWrite pw = storage
-                .prepareWrite(SimulationIO.slotIndex(key.x(), key.y(), key.z()), entry);
+        SimulationStorage storage;
+        SimulationStorage.PendingWrite pw;
+        try {
+            storage = SimulationIO.getOrOpen(path);
+            pw = storage.prepareWrite(SimulationIO.slotIndex(key.x(), key.y(), key.z()), entry);
+        } catch (RuntimeException e) {
+            InfsFarlands.LOGGER.error("farlands: ssa open failed {}", path, e);
+            data.clearReleasing();
+            return false;
+        }
         if (pw == null) {
             data.clearReleasing();
             return false;
         }
-        SimulationIO.submitWrite(level, path, List.of(pw), () -> {
-            SimulationIO.getOrOpen(path).commitWrite(pw);
-            data.clearPersistDirty();
-            // 提交期间又进了视距的话，标记已被 ensureSection 撤销，条目要留给玩家。
-            if (data.isReleasing()) {
-                SimulationStore.removeIfSame(dimension, key, data);
-            }
-        });
+        try {
+            SimulationIO.submitWrite(level, path, List.of(pw), () -> {
+                try {
+                    SimulationIO.getOrOpen(path).commitWrite(pw);
+                } catch (RuntimeException e) {
+                    // 提交失败同样只记一行：脏位没清，下一次周期性刷盘会把这整段重来一遍。
+                    InfsFarlands.LOGGER.error("farlands: ssa commit failed {}", path, e);
+                    data.clearReleasing();
+                    return;
+                }
+                data.clearPersistDirty();
+                // 提交期间又进了视距的话，标记已被 ensureSection 撤销，条目要留给玩家。
+                if (data.isReleasing()) {
+                    SimulationStore.removeIfSame(dimension, key, data);
+                }
+            });
+        } catch (RuntimeException e) {
+            InfsFarlands.LOGGER.error("farlands: ssa submit failed {}", path, e);
+            data.clearReleasing();
+            return false;
+        }
         return true;
     }
 
@@ -200,7 +244,17 @@ public final class SimulationLifecycle {
                 if (!SimulationSectionStage.isTerminal(data.stage())) {
                     continue;
                 }
-                Path path = SimulationIO.pathForWrite(level, key.x(), key.y(), key.z());
+                Path path;
+                try {
+                    path = SimulationIO.pathForWrite(level, key.x(), key.y(), key.z());
+                } catch (RuntimeException e) {
+                    InfsFarlands.LOGGER.error("farlands: ssa shutdown path failed section={},{},{}", key.x(),
+                            key.y(), key.z(), e);
+                    continue;
+                }
+                if (path == null) {
+                    continue;
+                }
                 byte[] entry;
                 try {
                     entry = SimulationSerializer.encode(data.section, data.blockLight, data.skyLight,
@@ -210,9 +264,15 @@ public final class SimulationLifecycle {
                             key.y(), key.z(), e);
                     continue;
                 }
-                SimulationStorage storage = SimulationIO.getOrOpen(path);
-                SimulationStorage.PendingWrite pw = storage
-                        .prepareWrite(SimulationIO.slotIndex(key.x(), key.y(), key.z()), entry);
+                SimulationStorage storage;
+                SimulationStorage.PendingWrite pw;
+                try {
+                    storage = SimulationIO.getOrOpen(path);
+                    pw = storage.prepareWrite(SimulationIO.slotIndex(key.x(), key.y(), key.z()), entry);
+                } catch (RuntimeException e) {
+                    InfsFarlands.LOGGER.error("farlands: ssa shutdown open failed {}", path, e);
+                    continue;
+                }
                 if (pw == null) {
                     continue;
                 }

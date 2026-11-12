@@ -22,6 +22,8 @@ import com.google.gson.JsonParser;
 
 import net.minecraft.server.level.ServerLevel;
 
+import com.inf.farlands.InfsFarlands;
+
 /**
  * ssa 文件名的映射表：三个区域坐标到 16 位小写十六进制编号。
  *
@@ -42,8 +44,9 @@ import net.minecraft.server.level.ServerLevel;
  * <ol>
  * <li>编号只增，永不复用。复用会让两个区域指向同一个文件，那是不可恢复的数据污染。</li>
  * <li>{@code next} 从表里最大的编号加一推导，不另存字段，因此文件形状与约定完全一致。</li>
- * <li>落盘先于建文件：{@link #ensure} 返回前完成原子替换。崩溃的后果只允许是「文件在、表里没有」，那是一个
- * 没人引用的孤儿文件；反向「表里有、文件没有」无害，读回按无数据处理。</li>
+ * <li>落盘先于建文件：只有原子替换成功、{@link #ensure} 交回编号之后，调用方才建文件；替换失败时 {@link #ensure}
+ * 返回 null，一个文件也不建。崩溃的后果只允许是「文件在、表里没有」，那是一个没人引用的孤儿文件；反向
+ * 「表里有、文件没有」无害，读回按无数据处理。</li>
  * <li>读失败即抛，不重建。丢表等于把段数据变成不可达，静默重置是必须避免的形态。</li>
  * </ol>
  *
@@ -114,8 +117,12 @@ public final class SimulationFileIndex {
      * 取该区域的编号，没有就分配一个新的并落盘。只在写路调用。
      *
      * <p>
-     * 落盘失败时把内存里刚加的两条与计数器一起回滚，再抛。不回滚的话，这个编号下次会分给另一个区域，
+     * 落盘失败时把内存里刚加的两条与计数器一起回滚，返回 null。不回滚的话，这个编号下次会分给另一个区域，
      * 两个区域就会指向同一个文件。
+     *
+     * <p>
+     * null 只表示这一轮没写出去，不是异常：调用方既不建文件也不读盘，等下一次周期刷盘重新分配到同一个编号。
+     * 回滚发生在建文件之前，所以失败不会留下指向未登记编号的文件。
      */
     public String ensure(Region region) {
         String have = this.byRegion.get(region);
@@ -132,7 +139,9 @@ public final class SimulationFileIndex {
             this.next--;
             this.byRegion.remove(region);
             this.byId.remove(id);
-            throw e;
+            InfsFarlands.LOGGER.error("farlands: ssa mapping save failed region={},{},{}",
+                    region.x(), region.y(), region.z(), e);
+            return null;
         }
         return id;
     }
