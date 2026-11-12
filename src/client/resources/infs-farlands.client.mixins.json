@@ -78,6 +78,7 @@
     "position.AvatarRendererPositionMixin",
     "position.LocalPlayerPositionMixin",
     "position.LocalPlayerExactPositionMixin",
+    "position.KeyboardHandlerExactCopyMixin",
     "position.DragonBeamMixin",
     "position.FishingLineMixin",
     "position.LeashOffsetMixin",
