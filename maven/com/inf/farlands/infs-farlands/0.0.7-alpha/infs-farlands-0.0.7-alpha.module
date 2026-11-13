@@ -1,0 +1,89 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "com.inf.farlands",
+    "module": "infs-farlands",
+    "version": "0.0.7-alpha",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.5.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api"
+      },
+      "files": [
+        {
+          "name": "infs-farlands-0.0.7-alpha.jar",
+          "url": "infs-farlands-0.0.7-alpha.jar",
+          "size": 1375883,
+          "sha512": "7a2496720d2931c69b67e2641a9ac994876d5d4f3c48e064ec675236f3e6190ca43ef00af0961f4478d136ad510fd7cdb34a59a79329ee9491f021b1bcd81d27",
+          "sha256": "d685f0a117eb0d61fa96c1d060e377dd949cc116892b0ff99324d0c0cb6b83af",
+          "sha1": "9820ecdba72fad56f9e4f42460d427c5f5fb7a22",
+          "md5": "eb9aedf9baa5a7f05b5aa9d9e2c098a4"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime"
+      },
+      "dependencies": [
+        {
+          "group": "net.fabricmc",
+          "module": "fabric-loader",
+          "version": {
+            "requires": "0.19.3"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "infs-farlands-0.0.7-alpha.jar",
+          "url": "infs-farlands-0.0.7-alpha.jar",
+          "size": 1375883,
+          "sha512": "7a2496720d2931c69b67e2641a9ac994876d5d4f3c48e064ec675236f3e6190ca43ef00af0961f4478d136ad510fd7cdb34a59a79329ee9491f021b1bcd81d27",
+          "sha256": "d685f0a117eb0d61fa96c1d060e377dd949cc116892b0ff99324d0c0cb6b83af",
+          "sha1": "9820ecdba72fad56f9e4f42460d427c5f5fb7a22",
+          "md5": "eb9aedf9baa5a7f05b5aa9d9e2c098a4"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "infs-farlands-0.0.7-alpha-sources.jar",
+          "url": "infs-farlands-0.0.7-alpha-sources.jar",
+          "size": 1059282,
+          "sha512": "d3e6a4b4ed89132daf8566db20e9f6a69451eedb4ff68e98c2bdceb93ecd5c5a9d9d8ba191689f5ec08c1d5e4d510f315222396a64c7f8984807c76ee20fa51c",
+          "sha256": "9b210250852915ffe91b7961dda04c49dfe8a24894971d2279914f372fb0a3d8",
+          "sha1": "b1676f34b467ce02e43f76cbaec2bc9e9aa7f34a",
+          "md5": "58e724ff4a5de1bf90dad6bc714f318c"
+        }
+      ]
+    }
+  ]
+}
