@@ -1,0 +1,118 @@
+name: Publish Farlands Pages
+
+on:
+  push:
+    branches: [fabric-26.1.2]
+    paths: ['docs/**']
+  release:
+    types: [published]
+  repository_dispatch:
+    types: [farlands-maven-published]
+  workflow_dispatch:
+    inputs:
+      preview:
+        description: Build a preview with a temporary Maven version
+        type: boolean
+        default: true
+      release_tag:
+        description: Published release tag to backfill (leave blank for docs only)
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: farlands-pages
+  queue: max
+
+jobs:
+  publish-maven:
+    if: >-
+      (github.event_name == 'release' &&
+       (startsWith(github.event.release.tag_name, 'v0.') ||
+        startsWith(github.event.release.tag_name, 'fabric-26.1.2-v'))) ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/fabric-26.1.2' &&
+       !inputs.preview && inputs.release_tag != '')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Store the published release in the Maven repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+        run: bash .github/scripts/publish-maven.sh
+
+  build-site:
+    if: >-
+      github.ref == 'refs/heads/fabric-26.1.2' && github.event_name != 'release' &&
+      (github.event_name != 'workflow_dispatch' || inputs.preview || inputs.release_tag == '')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/configure-pages@v5
+      - run: mkdir -p _site
+      - uses: actions/jekyll-build-pages@v1
+        with:
+          source: docs
+          destination: _site
+      - name: Restore published Maven versions
+        if: ${{ !inputs.preview }}
+        run: |
+          set -euo pipefail
+          refs=$(git ls-remote --heads origin refs/heads/maven-repository)
+          if [[ -n "$refs" ]]; then
+            git fetch --depth=1 origin refs/heads/maven-repository
+            git archive FETCH_HEAD maven | tar -x -C _site
+          fi
+      - uses: actions/setup-java@v5
+        if: ${{ inputs.preview }}
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Add preview Maven artifacts
+        if: ${{ inputs.preview }}
+        run: >-
+          bash gradlew --no-daemon --console=plain -PmodVersion=0.0.7-alpha.pages-check
+          --init-script .github/scripts/pages-maven.init.gradle
+          -PpagesMavenDir=_site/maven publishMavenJavaPublicationToPagesRepository
+      - name: Check the combined site
+        env:
+          PREVIEW: ${{ inputs.preview }}
+        run: |
+          set -euo pipefail
+          for file in dome-planes-v3.html math/hash.zip wiki/wiki.html wiki.EN_US/wiki.html wiki.farlands/wiki.html; do
+            test -s "_site/$file" || { echo "Missing Pages output: $file"; exit 1; }
+          done
+          if [[ "$PREVIEW" == true ]]; then
+            module=_site/maven/com/inf/farlands/infs-farlands
+            artifact="$module/0.0.7-alpha.pages-check/infs-farlands-0.0.7-alpha.pages-check"
+            for suffix in .jar -sources.jar .pom .module; do
+              test -s "$artifact$suffix"
+            done
+            test -s "$module/maven-metadata.xml"
+          fi
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+  deploy:
+    if: ${{ !inputs.preview }}
+    needs: build-site
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v5
+        id: deployment

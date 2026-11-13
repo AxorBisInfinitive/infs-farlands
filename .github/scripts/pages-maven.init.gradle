@@ -1,0 +1,7 @@
+gradle.projectsEvaluated {
+	def project = gradle.rootProject
+	project.publishing.repositories.maven {
+		name = 'pages'
+		url = project.uri(project.providers.gradleProperty('pagesMavenDir').get())
+	}
+}
