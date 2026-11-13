@@ -6,6 +6,7 @@ import java.util.function.Consumer;
 
 import com.inf.farlands.client.gui.demo.DropdownSelect;
 import com.inf.farlands.client.gui.viewport.ScrollViewport;
+import com.inf.farlands.client.integrate.modernui.ModernUIEase;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.components.AbstractWidget;
@@ -43,6 +44,9 @@ public final class DimensionPage implements Tab {
         this.layer = layer;
         this.leaves.add(viewport);
         this.leaves.add(layer);
+        // 装了 ModernUI，且它自己的平滑开关开着时，给本页的视口挂上它的补间引擎；否则空转。
+        // 挂载点是 ScrollViewport 实现的 SmoothScrollable，门控与失败降级都在 ModernUIEase 里。
+        ModernUIEase.attach(viewport);
     }
 
     public Identifier dimension() {
