@@ -3,6 +3,7 @@ package com.inf.farlands.client.mixin.worldselection;
 import java.util.Arrays;
 import java.util.List;
 
+import com.inf.farlands.client.gui.CreatingWorldSimulationConfig;
 import com.inf.farlands.client.gui.CreatingWorldSystemsConfig;
 import com.inf.farlands.client.gui.FarlandsTab;
 import com.inf.farlands.client.gui.SimulationLandsTab;
@@ -57,6 +58,10 @@ public class CreateWorldScreenMixin {
     @Unique
     private FarlandsTab farlandsTab;
 
+    /** 同屏的模拟之地页签。它的非法同样要让创建按钮变灰、回车被吃掉。 */
+    @Unique
+    private SimulationLandsTab farlandsSimulationTab;
+
     /** 本屏幕实例的首屏是否已发过进页。界面重建会再走一次页签构造，靠它与首屏那一发区分。 */
     @Unique
     private boolean farlandsEnteredFirstPage;
@@ -79,8 +84,10 @@ public class CreateWorldScreenMixin {
         FarlandsTab tab = new FarlandsTab(this.farlandsDimensions);
         this.farlandsTab = tab;
         extended[tabs.length] = tab;
-        // 第二个页签与第一个共用维度表与骨架，但只放地形一族、选择存内存；它不参与下面那段首屏判定。
-        extended[tabs.length + 1] = new SimulationLandsTab(this.farlandsDimensions);
+        // 第二个页签与第一个共用维度表与骨架，但只放地形一族；它不参与下面那段首屏判定。
+        SimulationLandsTab simulationTab = new SimulationLandsTab(this.farlandsDimensions);
+        this.farlandsSimulationTab = simulationTab;
+        extended[tabs.length + 1] = simulationTab;
         // 首屏那一页也算一次进页，每个屏幕实例一次：重建世界走的是新屏幕实例，因此照发；窗口缩放
         // 只是同一实例的界面重建，标记挡住重复。
         if (!this.farlandsEnteredFirstPage && !this.farlandsDimensions.isEmpty()) {
@@ -100,8 +107,15 @@ public class CreateWorldScreenMixin {
     private LayoutElement farlands$bindCreateButton(LayoutElement child) {
         if (child instanceof Button button && this.farlandsTab != null) {
             FarlandsTab tab = this.farlandsTab;
-            button.active = !tab.hasInvalid();
-            tab.setInvalidListener(() -> button.active = !tab.hasInvalid());
+            SimulationLandsTab simulationTab = this.farlandsSimulationTab;
+            // 两个页签任一非法都拦住创建：提交时两份档案都要编，模拟层那份非法同样会让创建抛。
+            button.active = !tab.hasInvalid() && (simulationTab == null || !simulationTab.hasInvalid());
+            tab.setInvalidListener(() -> button.active = !tab.hasInvalid()
+                    && (simulationTab == null || !simulationTab.hasInvalid()));
+            if (simulationTab != null) {
+                simulationTab.setInvalidListener(() -> button.active = !tab.hasInvalid()
+                        && !simulationTab.hasInvalid());
+            }
         }
         return child;
     }
@@ -115,6 +129,7 @@ public class CreateWorldScreenMixin {
     @Inject(method = "openCreateWorldScreen", at = @At("HEAD"))
     private static void farlands$resetConfig(CallbackInfo ci) {
         CreatingWorldSystemsConfig.reset();
+        CreatingWorldSimulationConfig.reset();
     }
 
     /**
@@ -126,8 +141,11 @@ public class CreateWorldScreenMixin {
      */
     @Inject(method = "keyPressed", at = @At("HEAD"), cancellable = true)
     private void farlands$blockConfirmWhileInvalid(KeyEvent event, CallbackInfoReturnable<Boolean> cir) {
-        if (event.isConfirmation() && this.farlandsTab != null && this.farlandsTab.hasInvalid()) {
-            cir.setReturnValue(true);
+        boolean invalid = this.farlandsTab != null && this.farlandsTab.hasInvalid();
+        if (invalid || (this.farlandsSimulationTab != null && this.farlandsSimulationTab.hasInvalid())) {
+            if (event.isConfirmation()) {
+                cir.setReturnValue(true);
+            }
         }
     }
 }

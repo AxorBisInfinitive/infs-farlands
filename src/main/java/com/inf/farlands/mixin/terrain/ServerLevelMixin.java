@@ -7,6 +7,10 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import com.inf.farlands.FarlandsTick;
+import com.inf.farlands.simulation.SimulationLevels;
+import com.inf.farlands.simulation.int64.SimulationNoiseSystem;
+import com.inf.farlands.simulation.registry.SimulationRegistries;
+import com.inf.farlands.simulation.serialize.SimulationIO;
 import com.inf.farlands.terrain.BiomeSystem;
 import com.inf.farlands.terrain.CarverSystem;
 import com.inf.farlands.terrain.DecorationSystem;
@@ -14,6 +18,7 @@ import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.SurfaceSystem;
 import com.inf.farlands.terrain.TerrainSystem;
 import com.inf.farlands.terrain.biomeSource.BiomeSourceFilter;
+import com.inf.farlands.terrain.registry.SystemId;
 import com.inf.farlands.terrain.registry.SystemsData;
 import com.inf.farlands.terrain.registry.SystemsHolder;
 import com.inf.farlands.terrain.registry.SystemsIO;
@@ -35,7 +40,7 @@ import net.minecraft.world.level.chunk.ChunkGenerator;
  * 且在世界没有原版主世界时判不出来。
  */
 @Mixin(ServerLevel.class)
-public abstract class ServerLevelMixin implements LevelSystems, SystemsHolder {
+public abstract class ServerLevelMixin implements LevelSystems, SystemsHolder, SimulationLevels {
 
     // ---- 每 level 一套地形相关系统 ----
 
@@ -55,6 +60,12 @@ public abstract class ServerLevelMixin implements LevelSystems, SystemsHolder {
     private DecorationSystem farlandsDecorationSystem;
     @Unique
     private TerrainFiller farlandsTerrainFiller;
+
+    /**
+     * 该 level 的模拟系统。构造末尾写一次，池线程上的填充任务只读，因此 volatile。
+     */
+    @Unique
+    private volatile SimulationNoiseSystem farlandsSimulationSystem;
     @Unique
     private SystemsData farlandsSystems;
 
@@ -83,6 +94,12 @@ public abstract class ServerLevelMixin implements LevelSystems, SystemsHolder {
         this.farlandsCarverSystem = SystemsIO.carver(selection);
         this.farlandsDecorationSystem = SystemsIO.decoration(selection);
         this.farlandsTerrainFiller = new StandardTerrainFiller();
+        // 模拟层的选择与实例在同一处解析与新建。此处仍在世界初始化之前，新世界因此能落到暂存或默认并写盘；
+        // 若推到首个 tick 才解析，那时 worlds 已 initialized，缺档会被判成「旧世界缺档案」而抛。
+        SystemsData.SystemSelection simulationSelection = SimulationIO.selection(
+                SimulationIO.systemsFor(server), level.dimension().identifier());
+        this.farlandsSimulationSystem = SimulationRegistries.newInstance(
+                new SystemId(simulationSelection.id()), SimulationIO.args(simulationSelection));
         // 群系源换出：系统在这里算一次，按生成器实例登记，getter 之后一律返回它。此处取到的仍是字段里
         // 那份原源，因为登记表此刻还没有该生成器的条目。
         ChunkGenerator generator = level.getChunkSource().getGenerator();
@@ -101,6 +118,11 @@ public abstract class ServerLevelMixin implements LevelSystems, SystemsHolder {
     @Override
     public TerrainSystem terrainSystem() {
         return this.farlandsTerrainSystem;
+    }
+
+    @Override
+    public SimulationNoiseSystem simulationSystem() {
+        return this.farlandsSimulationSystem;
     }
 
     @Override

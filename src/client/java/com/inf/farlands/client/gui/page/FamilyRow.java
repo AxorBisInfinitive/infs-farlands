@@ -11,7 +11,6 @@ import com.inf.farlands.terrain.registry.FamilyKind;
 import com.inf.farlands.terrain.registry.SystemId;
 import com.inf.farlands.terrain.registry.SystemParams;
 import com.inf.farlands.terrain.registry.SystemSelectionParser;
-import com.inf.farlands.terrain.registry.SystemsIO;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.Font;
@@ -42,6 +41,7 @@ public final class FamilyRow {
     private final List<SystemId> ids;
     private final Function<SystemId, Class<?>> classOf;
     private final FamilySelectionStore store;
+    private final java.util.function.BiFunction<Identifier, FamilyKind, SystemId> fallback;
     private final ParamGroup group;
     private final StringWidget label;
     private final Component normalLabel;
@@ -52,13 +52,15 @@ public final class FamilyRow {
     private SystemId current;
 
     public FamilyRow(Identifier page, FamilyKind kind, List<SystemId> ids, Function<SystemId, Class<?>> classOf,
-            FamilySelectionStore store, DropdownSelect.Layer layer, DropdownSelect.Revealer revealer, int width,
+            FamilySelectionStore store, java.util.function.BiFunction<Identifier, FamilyKind, SystemId> fallback,
+            DropdownSelect.Layer layer, DropdownSelect.Revealer revealer, int width,
             Font font, Component title, Runnable onChanged, Runnable relayout) {
         this.page = page;
         this.kind = kind;
         this.ids = ids;
         this.classOf = classOf;
         this.store = store;
+        this.fallback = fallback;
         this.onChanged = onChanged;
         this.relayout = relayout;
         this.normalLabel = title;
@@ -67,7 +69,7 @@ public final class FamilyRow {
         this.group = new ParamGroup(width);
         this.group.setOnChanged(onChanged);
         SystemId saved = store.system(page, kind);
-        int index = Math.max(0, ids.indexOf(saved == null ? SystemsIO.defaultId(page, kind) : saved));
+        int index = Math.max(0, ids.indexOf(saved == null ? fallback.apply(page, kind) : saved));
         DropdownSelect dropdown = new DropdownSelect(layer, revealer, width, FIELD_HEIGHT, options(ids), index,
                 i -> {
                     SystemId chosen = ids.get(i);
@@ -96,7 +98,7 @@ public final class FamilyRow {
      */
     public void applySelection() {
         SystemId saved = this.store.system(this.page, this.kind);
-        this.applySelection(saved == null ? SystemsIO.defaultId(this.page, this.kind) : saved);
+        this.applySelection(saved == null ? this.fallback.apply(this.page, this.kind) : saved);
     }
 
     private void applySelection(SystemId id) {
@@ -114,7 +116,7 @@ public final class FamilyRow {
      */
     public boolean revalidate() {
         this.group.clearRuleMarks();
-        SystemId id = this.current == null ? SystemsIO.defaultId(this.page, this.kind) : this.current;
+        SystemId id = this.current == null ? this.fallback.apply(this.page, this.kind) : this.current;
         List<SystemParams.Violation> found = SystemSelectionParser.violations(this.classOf.apply(id),
                 this.group.currentTexts());
         for (SystemParams.Violation violation : found) {

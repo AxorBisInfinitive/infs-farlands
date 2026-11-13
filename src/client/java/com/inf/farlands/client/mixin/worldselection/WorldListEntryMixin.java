@@ -1,6 +1,6 @@
 package com.inf.farlands.client.mixin.worldselection;
 
-import com.inf.farlands.client.gui.SystemsCompat;
+import com.inf.farlands.client.gui.SelectionCompat;
 
 import net.minecraft.client.gui.screens.worldselection.WorldSelectionList;
 import net.minecraft.world.level.storage.LevelSummary;
@@ -27,6 +27,7 @@ public class WorldListEntryMixin {
 
     @Redirect(method = "extractContent(Lnet/minecraft/client/gui/GuiGraphicsExtractor;IIZF)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/storage/LevelSummary;isCompatible()Z"))
     private boolean farlands$iconIncompatible(LevelSummary summary) {
-        return summary.isCompatible() && !((SystemsCompat) summary).systemsIncompatible();
+        SelectionCompat compat = (SelectionCompat) summary;
+        return summary.isCompatible() && !compat.systemsIncompatible() && !compat.simulationIncompatible();
     }
 }

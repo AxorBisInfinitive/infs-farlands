@@ -11,7 +11,7 @@ import net.minecraft.server.level.ServerLevel;
 
 import com.inf.farlands.FarlandsConfig;
 import com.inf.farlands.InfsFarlands;
-import com.inf.farlands.simulation.serialize.SimulationIO;
+import com.inf.farlands.simulation.serialize.SimulationSectionIO;
 
 /**
  * 模拟段的生产池，线程名 {@code farlands-sim}。
@@ -70,7 +70,7 @@ public final class SimulationPool {
                             task.key().x(), task.key().y(), task.key().z(), t);
                 }
                 boolean success = produced;
-                SimulationIO.runOnMainThread(() -> {
+                SimulationSectionIO.runOnMainThread(() -> {
                     try {
                         if (onDoneMainThread != null) {
                             onDoneMainThread.accept(success);
@@ -104,7 +104,7 @@ public final class SimulationPool {
     public static void awaitIdle(MinecraftServer server, long timeoutMs) {
         long deadline = System.currentTimeMillis() + timeoutMs;
         while (System.currentTimeMillis() < deadline) {
-            SimulationIO.drainMainThreadTasks(server);
+            SimulationSectionIO.drainMainThreadTasks(server);
             if (!hasInflightWork()) {
                 return;
             }

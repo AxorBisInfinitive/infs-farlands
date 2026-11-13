@@ -62,13 +62,39 @@ public class FarlandsTab extends DimensionTab {
 
     @Override
     protected List<FamilyKind> families() {
-        return List.of(FamilyKind.BIOME, FamilyKind.TERRAIN, FamilyKind.SURFACE, FamilyKind.CARVER,
-                FamilyKind.DECORATION);
+        return CreatingWorldSystemsConfig.families();
     }
 
     @Override
     protected FamilySelectionStore store() {
         return STORE;
+    }
+
+    @Override
+    protected List<SystemId> ids(FamilyKind kind) {
+        return switch (kind) {
+            case BIOME -> com.inf.farlands.terrain.registry.SystemRegistries.biomeIds();
+            case TERRAIN -> com.inf.farlands.terrain.registry.SystemRegistries.terrainIds();
+            case SURFACE -> com.inf.farlands.terrain.registry.SystemRegistries.surfaceIds();
+            case CARVER -> com.inf.farlands.terrain.registry.SystemRegistries.carverIds();
+            case DECORATION -> com.inf.farlands.terrain.registry.SystemRegistries.decorationIds();
+        };
+    }
+
+    @Override
+    protected java.util.function.Function<SystemId, Class<?>> classOf(FamilyKind kind) {
+        return switch (kind) {
+            case BIOME -> com.inf.farlands.terrain.registry.SystemRegistries::biomeClassOf;
+            case TERRAIN -> com.inf.farlands.terrain.registry.SystemRegistries::terrainClassOf;
+            case SURFACE -> com.inf.farlands.terrain.registry.SystemRegistries::surfaceClassOf;
+            case CARVER -> com.inf.farlands.terrain.registry.SystemRegistries::carverClassOf;
+            case DECORATION -> com.inf.farlands.terrain.registry.SystemRegistries::decorationClassOf;
+        };
+    }
+
+    @Override
+    protected SystemId defaultId(Identifier page, FamilyKind kind) {
+        return com.inf.farlands.terrain.registry.SystemsIO.defaultId(page, kind);
     }
 
     @Override

@@ -16,8 +16,10 @@ import com.inf.farlands.terrain.decorationFiller.DecorationFiller;
 import com.inf.farlands.terrain.pipeline.GenQueue;
 import com.inf.farlands.terrain.pipeline.NeighborhoodTickets;
 import com.inf.farlands.simulation.SimulationLifecycle;
+import com.inf.farlands.simulation.SimulationLevels;
 import com.inf.farlands.simulation.SimulationServer;
 import com.inf.farlands.simulation.model.SimulationStore;
+import com.inf.farlands.simulation.serialize.SimulationIO;
 import com.inf.farlands.simulation.terrain.SimulationPool;
 import com.inf.farlands.terrain.pipeline.OwnershipTable;
 import com.inf.farlands.terrain.pipeline.Scheduler;
@@ -92,6 +94,8 @@ public abstract class MinecraftServerMixin {
         SimulationStore.clearAll();
         SimulationServer.clearWorldState();
         SimulationLifecycle.clearWorldState();
+        // 模拟层的选择档案按 server 解析一次，停服清掉；系统实例挂在 level 上，随 level 一起消失。
+        SimulationIO.clearWorldState();
         ChunkReadiness.clearAll();
         SectionStage.clearAll();
         EntitySectionWindow.clear();

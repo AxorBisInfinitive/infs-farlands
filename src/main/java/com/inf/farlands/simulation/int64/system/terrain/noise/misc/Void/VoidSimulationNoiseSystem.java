@@ -9,20 +9,30 @@ import com.inf.farlands.simulation.int64.noise.Random;
 import com.inf.farlands.simulation.int64.noise.Router;
 import com.inf.farlands.simulation.int64.noise.Settings;
 import com.inf.farlands.simulation.int64.noise.instance.Constant;
+import com.inf.farlands.terrain.registry.SystemArgs;
+import com.inf.farlands.terrain.registry.SystemDefaultParams;
+import com.inf.farlands.terrain.registry.SystemParams;
 
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
- * 模拟层的 VOID 系统，与 terrain 的 {@code VoidNoiseSystem} 同形：什么都不生成。
+ * 模拟层的 VOID 系统，与 farlands 的 {@code VoidNoiseSystem} 同形：什么都不生成。
  *
- * <p>四处口径照抄：{@code finalDensity} 恒 {@code -1.0}，含水层的液面查询恒空气，含水层恒 AIR，
- * {@code defaultBlock} 不覆写。第一处让密度恒负、第二处让流体分支落成空气、第三处让材质规则在第一步就短路。
+ * <p>
+ * 三处口径照抄：{@code finalDensity} 恒负、液面查询恒空气、含水层恒 AIR。第一处让密度恒负，第二处让流体分支
+ * 落成空气，第三处让材质规则在第一步就短路。
  *
- * <p>无参数：模拟层这一版用硬编码枚举选系统，不走 {@code SystemParams}，因此没有
- * {@code @SystemDefaultParams}，构造器也不收 {@code SystemArgs}。
+ * <p>
+ * 不吃参数，声明写 {@link SystemParams#EMPTY}：注册期要求每个实现类都有声明字段，没有声明不是一种状态。
  */
 public final class VoidSimulationNoiseSystem implements SimulationNoiseSystem {
+
+    @SystemDefaultParams
+    public static final SystemParams DEFAULT_PARAMS = SystemParams.EMPTY;
+
+    public VoidSimulationNoiseSystem(SystemArgs args) {
+    }
 
     @Override
     public Density createFinalDensity(Router router) {

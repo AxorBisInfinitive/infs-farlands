@@ -1,6 +1,8 @@
 package com.inf.farlands.client.mixin.integratedserver;
 
+import com.inf.farlands.client.gui.CreatingWorldSimulationConfig;
 import com.inf.farlands.client.gui.CreatingWorldSystemsConfig;
+import com.inf.farlands.simulation.serialize.SimulationIO;
 import com.inf.farlands.terrain.registry.SystemsIO;
 
 import net.minecraft.client.server.IntegratedServer;
@@ -50,6 +52,8 @@ public class IntegratedServerMixin {
         IntegratedServer self = (IntegratedServer) (Object) this;
         if (!self.getWorldData().overworldData().isInitialized()) {
             SystemsIO.stageForLevelCreation(CreatingWorldSystemsConfig.buildSystemsData());
+            // 模拟层的选择同样在 level 构造之前交给档案层：两份档案都必须在第一个 level 之前就位。
+            SimulationIO.stageForLevelCreation(CreatingWorldSimulationConfig.buildSimulationData());
         }
     }
 }

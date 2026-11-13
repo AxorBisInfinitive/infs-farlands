@@ -1,6 +1,6 @@
 package com.inf.farlands.simulation.int64.terrainFiller;
 
-import com.inf.farlands.simulation.SimulationSystem;
+import com.inf.farlands.simulation.SimulationLevels;
 import com.inf.farlands.simulation.int64.SimulationNoiseSystem;
 import com.inf.farlands.simulation.int64.noise.Aquifer;
 import com.inf.farlands.simulation.int64.noise.CellSampler;
@@ -34,8 +34,9 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
  * 先按 cell 网格算角点、再块内三线性插值；其余走 {@link Sampler} 的逐块求值。两条路径喂同一个
  * {@code SectionSink}，写入面完全相同。cell 路径要求 cell 边长整除一段，不成立时退回逐块。
  *
- * <p>系统从 {@link SimulationSystem} 现取，本类不认识当前是哪一个。terrain 那边从 {@code LevelSystems}
- * 取，这边从硬编码枚举取；将来系统按 level 分化时只改这一个取数点，接口不动。
+ * <p>系统按入参 {@code level} 取，本类不认识当前是哪一个。取数点只有一处，是
+ * {@code SimulationLevels.of(level)}：那边的实例由该维度的落盘选择反射新建，与 farlands 的
+ * {@code SystemsHolder} 同一职责。
  *
  * <p>跑在 {@code farlands-sim} 上，所以段写入只用五参 {@code setBlockState} 的 {@code false} 一档，不碰阶段、
  * 不碰段表、不标脏，那三件由 {@code SimulationLifecycle} 在主线程做。
@@ -58,7 +59,7 @@ public abstract class AbstractSimulationFiller implements SimulationFiller {
 
     @Override
     public void fill(ServerLevel level, SimulationSectionKey key, SimulationSectionData data) {
-        SimulationNoiseSystem system = SimulationSystem.SELECTED.system();
+        SimulationNoiseSystem system = ((SimulationLevels) level).simulationSystem();
         Settings settings = prototypeFor(system).withRange(key.y() * 16L, 16L);
         Router router = system.createRouter(BASE_ROUTER);
         Density density = router.finalDensity();

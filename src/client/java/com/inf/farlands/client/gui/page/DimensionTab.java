@@ -15,8 +15,6 @@ import com.inf.farlands.client.gui.demo.DropdownSelect;
 import com.inf.farlands.client.gui.viewport.ScrollViewport;
 import com.inf.farlands.terrain.registry.FamilyKind;
 import com.inf.farlands.terrain.registry.SystemId;
-import com.inf.farlands.terrain.registry.SystemRegistries;
-import com.inf.farlands.terrain.registry.SystemsIO;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -115,7 +113,8 @@ public abstract class DimensionTab implements Tab {
             Map<FamilyKind, FamilyRow> pageRows = new EnumMap<>(FamilyKind.class);
             this.rows.put(dimension, pageRows);
             for (FamilyKind kind : families) {
-                FamilyRow row = new FamilyRow(dimension, kind, ids(kind), classOf(kind), this.store(), layer,
+                FamilyRow row = new FamilyRow(dimension, kind, ids(kind), classOf(kind), this.store(),
+                        this::defaultId, layer,
                         bottom -> this.reveal(pageIndex, bottom), width, font, familyTitle(kind),
                         () -> this.onRowChanged(dimension, kind), this::relayout);
                 pageRows.put(kind, row);
@@ -321,27 +320,11 @@ public abstract class DimensionTab implements Tab {
 
     // ---- 与注册表同源的四张表 ----
 
-    /** 该族在注册表里的全部系统，顺序即登记顺序。 */
-    static List<SystemId> ids(FamilyKind kind) {
-        return switch (kind) {
-            case BIOME -> SystemRegistries.biomeIds();
-            case TERRAIN -> SystemRegistries.terrainIds();
-            case SURFACE -> SystemRegistries.surfaceIds();
-            case CARVER -> SystemRegistries.carverIds();
-            case DECORATION -> SystemRegistries.decorationIds();
-        };
-    }
+    /** 该族在本层注册表里的全部系统，顺序即登记顺序。构造期就会被调到，实现方此时不能访问自己的字段。 */
+    protected abstract List<SystemId> ids(FamilyKind kind);
 
-    /** 该族 id 到实现类的取法，供声明解析与校验。 */
-    static Function<SystemId, Class<?>> classOf(FamilyKind kind) {
-        return switch (kind) {
-            case BIOME -> SystemRegistries::biomeClassOf;
-            case TERRAIN -> SystemRegistries::terrainClassOf;
-            case SURFACE -> SystemRegistries::surfaceClassOf;
-            case CARVER -> SystemRegistries::carverClassOf;
-            case DECORATION -> SystemRegistries::decorationClassOf;
-        };
-    }
+    /** 该族 id 到实现类的取法，供声明解析与校验。约束同 {@link #ids}。 */
+    protected abstract Function<SystemId, Class<?>> classOf(FamilyKind kind);
 
     /** 族标题的键，与语言文件里那五条同名。 */
     static Component familyTitle(FamilyKind kind) {
@@ -389,7 +372,8 @@ public abstract class DimensionTab implements Tab {
     }
 
     /** 当前被选中的默认项判据，与落盘同源。供子类在需要时复用。 */
-    protected static SystemId defaultId(Identifier page, FamilyKind kind) {
-        return SystemsIO.defaultId(page, kind);
-    }
+    /**
+     * 该维度该族没选过时的默认项。由子类给：两层各有一套注册表与默认表，默认值也必须同源自家的那一套。
+     */
+    protected abstract SystemId defaultId(Identifier page, FamilyKind kind);
 }

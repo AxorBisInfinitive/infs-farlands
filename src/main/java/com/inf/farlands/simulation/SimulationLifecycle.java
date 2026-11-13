@@ -18,7 +18,7 @@ import com.inf.farlands.simulation.model.SimulationSectionData;
 import com.inf.farlands.simulation.model.SimulationSectionKey;
 import com.inf.farlands.simulation.model.SimulationSectionStage;
 import com.inf.farlands.simulation.model.SimulationStore;
-import com.inf.farlands.simulation.serialize.SimulationIO;
+import com.inf.farlands.simulation.serialize.SimulationSectionIO;
 import com.inf.farlands.simulation.serialize.SimulationSerializer;
 import com.inf.farlands.simulation.serialize.SimulationStorage;
 import com.inf.farlands.simulation.terrain.SimulationPool;
@@ -44,7 +44,7 @@ public final class SimulationLifecycle {
     /**
      * 唯一的填充器。逻辑全在 {@code AbstractSimulationFiller}，实例无状态。
      *
-     * <p>系统不在这里选：填充器按 {@code SimulationSystem.SELECTED} 现取，换系统只改枚举那一处。
+     * <p>系统不在这里选：填充器按入参 level 向 {@code SimulationLevels} 取实例，选择来自该维度的档案。
      */
     private static final SimulationFiller FILLER = new StandardSimulationFiller();
 
@@ -75,7 +75,7 @@ public final class SimulationLifecycle {
         }
         SimulationStorage.SlotRef ref;
         try {
-            ref = SimulationIO.slotAt(level, key.x(), key.y(), key.z());
+            ref = SimulationSectionIO.slotAt(level, key.x(), key.y(), key.z());
         } catch (RuntimeException e) {
             InfsFarlands.LOGGER.error("farlands: ssa slot lookup failed section={},{},{}", key.x(), key.y(),
                     key.z(), e);
@@ -88,17 +88,17 @@ public final class SimulationLifecycle {
             produce(level, key);
             return;
         }
-        Path path = SimulationIO.findPath(level, key.x(), key.y(), key.z());
+        Path path = SimulationSectionIO.findPath(level, key.x(), key.y(), key.z());
         if (path == null) {
             // 槽位查得到就说明映射里有这个区域，这里落空只可能是表在两次调用之间被换掉。
             LOADING.remove(pending);
             produce(level, key);
             return;
         }
-        List<SimulationIO.SlotKey> keys = List
-                .of(new SimulationIO.SlotKey(key.x(), key.y(), key.z(), ref));
+        List<SimulationSectionIO.SlotKey> keys = List
+                .of(new SimulationSectionIO.SlotKey(key.x(), key.y(), key.z(), ref));
         try {
-            SimulationIO.submitRead(level, path, keys, level.palettedContainerFactory(),
+            SimulationSectionIO.submitRead(level, path, keys, level.palettedContainerFactory(),
                     decoded -> finishRead(level, key, pending, decoded));
         } catch (RuntimeException e) {
             // 开文件失败按未命中处理，重跑生产者。代价是盘上那一份会被生成结果覆盖，
@@ -148,7 +148,7 @@ public final class SimulationLifecycle {
         ResourceKey<Level> dimension = level.dimension();
         Path path;
         try {
-            path = SimulationIO.pathForWrite(level, key.x(), key.y(), key.z());
+            path = SimulationSectionIO.pathForWrite(level, key.x(), key.y(), key.z());
         } catch (RuntimeException e) {
             InfsFarlands.LOGGER.error("farlands: ssa path failed section={},{},{}", key.x(), key.y(), key.z(), e);
             data.clearReleasing();
@@ -171,8 +171,8 @@ public final class SimulationLifecycle {
         SimulationStorage storage;
         SimulationStorage.PendingWrite pw;
         try {
-            storage = SimulationIO.getOrOpen(path);
-            pw = storage.prepareWrite(SimulationIO.slotIndex(key.x(), key.y(), key.z()), entry);
+            storage = SimulationSectionIO.getOrOpen(path);
+            pw = storage.prepareWrite(SimulationSectionIO.slotIndex(key.x(), key.y(), key.z()), entry);
         } catch (RuntimeException e) {
             InfsFarlands.LOGGER.error("farlands: ssa open failed {}", path, e);
             data.clearReleasing();
@@ -183,9 +183,9 @@ public final class SimulationLifecycle {
             return false;
         }
         try {
-            SimulationIO.submitWrite(level, path, List.of(pw), () -> {
+            SimulationSectionIO.submitWrite(level, path, List.of(pw), () -> {
                 try {
-                    SimulationIO.getOrOpen(path).commitWrite(pw);
+                    SimulationSectionIO.getOrOpen(path).commitWrite(pw);
                 } catch (RuntimeException e) {
                     // 提交失败同样只记一行：脏位没清，下一次周期性刷盘会把这整段重来一遍。
                     InfsFarlands.LOGGER.error("farlands: ssa commit failed {}", path, e);
@@ -221,7 +221,7 @@ public final class SimulationLifecycle {
                 persistSection(level, key, data);
             }
         }
-        SimulationIO.flushAllOffsetTables();
+        SimulationSectionIO.flushAllOffsetTables();
     }
 
     /**
@@ -232,7 +232,7 @@ public final class SimulationLifecycle {
      * 同步写不依赖异步回调，所以 commit 也就地做。
      */
     public static void shutdownSyncFlush(MinecraftServer server) {
-        SimulationIO.drainMainThreadTasks(server);
+        SimulationSectionIO.drainMainThreadTasks(server);
         for (ServerLevel level : server.getAllLevels()) {
             PalettedContainerFactory factory = level.palettedContainerFactory();
             ResourceKey<Level> dimension = level.dimension();
@@ -246,7 +246,7 @@ public final class SimulationLifecycle {
                 }
                 Path path;
                 try {
-                    path = SimulationIO.pathForWrite(level, key.x(), key.y(), key.z());
+                    path = SimulationSectionIO.pathForWrite(level, key.x(), key.y(), key.z());
                 } catch (RuntimeException e) {
                     InfsFarlands.LOGGER.error("farlands: ssa shutdown path failed section={},{},{}", key.x(),
                             key.y(), key.z(), e);
@@ -267,8 +267,8 @@ public final class SimulationLifecycle {
                 SimulationStorage storage;
                 SimulationStorage.PendingWrite pw;
                 try {
-                    storage = SimulationIO.getOrOpen(path);
-                    pw = storage.prepareWrite(SimulationIO.slotIndex(key.x(), key.y(), key.z()), entry);
+                    storage = SimulationSectionIO.getOrOpen(path);
+                    pw = storage.prepareWrite(SimulationSectionIO.slotIndex(key.x(), key.y(), key.z()), entry);
                 } catch (RuntimeException e) {
                     InfsFarlands.LOGGER.error("farlands: ssa shutdown open failed {}", path, e);
                     continue;
@@ -286,20 +286,20 @@ public final class SimulationLifecycle {
                 data.clearPersistDirty();
             }
         }
-        SimulationIO.flushAllSync();
-        SimulationIO.awaitIODrain();
-        SimulationIO.clearCache();
+        SimulationSectionIO.flushAllSync();
+        SimulationSectionIO.awaitIODrain();
+        SimulationSectionIO.clearCache();
     }
 
     /** 读回回调，主线程。盘上的段没到终态就不采用，按未命中处理，重跑生产者。 */
     private static void finishRead(ServerLevel level, SimulationSectionKey key, PendingKey pending,
-            List<SimulationIO.DecodedEntry> decoded) {
+            List<SimulationSectionIO.DecodedEntry> decoded) {
         LOADING.remove(pending);
         ResourceKey<Level> dimension = level.dimension();
         if (SimulationStore.contains(dimension, key)) {
             return;
         }
-        for (SimulationIO.DecodedEntry entry : decoded) {
+        for (SimulationSectionIO.DecodedEntry entry : decoded) {
             if (!SimulationSectionStage.isTerminal(entry.decoded().stage())) {
                 continue;
             }

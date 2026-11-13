@@ -36,7 +36,7 @@ import com.inf.farlands.InfsFarlands;
  * 表在 {@code <维度目录>/ssa/mapping.json}，一个维度一份，形状是
  * {@code {"mapping": {"<x>.<y>.<z>": "<16 位十六进制>"}}}。key 是区域坐标，不是段号：一个 ssa 文件覆盖
  * 32 乘 32 乘 32 个段，键的粒度必须与文件粒度一致。段号到区域号的换算收在
- * {@code SimulationIO.regionOf} 一处。
+ * {@code SimulationSectionIO.regionOf} 一处。
  *
  * <p>
  * 四条不变式：
@@ -99,7 +99,7 @@ public final class SimulationFileIndex {
 
     /** 该 level 所属维度的表，首次调用时读盘。主线程调用。 */
     public static SimulationFileIndex of(ServerLevel level) {
-        Path dir = SimulationIO.dimensionDir(level);
+        Path dir = SimulationSectionIO.dimensionDir(level);
         SimulationFileIndex index = INSTANCES.get(dir);
         if (index == null) {
             index = load(dir);

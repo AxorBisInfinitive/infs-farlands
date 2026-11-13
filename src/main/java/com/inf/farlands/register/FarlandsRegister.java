@@ -1,6 +1,9 @@
 package com.inf.farlands.register;
 
 import com.inf.farlands.InfsFarlands;
+import com.inf.farlands.simulation.int64.system.terrain.noise.misc.Void.VoidSimulationNoiseSystem;
+import com.inf.farlands.simulation.int64.system.terrain.noise.overworld.Cwg.CwgSimulationNoiseSystem;
+import com.inf.farlands.simulation.registry.SimulationRegistries;
 import com.inf.farlands.command.FarlandsCommandRegistry;
 import com.inf.farlands.compat.chunky.ChunkyPregen;
 import com.inf.farlands.register.command.FarLandsCommands;
@@ -85,6 +88,9 @@ public class FarlandsRegister {
 
     /** 40 个内置系统按五族登记，id 与实现类的对应关系集中在此。 */
     private static void registerSystems() {
+        // 模拟层两个内置系统。登记必须在世界加载之前：档案在 level 构造时才解析。
+        SimulationRegistries.register(SimulationRegistries.NOISE_VOID, VoidSimulationNoiseSystem.class);
+        SimulationRegistries.register(SimulationRegistries.NOISE_CWG, CwgSimulationNoiseSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_VOID_NOISE_SYSTEM, VoidNoiseSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_VOID_SECTION_SYSTEM,
                 VoidSectionSystem.class);

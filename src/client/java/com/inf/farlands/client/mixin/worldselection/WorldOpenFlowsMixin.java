@@ -2,6 +2,7 @@ package com.inf.farlands.client.mixin.worldselection;
 
 import java.nio.file.Path;
 
+import com.inf.farlands.client.gui.CreatingWorldSimulationConfig;
 import com.inf.farlands.client.gui.CreatingWorldSystemsConfig;
 import com.mojang.datafixers.util.Pair;
 
@@ -36,12 +37,15 @@ public class WorldOpenFlowsMixin {
     private void farlands$prefillFromWorld(LevelStorageAccess levelSourceAccess,
             CallbackInfoReturnable<Pair<LevelSettings, WorldCreationContext>> cir) {
         CreatingWorldSystemsConfig.reset();
+        CreatingWorldSimulationConfig.reset();
         try {
             Path root = levelSourceAccess.getLevelPath(LevelResource.ROOT);
             CreatingWorldSystemsConfig.prefillFrom(root);
+            CreatingWorldSimulationConfig.prefillFrom(root);
         } catch (RuntimeException e) {
             // 取世界根失败：留空映射，界面走默认，prefillFrom 的 toast 已覆盖读盘失败
             CreatingWorldSystemsConfig.reset();
+            CreatingWorldSimulationConfig.reset();
         }
     }
 }

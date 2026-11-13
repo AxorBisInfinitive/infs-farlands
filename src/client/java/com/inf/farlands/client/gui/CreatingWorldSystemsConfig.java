@@ -2,20 +2,16 @@ package com.inf.farlands.client.gui;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
+import com.inf.farlands.client.gui.page.FamilySelectionStore;
 import com.inf.farlands.terrain.registry.FamilyKind;
 import com.inf.farlands.terrain.registry.SystemId;
-import com.inf.farlands.terrain.registry.SystemParams;
-import com.inf.farlands.terrain.registry.SystemRegistries;
-import com.inf.farlands.terrain.registry.SystemSelectionParser;
 import com.inf.farlands.terrain.registry.SystemsData;
 import com.inf.farlands.terrain.registry.SystemsIO;
 
@@ -26,95 +22,107 @@ import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.resources.Identifier;
 
 /**
- * 创建世界页签下面全部可编辑状态的暂存处：每个维度页 × 五族各自选中的系统，以及该系统每个参数的文本。
+ * 创建世界页里 farlands 那一层的可编辑暂存：每个维度页五族的选择与参数文本。
  *
  * <p>
- * 放静态持有者而不是页签实例上，是因为页签在 CreateWorldScreen.init 里构造，界面重建会重建页签，
- * 实例字段存不住。
+ * 簿记在 {@link CreatingWorldSelections}，本类只提供这一层的族表、按族取实现类的办法、默认项与落盘结构。
+ * 两层各持一个容器实例，分层靠实例，不靠两份代码。
  *
  * <p>
- * 维度页的集合不写死：它由世界实际拥有的维度决定，在本类里存一份，界面建页与落盘编 SystemsData
- * 读的是同一份。两处若各取各的，界面上改了而落盘的维度集合不含它，或反过来，都会静默丢配置。
- *
- * <p>
- * 本类依赖 SystemToast 与 Minecraft，故留在 client 源集；维度键与族枚举在 main 源集。
- *
- * <p>
- * 两个入口预填的东西不同：新建与测试世界从空开始，界面走各族默认；重建已有世界按该世界的
- * systems.dat 预填，缺项与读取失败都退回默认，读取失败另弹一个 toast。
+ * 静态持有者而不是页签实例：页签在界面重建时会重建，实例字段存不住。
  */
 public final class CreatingWorldSystemsConfig {
 
-    /** 本世界实际拥有的维度，决定界面有几页。由页签构造时喂入。 */
-    private static volatile List<Identifier> dimensions = List.of();
+    /** 五族，界面从上到下的顺序。 */
+    private static final List<FamilyKind> FAMILIES = List.of(FamilyKind.BIOME, FamilyKind.TERRAIN,
+            FamilyKind.SURFACE, FamilyKind.CARVER, FamilyKind.DECORATION);
 
-    /** 维度 -> 族 -> 选中的系统。 */
-    private static final Map<Identifier, Map<FamilyKind, SystemId>> SYSTEMS = new ConcurrentHashMap<>();
+    /** 本层的暂存。 */
+    private static final CreatingWorldSelections STATE = new CreatingWorldSelections();
 
-    /** 维度 -> 族 -> 系统 -> 参数名 -> 文本。按系统分组，切换系统后原来填的文本仍留着。 */
-    private static final Map<Identifier, Map<FamilyKind, Map<SystemId, Map<String, String>>>> TEXT = new ConcurrentHashMap<>();
+    /** 页签用的单例。 */
+    public static final FamilySelectionStore STORE = STATE;
 
     private CreatingWorldSystemsConfig() {
     }
 
-    /**
-     * 登记这次创建流程要处理哪些维度。界面页列表与落盘内容都以它为准，所以由页签构造时统一喂一次。
-     */
     public static void setDimensions(List<Identifier> order) {
-        dimensions = List.copyOf(order);
+        STATE.setDimensions(order);
     }
 
-    /** 本次创建流程的维度，保序。 */
     public static List<Identifier> dimensions() {
-        return dimensions;
+        return STATE.dimensions();
     }
 
     /** 清空全部暂存。打开创建世界页、以及重建世界读盘前各调用一次。 */
     public static void reset() {
-        SYSTEMS.clear();
-        TEXT.clear();
+        STATE.reset();
     }
 
-    /** 该维度该族选中的系统，没选过返回 null。 */
     public static SystemId system(Identifier page, FamilyKind kind) {
-        return inner(SYSTEMS, page).get(kind);
+        return STATE.system(page, kind);
     }
 
     public static void select(Identifier page, FamilyKind kind, SystemId system) {
-        inner(SYSTEMS, page).put(kind, system);
+        STATE.select(page, kind, system);
     }
 
-    /** 该维度该族该系统的参数文本。没有条目时返回空视图，调用方不必判空。 */
     public static Map<String, String> text(Identifier page, FamilyKind kind, SystemId system) {
-        Map<SystemId, Map<String, String>> bySystem = innerText(page, kind);
-        Map<String, String> held = bySystem.get(system);
-        return held == null ? Map.of() : held;
+        return STATE.text(page, kind, system);
     }
 
-    /** 写一条参数文本。只在真的有编辑时调用，空框不落条目。 */
     public static void putText(Identifier page, FamilyKind kind, SystemId system, String key, String value) {
-        innerText(page, kind).computeIfAbsent(system, k -> new ConcurrentHashMap<>()).put(key, value);
+        STATE.putText(page, kind, system, key, value);
     }
 
-    private static <K, V> Map<K, V> inner(Map<Identifier, Map<K, V>> outer, Identifier page) {
-        return outer.computeIfAbsent(page, k -> new ConcurrentHashMap<>());
+    /** 本层五族，供界面按族建行。 */
+    public static List<FamilyKind> families() {
+        return FAMILIES;
     }
 
-    /** TEXT 比 SYSTEMS 多一层，单独写一个重载，免得泛型推断失败。 */
-    private static Map<SystemId, Map<String, String>> innerText(Identifier page, FamilyKind kind) {
-        return inner(TEXT, page).computeIfAbsent(kind, k -> new ConcurrentHashMap<>());
+    /** 当前界面的全部违规，跨全部维度页与五族。与 {@link #buildSystemsData} 用同一份判据。 */
+    public static List<CreatingWorldSelections.Violation> violations() {
+        return STATE.violationsAll(CreatingWorldSystemsConfig::classOf, FAMILIES, SystemsIO::defaultId);
     }
 
     /**
-     * 按已有世界的 systems.dat 预填。文件不存在或读取失败时，映射留空，界面退回默认；读取失败另弹
-     * 一个 toast。
+     * 把当前暂存编成一份 {@link SystemsData}，供新建世界落盘。
      *
-     * <p>
-     * 不做维度过滤：文件里有哪个维度就填哪个维度，界面按世界实际的维度取用。
-     *
-     * @param worldRoot 世界根目录，由 LevelStorageAccess.getLevelPath(LevelResource.ROOT)
-     *                  给出
+     * <p>文本非法时抛，由调用方中止创建，不在此处吞掉或退回默认。
      */
+    public static SystemsData buildSystemsData() {
+        List<CreatingWorldSelections.Violation> violations = violations();
+        if (!violations.isEmpty()) {
+            throw new IllegalStateException("farlands: invalid params at world creation: " + describe(violations));
+        }
+        Map<Identifier, SystemsData.LevelSelection> levels = new LinkedHashMap<>();
+        for (Identifier page : STATE.dimensions()) {
+            levels.put(page, new SystemsData.LevelSelection(
+                    select(page, FamilyKind.TERRAIN),
+                    select(page, FamilyKind.BIOME),
+                    select(page, FamilyKind.SURFACE),
+                    select(page, FamilyKind.CARVER),
+                    select(page, FamilyKind.DECORATION)));
+        }
+        return new SystemsData(levels);
+    }
+
+    private static SystemsData.SystemSelection select(Identifier page, FamilyKind kind) {
+        return STATE.selection(page, kind, classOf(kind), SystemsIO::defaultId);
+    }
+
+    /** 按族取实现类。界面按族重跑校验与编参数都用它。 */
+    public static Function<SystemId, Class<?>> classOf(FamilyKind kind) {
+        return switch (kind) {
+            case BIOME -> com.inf.farlands.terrain.registry.SystemRegistries::biomeClassOf;
+            case TERRAIN -> com.inf.farlands.terrain.registry.SystemRegistries::terrainClassOf;
+            case SURFACE -> com.inf.farlands.terrain.registry.SystemRegistries::surfaceClassOf;
+            case CARVER -> com.inf.farlands.terrain.registry.SystemRegistries::carverClassOf;
+            case DECORATION -> com.inf.farlands.terrain.registry.SystemRegistries::decorationClassOf;
+        };
+    }
+
+    /** 按已有世界的 systems.dat 预填。读不出来时映射留空、界面退回默认，另弹 toast。 */
     public static void prefillFrom(Path worldRoot) {
         Path file = SystemsIO.file(worldRoot);
         try {
@@ -122,78 +130,33 @@ public final class CreatingWorldSystemsConfig {
                 apply(SystemsIO.read(file));
             }
         } catch (RuntimeException e) {
-            toastReadFailure(e);
+            Minecraft minecraft = Minecraft.getInstance();
+            SystemToast.add(minecraft.getToastManager(), SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
+                    Component.translatable("createWorld.tab.infs-farlands.error.read.title"),
+                    Component.translatable("createWorld.tab.infs-farlands.error.read.message",
+                            String.valueOf(e.getMessage())));
         }
     }
 
-    /**
-     * 把当前全部维度页的选择与参数文本编成一份 {@link SystemsData}，供新建世界落盘。
-     *
-     * <p>
-     * 五个族的注册表取类与参数文本的键都在这里收口，{@link SystemSelectionParser} 只做文本到
-     * {@code Arg} 的还原。选中的系统不在该族注册表里时 {@code classOf} 抛。
-     *
-     * <p>
-     * 文本非法的解析失败直穿给调用方，由它决定中止创建，不在此处吞掉或退回默认。
-     */
-    public static SystemsData buildSystemsData() {
-        List<FamilyViolation> violations = violations();
-        if (!violations.isEmpty()) {
-            throw new IllegalStateException(
-                    "farlands: invalid params at world creation: " + describe(violations));
+    private static void apply(SystemsData data) {
+        for (Map.Entry<Identifier, SystemsData.LevelSelection> entry : data.levels().entrySet()) {
+            put(entry.getKey(), FamilyKind.TERRAIN, entry.getValue().terrain());
+            put(entry.getKey(), FamilyKind.BIOME, entry.getValue().biome());
+            put(entry.getKey(), FamilyKind.SURFACE, entry.getValue().surface());
+            put(entry.getKey(), FamilyKind.CARVER, entry.getValue().carver());
+            put(entry.getKey(), FamilyKind.DECORATION, entry.getValue().decoration());
         }
-        Map<Identifier, SystemsData.LevelSelection> levels = new LinkedHashMap<>();
-        for (Identifier page : dimensions) {
-            levels.put(page, levelSelection(page));
-        }
-        return new SystemsData(levels);
     }
 
-    /** 一条违规所属的维度页与族。界面靠它定位到该标红的参数组。 */
-    public record FamilyViolation(Identifier dimension, FamilyKind family, SystemId system, Set<String> keys,
-            Component message) {
+    /** 一侧的预填：还原在 SystemsIO，与选择世界页的兼容性判据共用同一段，两处不会漂移。 */
+    private static void put(Identifier page, FamilyKind kind, SystemsData.SystemSelection selection) {
+        STATE.put(page, kind, new SystemId(selection.id()), SystemsIO.texts(kind, selection));
     }
 
-    /**
-     * 当前界面的全部违规，跨全部维度页与五族。
-     *
-     * <p>
-     * 与 {@link #buildSystemsData} 用同一份判据：后者先跑本方法，非空即抛。所以提交前那一次检验与真正
-     * 落盘那一次不会分叉，界面也拿得到结构化的结果去标红。
-     */
-    public static List<FamilyViolation> violations() {
-        List<FamilyViolation> out = new ArrayList<>();
-        for (Identifier page : dimensions) {
-            for (FamilyKind kind : FamilyKind.values()) {
-                SystemId id = system(page, kind);
-                if (id == null) {
-                    id = SystemsIO.defaultId(page, kind);
-                }
-                List<SystemParams.Violation> found;
-                try {
-                    found = SystemSelectionParser.violations(classOf(kind, id), text(page, kind, id));
-                } catch (RuntimeException e) {
-                    out.add(new FamilyViolation(page, kind, id, Set.of(), SystemSelectionParser.problem(e)));
-                    continue;
-                }
-                for (SystemParams.Violation violation : found) {
-                    out.add(new FamilyViolation(page, kind, id, violation.keys(), violation.message()));
-                }
-            }
-        }
-        return out;
-    }
-
-    /**
-     * 违规的定位串：维度 / 族 / 系统，接键名与理由标识。
-     *
-     * <p>
-     * 键名按 TreeSet 排序去重，同一份配置每次产出同一行。理由只取语言键、不取渲染文本：这条消息落在崩溃报告
-     * 与服务端日志里，不该带客户端语言。
-     */
-    private static String describe(List<FamilyViolation> violations) {
+    /** 违规的定位串：键名排序去重，理由只取语言键，日志里可 grep 且不随客户端语言变。 */
+    private static String describe(List<CreatingWorldSelections.Violation> violations) {
         StringBuilder sb = new StringBuilder();
-        for (FamilyViolation violation : violations) {
+        for (CreatingWorldSelections.Violation violation : violations) {
             if (sb.length() > 0) {
                 sb.append("; ");
             }
@@ -206,79 +169,8 @@ public final class CreatingWorldSystemsConfig {
         return sb.toString();
     }
 
-    /** 理由标识：translatable 取语言键名，其余取渲染文本。内置系统的检查与规则一律用 translatable。 */
     private static String reasonOf(Component message) {
         return message.getContents() instanceof TranslatableContents translatable ? translatable.getKey()
                 : message.getString();
-    }
-
-    /**
-     * 一页的选择。五族的默认都按维度分派：原版三个维度各取各的 vanilla，其余维度退 VOID。
-     *
-     * <p>判据取自 {@link SystemsIO#defaultId}，与 {@code SystemsIO.defaultFor} 同源。新世界的维度集合
-     * 来自界面暂存，那条路在新世界走不到，所以这份默认就是新世界实际拿到的默认；两处若各写一份判据，
-     * 默认就会分叉。
-     */
-    private static SystemsData.LevelSelection levelSelection(Identifier page) {
-        return new SystemsData.LevelSelection(
-                family(page, FamilyKind.TERRAIN, SystemRegistries::terrainClassOf,
-                        SystemsIO.defaultId(page, FamilyKind.TERRAIN)),
-                family(page, FamilyKind.BIOME, SystemRegistries::biomeClassOf,
-                        SystemsIO.defaultId(page, FamilyKind.BIOME)),
-                family(page, FamilyKind.SURFACE, SystemRegistries::surfaceClassOf,
-                        SystemsIO.defaultId(page, FamilyKind.SURFACE)),
-                family(page, FamilyKind.CARVER, SystemRegistries::carverClassOf,
-                        SystemsIO.defaultId(page, FamilyKind.CARVER)),
-                family(page, FamilyKind.DECORATION, SystemRegistries::decorationClassOf,
-                        SystemsIO.defaultId(page, FamilyKind.DECORATION)));
-    }
-
-    /** 一族的选择。没选过时用该族的 VOID，与界面的初始选中同一份常量。 */
-    private static SystemsData.SystemSelection family(Identifier page, FamilyKind kind,
-            Function<SystemId, Class<?>> classOf, SystemId fallback) {
-        SystemId id = system(page, kind);
-        if (id == null) {
-            id = fallback;
-        }
-        return SystemSelectionParser.parse(id, text(page, kind, id), classOf.apply(id));
-    }
-
-    private static void apply(SystemsData data) {
-        for (Map.Entry<Identifier, SystemsData.LevelSelection> level : data.levels().entrySet()) {
-            applyLevel(level.getKey(), level.getValue());
-        }
-    }
-
-    private static void applyLevel(Identifier page, SystemsData.LevelSelection selection) {
-        applySystem(page, FamilyKind.TERRAIN, selection.terrain());
-        applySystem(page, FamilyKind.BIOME, selection.biome());
-        applySystem(page, FamilyKind.SURFACE, selection.surface());
-        applySystem(page, FamilyKind.CARVER, selection.carver());
-        applySystem(page, FamilyKind.DECORATION, selection.decoration());
-    }
-
-    /**
-     * 把一个族的选择预填进界面：有参数声明的按声明键逐个写文本形态，没有声明的把整张参数复合写进
-     * 自由框那个键。两侧各自与解析端同一形态，重建世界时才能原样读回。
-     */
-    private static void applySystem(Identifier page, FamilyKind kind, SystemsData.SystemSelection selection) {
-        SystemId id = new SystemId(selection.id());
-        select(page, kind, id);
-        // 还原在 SystemsIO，与选择世界页的兼容性判据共用同一段，两处不会漂移。
-        SystemsIO.texts(kind, selection).forEach((key, value) -> putText(page, kind, id, key, value));
-    }
-
-    /** 按族取实现类，供预填判断该系统有没有参数声明，也供界面按族重跑校验。 */
-    public static Class<?> classOf(FamilyKind kind, SystemId id) {
-        return SystemsIO.classOf(kind, id);
-    }
-
-    /** 读取失败弹一段中英可译的提示，正文带异常消息便于定位。 */
-    private static void toastReadFailure(RuntimeException e) {
-        Minecraft minecraft = Minecraft.getInstance();
-        SystemToast.add(minecraft.getToastManager(), SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
-                Component.translatable("createWorld.tab.infs-farlands.error.read.title"),
-                Component.translatable("createWorld.tab.infs-farlands.error.read.message",
-                        String.valueOf(e.getMessage())));
     }
 }

@@ -20,7 +20,7 @@ public final class SystemRegistry<T> {
     private final Class<T> familyType;
     private final Map<SystemId, Class<? extends T>> entries = new LinkedHashMap<>();
 
-    SystemRegistry(Class<T> familyType) {
+    public SystemRegistry(Class<T> familyType) {
         this.familyType = familyType;
     }
 

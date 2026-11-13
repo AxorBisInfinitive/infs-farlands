@@ -1,14 +1,11 @@
 package com.inf.farlands.terrain.registry;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.WeakHashMap;
 import java.util.function.Function;
 
 import com.inf.farlands.terrain.BiomeSystem;
@@ -21,11 +18,6 @@ import com.inf.farlands.terrain.registry.SystemsData.LevelSelection;
 import com.inf.farlands.terrain.registry.SystemsData.SystemSelection;
 
 import net.minecraft.core.registries.Registries;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtAccounter;
-import net.minecraft.nbt.NbtIo;
-import net.minecraft.nbt.NbtOps;
-import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.resources.Identifier;
@@ -39,49 +31,39 @@ import net.minecraft.world.level.storage.LevelResource;
  * 系统配置的读写与落地。
  *
  * <p>
- * 读自己来，不走 SavedDataStorage：它的读路径把解析失败记成日志后返回 null，上层
- * computeIfAbsent 随即新建默认对象，损坏的配置因此不会失败，而这条路要的是一律抛出。
+ * 读盘骨架在 {@link SelectionFile}：严格自读、已初始化却缺档即抛、缺档取暂存再取默认、按 server 解析一次。
+ * 本类只提供 farlands 这一层的编码、默认表与「还原成界面文本」那一层校验。
  *
  * <p>
- * 写借 SavedDataStorage：set 只标脏进缓存，由 MinecraftServer.saveAllChunks 按既有的保存节奏
- * 落盘，编码用同一份 Codec，两端格式不会走偏。配置文件在磁盘上不存在而世界又已初始化时即抛；
- * 只有新世界的首次解析才写默认值。
+ * 写借 {@code DataStorage}：{@code set} 只标脏进缓存，由既有的保存节奏落盘，编码用同一份 {@code Codec}。
  */
 public final class SystemsIO {
+
+    private static final SelectionFile<SystemsData> FILE =
+            new SelectionFile<>(SystemsData.TYPE, SystemsData.CODEC);
 
     private SystemsIO() {
     }
 
-    /** 配置文件路径，与 SavedDataStorage 的取法同式。 */
+    /** 配置文件路径，与 {@code SavedDataStorage} 的取法同式。 */
     public static Path file(MinecraftServer server) {
-        return file(server.getWorldPath(LevelResource.ROOT));
+        return FILE.file(server);
     }
 
     /** 某个世界根目录下的配置文件路径。启动期与选择世界页因此共用同一份算式。 */
     public static Path file(Path worldRoot) {
-        return SystemsData.ID.withSuffix(".dat")
-                .resolveAgainst(worldRoot.resolve(LevelResource.DATA.id()));
+        return FILE.file(worldRoot);
     }
 
     /**
      * 该世界根目录下的配置能不能用。
      *
-     * <p>文件在时判两层，两层都过才算兼容。第一层是 {@link #read}：NBT 读不出、缺 {@code data} 键、
-     * codec 解不开。第二层是 {@link #texts}：文件读得出不代表能用，{@code Arg} 的值经
-     * {@code Codec.PASSTHROUGH} 原样带过，声明类型与标签类型不符要等到还原文本时才暴露，未注册的
-     * 系统 id 要等到取类时才暴露。第二层与界面预填共用 {@link #texts} 这一段代码，所以「列表说能
-     * 打开、预填时才炸」不会出现。
-     *
-     * <p>文件不在时要看世界是否已初始化：{@link #resolve} 对「已初始化却没有配置」的世界直接抛，
-     * 那种世界进了列表也打不开，所以这里判成不兼容。未初始化的世界按暂存或默认选择走，判成兼容。
+     * <p>两层：{@link #read} 与 {@link #texts}。文件读得出不代表能用：{@code Arg} 的值经
+     * {@code Codec.PASSTHROUGH} 原样带过，声明类型与标签类型不符要等到还原文本时才暴露，未注册的系统 id 要
+     * 等到取类时才暴露。第二层与界面预填共用 {@link #texts}，所以「列表说能打开、预填时才炸」不会出现。
      */
     public static boolean compatible(Path worldRoot) {
-        Path file = file(worldRoot);
-        if (!Files.exists(file)) {
-            return !initialized(worldRoot);
-        }
-        try {
-            SystemsData data = read(file);
+        return FILE.compatible(worldRoot, data -> {
             for (LevelSelection selection : data.levels().values()) {
                 texts(FamilyKind.TERRAIN, selection.terrain());
                 texts(FamilyKind.BIOME, selection.biome());
@@ -89,32 +71,7 @@ public final class SystemsIO {
                 texts(FamilyKind.CARVER, selection.carver());
                 texts(FamilyKind.DECORATION, selection.decoration());
             }
-            return true;
-        } catch (RuntimeException e) {
-            return false;
-        }
-    }
-
-    /**
-     * 该世界根目录下 {@code level.dat} 的 initialized 标志，缺键默认真。
-     *
-     * <p>与 {@code PrimaryLevelData.parse} 的 {@code input.get("initialized").asBoolean(true)} 同式，
-     * 与 {@link #resolve} 读的 {@code overworldData().isInitialized()} 也是同一份数据：那个标志在
-     * 第一个 {@code ServerLevel} 构造之后才置真，所以新建世界在 resolve 时读到假、已有世界读到真。
-     *
-     * <p>只在缺 {@link #file(Path)} 时才读，有配置的世界不付这次解析。配额用
-     * {@link NbtAccounter#unlimitedHeap()}，与 {@code SavedDataStorage} 读同一个文件时一致。
-     *
-     * <p>读不出来按已初始化处理：那种世界的摘要本身解不出来，已经不可用，偏保守的方向不会误放行。
-     */
-    private static boolean initialized(Path worldRoot) {
-        try {
-            CompoundTag root = NbtIo.readCompressed(
-                    worldRoot.resolve(LevelResource.LEVEL_DATA_FILE.id()), NbtAccounter.unlimitedHeap());
-            return root.getCompoundOrEmpty("Data").getBooleanOr("initialized", true);
-        } catch (Exception e) {
-            return true;
-        }
+        });
     }
 
     /**
@@ -122,8 +79,7 @@ public final class SystemsIO {
      *
      * <p>逐项按声明类型还原，文件里缺的项不出现。界面预填与兼容性判据共用本方法，两处不会漂移。
      *
-     * <p>失败一律抛：未注册的系统 id、声明类型与标签类型不符都在这里暴露，由调用方决定是中止还是
-     * 判成不兼容。
+     * <p>失败一律抛：未注册的系统 id、声明类型与标签类型不符都在这里暴露，由调用方决定是中止还是判成不兼容。
      */
     public static Map<String, String> texts(FamilyKind kind, SystemSelection selection) {
         SystemId id = new SystemId(selection.id());
@@ -149,88 +105,30 @@ public final class SystemsIO {
         };
     }
 
-    /**
-     * 创建世界页签的选择在 level 构造之前的暂存。客户端在服务端线程启动之前放进来，本类在文件
-     * 不存在且世界尚未初始化的那条分支里取用一次即清空，所以既成世界与专服都碰不到它。
-     *
-     * <p>只在「这次 level 构造」的生命周期内有效，不进磁盘、不做回退。取用时落盘仍由
-     * {@link net.minecraft.world.level.storage.SavedDataStorage} 负责，本类不写文件。
-     */
-    private static volatile SystemsData staged;
-
-    /** level 构造前把界面选择交给本类。由集成服务器在 createLevels 之前调用。 */
+    /** 创建世界页签的选择在 level 构造之前的暂存。 */
     public static void stageForLevelCreation(SystemsData data) {
-        staged = data;
+        FILE.stageForLevelCreation(data);
     }
-
-    private static SystemsData takeStaged() {
-        SystemsData data = staged;
-        staged = null;
-        return data;
-    }
-
-    /**
-     * 该 server 的系统配置，每个 server 实例解析一次。该 server 的第一个构造的 level 走到这里时
-     * {@code resolve} 尚未跑过，解析并记下；其余维度构造时直接命中。
-     *
-     * <p>用 server 实例做键而不是「主世界是否已构造」，后者依赖 level 的构造顺序，且在世界没有原版
-     * 主世界时判不出来。WeakHashMap 是零成本的兜底：server 正常关闭时本就该丢弃。
-     */
-    private static final Map<MinecraftServer, SystemsData> RESOLVED =
-            Collections.synchronizedMap(new WeakHashMap<>());
 
     public static SystemsData systemsFor(MinecraftServer server) {
-        synchronized (RESOLVED) {
-            SystemsData data = RESOLVED.get(server);
-            if (data == null) {
-                data = resolve(server);
-                RESOLVED.put(server, data);
-            }
-            return data;
-        }
+        return FILE.systemsFor(server, SystemsIO::defaultFor);
     }
 
     /** 解析该世界的配置：文件在则严格自读，不在则按新世界落默认并写回，其余情形抛。 */
     public static SystemsData resolve(MinecraftServer server) {
-        Path file = file(server);
-        if (Files.exists(file)) {
-            return read(file);
-        }
-        if (server.getWorldData().overworldData().isInitialized()) {
-            throw new IllegalStateException("farlands: existing world has no systems config file " + file);
-        }
-        SystemsData data = takeStaged();
-        if (data == null) {
-            data = defaultFor(server);
-        }
-        server.getDataStorage().set(SystemsData.TYPE, data);
-        return data;
+        return FILE.systemsFor(server, SystemsIO::defaultFor);
     }
 
     /** 严格自读。任何异常都带上文件路径直穿，不做回退也不新建默认。 */
     public static SystemsData read(Path file) {
-        CompoundTag root;
-        try {
-            root = NbtIo.readCompressed(file, NbtAccounter.defaultQuota());
-        } catch (Exception e) {
-            throw new IllegalStateException("farlands: failed to read systems config " + file, e);
-        }
-        Tag data = root.get("data");
-        if (data == null) {
-            throw new IllegalStateException("farlands: systems config has no data tag " + file);
-        }
-        try {
-            return SystemsData.CODEC.parse(NbtOps.INSTANCE, data).getOrThrow(IllegalStateException::new);
-        } catch (RuntimeException e) {
-            throw new IllegalStateException("farlands: failed to parse systems config " + file, e);
-        }
+        return FILE.read(file);
     }
 
     /**
      * 该维度的选择。缺失时补该族 VOID 并照常返回，不抛。
      *
-     * <p>缺失是正常情形而非错误：世界维度由数据包与模组决定，配置文件写在某个时刻，之后维度集合
-     * 可能变。按既定语义，非原版维度的默认选择是 VOID，所以缺失等价于「没为它配过」，补上即可。
+     * <p>缺失是正常情形而非错误：世界维度由数据包与模组决定，配置文件写在某个时刻，之后维度集合可能变。
+     * 按既定语义，非原版维度的默认选择是 VOID，所以缺失等价于「没为它配过」，补上即可。
      */
     public static LevelSelection selection(SystemsData data, Identifier dimension) {
         LevelSelection selection = data.selection(dimension);
@@ -239,8 +137,7 @@ public final class SystemsIO {
 
     /**
      * 内置默认。原版三个维度各取各的 vanilla 五族，其余维度取 {@link #voidSelection()}。
-     * 维度取注册表里的全部 LevelStem，新世界因此不会因为数据包加了维度而缺条目。只在该世界还没有
-     * 配置文件时生效，已有配置文件的世界一律以文件为准。
+     * 维度取注册表里的全部 LevelStem，新世界因此不会因为数据包加了维度而缺条目。
      */
     public static SystemsData defaultFor(MinecraftServer server) {
         Map<Identifier, LevelSelection> levels = new LinkedHashMap<>();
@@ -255,8 +152,8 @@ public final class SystemsIO {
     /**
      * 该维度的默认五族选择：原版三个维度各取各的 vanilla，其余维度五族全 VOID。
      *
-     * <p>判据只有这一处。新世界的维度集合来自界面暂存，{@link #defaultFor} 那条路在新世界走不到，
-     * 所以界面建页与落盘默认都经 {@link #defaultId} 取同一份判据，两处各写一份会分叉。
+     * <p>判据只有这一处。新世界的维度集合来自界面暂存，{@link #defaultFor} 那条路在新世界走不到，所以界面
+     * 建页与落盘默认都经 {@link #defaultId} 取同一份判据，两处各写一份会分叉。
      */
     public static LevelSelection defaultSelection(Identifier dimension) {
         VanillaDefaults defaults = vanillaDefaultsOf(dimension);
@@ -384,9 +281,8 @@ public final class SystemsIO {
     /**
      * 造参数视图，先跑该系统的声明级校验。
      *
-     * <p>
-     * 手改过的 systems.dat 可能违反某条跨字段规则，而那些判据原先只写在构造器里，症状是世界加载期一份
-     * 栈顶在反射上的崩溃。这里拦下之后消息能指到参数，用的还是创建世界页签那一份声明。
+     * <p>手改过的 systems.dat 可能违反跨字段规则，而那些判据原先只写在构造器里，症状是世界加载期一份栈顶在
+     * 反射上的崩溃。这里拦下之后消息能指到参数，用的还是创建世界页签那一份声明。
      */
     private static SystemArgs args(SystemSelection selection, Function<SystemId, Class<?>> classOf) {
         SystemId id = systemId(selection);
@@ -402,8 +298,7 @@ public final class SystemsIO {
     /**
      * 违规的定位串：键名加理由标识。
      *
-     * <p>
-     * 键名按 TreeSet 排序去重，同一份配置每次产出同一行，日志可 grep。理由只取语言键，不取
+     * <p>键名按 TreeSet 排序去重，同一份配置每次产出同一行，日志可 grep。理由只取语言键，不取
      * {@code getArgs()}：参数里可能有 {@code Component}，渲染它们等于把客户端语言拉回服务端消息。
      */
     private static String describe(List<SystemParams.Violation> violations) {
@@ -422,8 +317,7 @@ public final class SystemsIO {
     /**
      * 理由标识：translatable 取语言键名，其余取渲染文本。
      *
-     * <p>
-     * 本模组内置的检查与规则一律用 translatable，因此本条产出的消息恒为 ASCII；第三方用 literal 时原样带入
+     * <p>本模组内置的检查与规则一律用 translatable，因此本条产出的消息恒为 ASCII；第三方用 literal 时原样带入
      * 它自己的文本。
      */
     private static String reasonOf(Component message) {
