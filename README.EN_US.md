@@ -18,6 +18,10 @@
 > - Process freeze
 > - Data corruption
 
+> [!IMPORTANT]
+>
+> If you find a bug or would like to make a suggestion, please create an Issue and a Pull Request.
+
 ## Features
 
 - Changes `Vanilla`'s X/Y/Z axis limits to [-2147483648, 2147483647].
@@ -42,6 +46,4 @@ The simulation architecture supports regions outside `int32` but within `int64`.
 
 </details>
 
-> [!IMPORTANT]
->
-> If you find a bug or would like to make a suggestion, please create an Issue and a Pull Request.
+**As a dependency**: `https://axorbisinfinitive.github.io/infs-farlands/maven/`

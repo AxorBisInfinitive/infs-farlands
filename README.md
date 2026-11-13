@@ -18,6 +18,10 @@
 > - 进程冻结
 > - 数据损坏
 
+> [!IMPORTANT]
+>
+> 如果您发现了漏洞，或想提出建议，请创建 Issue 和 Pull Request。
+
 ## 特性
 
 - 将 `Vanilla` 的 X/Y/Z 轴界限改为 [-2147483648, 2147483647]。
@@ -42,6 +46,4 @@
 
 </details>
 
-> [!IMPORTANT]
->
-> 如果您发现了漏洞，或想提出建议，请创建 Issue 和 Pull Request。
+**作为依赖**：`https://axorbisinfinitive.github.io/infs-farlands/maven/`
