@@ -83,6 +83,7 @@ public class FarlandsRegister {
             SectionBlocksUpdatePacketRegister.registerType();
             SystemsPacketRegister.registerType();
             SimulationSectionPacketRegister.registerType();
+            SimulationSystemsPacketRegister.registerType();
         }
     }
 

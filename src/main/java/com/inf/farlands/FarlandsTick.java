@@ -16,6 +16,7 @@ import com.inf.farlands.util.maps.AquiferUtil;
 import com.inf.farlands.util.maps.BlockUtil;
 import com.inf.farlands.util.maps.SectionUtil;
 import com.inf.farlands.util.network.ChunkDataSender;
+import com.inf.farlands.util.network.SimulationSystemsSender;
 import com.inf.farlands.util.network.SystemsSender;
 import com.inf.farlands.util.window.EntitySectionWindow;
 import com.inf.farlands.util.window.PlayerTable;
@@ -242,6 +243,8 @@ public class FarlandsTick {
         }
         // 世界系统选择下发：玩家进服或换维度后补一次，客户端据此显示当前 level 用哪五族系统。
         SystemsSender.tick(server);
+        // 模拟层的选择同理，只有一族，走自己那条下发。
+        SimulationSystemsSender.tick(server);
         // 周期持久化：窗口内脏 section 写盘；偏移表与数据同节奏落盘，否则运行中磁盘偏移表
         // 陈旧，重进时 getSlot 错位丢 section。崩溃与强退兜底。
         //

@@ -26,6 +26,7 @@ import com.inf.farlands.terrain.pipeline.Scheduler;
 import com.inf.farlands.terrain.pipeline.SpawnPreload;
 import com.inf.farlands.terrain.structure.StructureDriver;
 import com.inf.farlands.util.network.ChunkDataSender;
+import com.inf.farlands.util.network.SimulationSystemsSender;
 import com.inf.farlands.util.network.SystemsSender;
 import com.inf.farlands.util.window.EntitySectionWindow;
 import com.inf.farlands.util.window.PlayerTable;
@@ -91,6 +92,7 @@ public abstract class MinecraftServerMixin {
         SpawnPreload.clearAll();
         NeighborhoodTickets.clearWorldState();
         SystemsSender.clearWorldState();
+        SimulationSystemsSender.clearWorldState();
         SimulationStore.clearAll();
         SimulationServer.clearWorldState();
         SimulationLifecycle.clearWorldState();
