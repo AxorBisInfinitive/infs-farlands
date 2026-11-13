@@ -10,15 +10,9 @@
 
 [中文](README.md) / [Wiki](docs/wiki.EN_US/wiki.md)
 
-> [!WARNING]
->
-> This mod is experimental. Some bugs may cause the following:
->
-> - Game crash
-> - Process freeze
-> - Data corruption
-
 > [!IMPORTANT]
+>
+> This mod is experimental.
 >
 > If you find a bug or would like to make a suggestion, please create an Issue and a Pull Request.
 

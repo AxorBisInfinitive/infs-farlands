@@ -10,15 +10,9 @@
 
 [English](README.EN_US.md) / [Wiki](docs/wiki/wiki.md)
 
-> [!WARNING]
->
-> 本模组是实验性的。某些漏洞可能造成如下影响：
->
-> - 游戏崩溃
-> - 进程冻结
-> - 数据损坏
-
 > [!IMPORTANT]
+>
+> 本模组是实验性的。
 >
 > 如果您发现了漏洞，或想提出建议，请创建 Issue 和 Pull Request。
 
