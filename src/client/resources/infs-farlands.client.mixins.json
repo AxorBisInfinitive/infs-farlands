@@ -6,6 +6,7 @@
     "debug.DebugEntryChunkGenerationMixin",
     "debug.DebugEntryPositionMixin",
     "debug.DebugScreenEntriesMixin",
+    "debug.DebugScreenOverlayMixin",
     "debug.renderer.ChunkBorderRendererMixin",
     "debug.tool.clamp.EntityPickMixin",
     "debug.tool.clamp.KeyboardHandlerMixin",

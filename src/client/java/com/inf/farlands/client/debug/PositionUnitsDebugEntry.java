@@ -41,6 +41,11 @@ import net.minecraft.world.level.chunk.LevelChunk;
  * {@code long} 而 {@code 2^63} 不能，取到哪一个决定 {@code Int64} 那一格写不写 {@code Not overflowed}。
  *
  * <p>
+ * 三个 ULP 与三个整数状态按档着色，未知一色，六个标签与坐标行不着色。ULP 恒为正且恒为 2 的幂，所以与 1 的
+ * 三态比较就是准确的分档，不需要容差。着色经 {@link DebugEntryColors} 的段标记，由
+ * {@link com.inf.farlands.client.mixin.debug.DebugScreenOverlayMixin} 在绘制前拆开。
+ *
+ * <p>
  * 三行按三个槽位实例的同一性缓存：槽位在位置写入时整体替换，三个引用不变就复用上次的结果。不按坐标值比较，
  * 因为 {@code NaN != NaN} 会让缓存永远失效。槽位尚未写过时 {@code exactValue} 每次新建实例，缓存因此不命中，
  * 那时每帧重算一次，属可接受。
@@ -87,14 +92,15 @@ public class PositionUnitsDebugEntry implements DebugScreenEntry {
         List<String> lines = new ArrayList<>(3);
         lines.add("X: " + scientific(x) + " / Y: " + scientific(y) + " / Z: " + scientific(z));
         if (x.isNaN() || y.isNaN() || z.isNaN()) {
-            lines.add("Float: " + UNKNOWN + " / Double: " + UNKNOWN + " / Binary256: " + UNKNOWN);
-            lines.add("Int32: " + UNKNOWN + " / Int64: " + UNKNOWN + " / Int256: " + UNKNOWN);
+            String unknown = farlands$unknown();
+            lines.add("Float: " + unknown + " / Double: " + unknown + " / Binary256: " + unknown);
+            lines.add("Int32: " + unknown + " / Int64: " + unknown + " / Int256: " + unknown);
             return lines;
         }
         Binary256 value = farlands$largest(x, y, z);
-        lines.add("Float: " + scientific(Binary256.of(Math.ulp(value.toFloat())))
-                + " / Double: " + scientific(Binary256.of(Math.ulp(value.toDouble())))
-                + " / Binary256: " + scientific(value.ulp()));
+        lines.add("Float: " + farlands$ulp(Binary256.of(Math.ulp(value.toFloat())))
+                + " / Double: " + farlands$ulp(Binary256.of(Math.ulp(value.toDouble())))
+                + " / Binary256: " + farlands$ulp(value.ulp()));
         lines.add("Int32: " + farlands$state(value, Integer.MIN_VALUE, Integer.MAX_VALUE)
                 + " / Int64: " + farlands$state(value, Long.MIN_VALUE, Long.MAX_VALUE)
                 + " / Int256: " + farlands$state(value, Int256.MIN_VALUE, Int256.MAX_VALUE));
@@ -120,17 +126,35 @@ public class PositionUnitsDebugEntry implements DebugScreenEntry {
     /** 该值在该整数类型上是否可表示。边界两侧都用精确值比较。 */
     private static String farlands$state(Binary256 value, long min, long max) {
         if (value.compareTo(Binary256.of(max)) > 0 || value.compareTo(Binary256.of(min)) < 0) {
-            return OVERFLOWED;
+            return DebugEntryColors.colored(DebugEntryColors.Shade.RISK, OVERFLOWED);
         }
-        return NOT_OVERFLOWED;
+        return DebugEntryColors.colored(DebugEntryColors.Shade.SAFE, NOT_OVERFLOWED);
     }
 
     /** {@code Int256} 的边界是 256 位整数，不是 long，单独一条重载。 */
     private static String farlands$state(Binary256 value, Int256 min, Int256 max) {
         if (value.compareTo(Binary256.of(max)) > 0 || value.compareTo(Binary256.of(min)) < 0) {
-            return OVERFLOWED;
+            return DebugEntryColors.colored(DebugEntryColors.Shade.RISK, OVERFLOWED);
         }
-        return NOT_OVERFLOWED;
+        return DebugEntryColors.colored(DebugEntryColors.Shade.SAFE, NOT_OVERFLOWED);
+    }
+
+    /**
+     * 一格 ULP 的着色。ULP 恒为正且恒为 2 的幂，与 1 的三态比较因此是准确的分档，不需要容差。
+     *
+     * <p>
+     * 窄化溢出时该格是无穷，比较落在大于 1 这一档，与「精度已经没了」同义。
+     */
+    private static String farlands$ulp(Binary256 ulp) {
+        int compared = ulp.compareTo(Binary256.ONE);
+        DebugEntryColors.Shade shade = compared < 0 ? DebugEntryColors.Shade.SAFE
+                : compared > 0 ? DebugEntryColors.Shade.RISK : DebugEntryColors.Shade.EDGE;
+        return DebugEntryColors.colored(shade, scientific(ulp));
+    }
+
+    /** 六格共用的未知文本。 */
+    private static String farlands$unknown() {
+        return DebugEntryColors.colored(DebugEntryColors.Shade.UNKNOWN, UNKNOWN);
     }
 
     private static String scientific(Binary256 value) {
