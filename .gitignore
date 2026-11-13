@@ -40,12 +40,9 @@ replay_*.log
 *.jfr
 
 # 自定义
-source
-doc
-repos
 /debug/
-*.log
-handoff.md
-workspace
+/doc/
 /lib/
 /logs/
+/repos/
+/source/
