@@ -67,6 +67,23 @@ public final class WorldBounds {
     }
 
     /**
+     * 段号是否在可玩段界内，段号是 long。
+     *
+     * <p>
+     * 按 long 比较，不窄化：段号可以超出 int，窄化会把 2^32 + 5 截成 5，把界外段判成界内。
+     */
+    public static boolean inSection(long sy) {
+        return sy >= MIN_PLAYABLE_SECTION && sy <= MAX_PLAYABLE_SECTION;
+    }
+
+    /**
+     * 三轴段号是否都在可玩段界内，任一轴界外即为假。与 {@link #inBlock(long, long, long)} 同族，量纲是段号。
+     */
+    public static boolean inSection(long x, long y, long z) {
+        return inSection(x) && inSection(y) && inSection(z);
+    }
+
+    /**
      * 段号是否在可表示段范围内，即段内方块左移四位后不越过 int。比可玩段两端各宽一段，
      * 那两段的方块全部在可玩方块范围之外。
      */

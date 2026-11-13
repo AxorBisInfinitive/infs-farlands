@@ -16,6 +16,7 @@ import com.inf.farlands.simulation.model.SimulationSectionKey;
 import com.inf.farlands.simulation.model.SimulationSectionStage;
 import com.inf.farlands.simulation.model.SimulationStore;
 import com.inf.farlands.util.pos.ExactPosition;
+import com.inf.farlands.util.world.WorldBounds;
 
 import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
 import net.minecraft.resources.ResourceKey;
@@ -29,8 +30,8 @@ import net.minecraft.world.level.Level;
  * 服务端的模拟层驱动：窗口变化时增删段，其余 tick 只派发脏段。
  *
  * <p>
- * 生命周期照原版的 chunk：视距并集里没有的段释放，新进的段创建并跑一次生产者，首次发送整段，之后只发脏段。
- * 与 chunk 的差别只有一条：这里不持久化，段释放即丢。
+ * 生命周期照原版的 chunk：视距与模拟区域的交里没有的段释放，新进的段创建并跑一次生产者，首次发送整段，之后
+ * 只发脏段。与 chunk 的差别只有一条：这里不持久化，段释放即丢。
  *
  * <p>
  * 每 tick 的工作量只与本 tick 真正发出去的段数成正比，不与窗口大小成正比。窗口按玩家缓存，只有中心段、视距或
@@ -299,12 +300,16 @@ public final class SimulationServer {
     }
 
     /**
-     * 该玩家视距内的段：横向按圆盘，纵向取整窗，每段一个键。
+     * 该玩家视距内的模拟区域：横向按圆盘，纵向取整窗，再与可玩段界取交。
      *
      * <p>
-     * 竖直方向不筛。视距内每一段都必须存在，空腔才有对象承载光：曾经按每 6 段一层枚举，段与段之间的空腔没有对象，
-     * 任何跨出段边界的取光都落到「无段」上得到 0，表现为段底发黑。层距如今不再是存在性口径，哪些段有方块完全由
-     * 选中的系统决定。
+     * 窗口是玩家窗口与模拟区域的交，不是玩家窗口本身。三轴都在可玩段界之内的段归地形侧，这里既不建也不发；归属
+     * 按段判，而可玩界与可玩段界逐格对齐，所以不存在半覆盖段，逐键判归属不会把一段切成两半。
+     *
+     * <p>
+     * 竖直方向不另设层距。视距内每一段都必须存在，空腔才有对象承载光：曾经按每 6 段一层枚举，段与段之间的空腔
+     * 没有对象，任何跨出段边界的取光都落到「无段」上得到 0，表现为段底发黑。层距如今不再是存在性口径，哪些段
+     * 有方块完全由选中的系统决定。
      *
      * <p>
      * 窗口不外扩：边缘的段都是空的，没有面可黑；圆盘边缘朝外的面背向观察者。
@@ -319,11 +324,25 @@ public final class SimulationServer {
                     continue;
                 }
                 for (long sy = centerY - half; sy <= centerY + half; sy++) {
-                    keys.add(new SimulationSectionKey(centerX + dx, sy, centerZ + dz));
+                    SimulationSectionKey key = new SimulationSectionKey(centerX + dx, sy, centerZ + dz);
+                    if (farlands$owned(key)) {
+                        keys.add(key);
+                    }
                 }
             }
         }
         return keys;
+    }
+
+    /**
+     * 该段是否归模拟层：三轴中任一轴的段号在可玩段界之外。
+     *
+     * <p>
+     * 与地形侧 {@code Scheduler.sectionsFor} 的剔段判据互为补集：那里用 {@code WorldBounds.inSection} 剔掉界外
+     * 段，这里用它的补集剔掉界内段。判据收在 {@code WorldBounds} 一处，三轴写法不在调用点重写。
+     */
+    private static boolean farlands$owned(SimulationSectionKey key) {
+        return !WorldBounds.inSection(key.x(), key.y(), key.z());
     }
 
     /**
