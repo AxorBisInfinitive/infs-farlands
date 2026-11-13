@@ -30,6 +30,7 @@
   "commands.infs-farlands.chunky.farlands.maxY.range": "maxY 必须 >= minY(%s)，且落在 Section 范围内",
   "selectWorld.infs-farlands.incompatible.systems": "不兼容的系统配置",
   "createWorld.tab.infs-farlands.title": "边境之地",
+  "createWorld.tab.infs-farlands.simulationlands.title": "模拟之地",
   "createWorld.tab.infs-farlands.button": "无",
   "createWorld.tab.infs-farlands.page.overworld": "主世界",
   "createWorld.tab.infs-farlands.page.the_nether": "下界",

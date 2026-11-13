@@ -5,6 +5,7 @@ import java.util.List;
 
 import com.inf.farlands.client.gui.CreatingWorldSystemsConfig;
 import com.inf.farlands.client.gui.FarlandsTab;
+import com.inf.farlands.client.gui.SimulationLandsTab;
 import com.inf.farlands.terrain.registry.SystemPageHooks;
 
 import net.minecraft.client.gui.components.Button;
@@ -28,7 +29,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * 给创建世界页追加一个页签，并按页签里的非法状态控制页脚的创建按钮。
  *
  * <p>init 里的页签数组是调用点现场构造后传给 TabNavigationBar$Builder.addTabs 的，把那个数组换成
- * 长度加一的即可，不必读 tabNavigationBar 字段，也不必覆写 init。新页追加在末尾，所以
+ * 长度加二的即可，不必读 tabNavigationBar 字段，也不必覆写 init。两个新页追加在末尾，所以
  * selectTab(0, false) 选中的仍是游戏页，原有三页的序号不变。
  *
  * <p>维度取自 WorldCreationContext 的 selectedDimensions，即**真正进世界的**那一份，不是注册表里的
@@ -74,10 +75,12 @@ public class CreateWorldScreenMixin {
 
     @ModifyArg(method = "init", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/components/tabs/TabNavigationBar$Builder;addTabs([Lnet/minecraft/client/gui/components/tabs/Tab;)Lnet/minecraft/client/gui/components/tabs/TabNavigationBar$Builder;"), index = 0)
     private Tab[] farlands$appendTab(Tab[] tabs) {
-        Tab[] extended = Arrays.copyOf(tabs, tabs.length + 1);
+        Tab[] extended = Arrays.copyOf(tabs, tabs.length + 2);
         FarlandsTab tab = new FarlandsTab(this.farlandsDimensions);
         this.farlandsTab = tab;
         extended[tabs.length] = tab;
+        // 第二个页签与第一个共用维度表与骨架，但只放地形一族、选择存内存；它不参与下面那段首屏判定。
+        extended[tabs.length + 1] = new SimulationLandsTab(this.farlandsDimensions);
         // 首屏那一页也算一次进页，每个屏幕实例一次：重建世界走的是新屏幕实例，因此照发；窗口缩放
         // 只是同一实例的界面重建，标记挡住重复。
         if (!this.farlandsEnteredFirstPage && !this.farlandsDimensions.isEmpty()) {
