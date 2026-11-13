@@ -3,10 +3,9 @@ plugins {
 	id 'maven-publish'
 }
 
-// 设置版本号为时间
-def buildTime = new Date().format("MM-dd.HH-mm")
-def baseVersion = project.properties.get("version", "0.0.6-alpha")
-version = baseVersion + "." + buildTime
+// 本地开发构建默认带时间戳；发布依赖时可用 -PmodVersion 固定坐标和模组版本。
+def baseVersion = project.version
+version = providers.gradleProperty("modVersion").getOrElse(baseVersion + "." + new Date().format("MM-dd.HH-mm"))
 
 repositories {
 	exclusiveContent {
