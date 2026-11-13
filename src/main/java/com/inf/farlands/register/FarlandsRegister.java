@@ -2,7 +2,6 @@ package com.inf.farlands.register;
 
 import com.inf.farlands.InfsFarlands;
 import com.inf.farlands.simulation.int64.system.terrain.noise.misc.Void.VoidSimulationNoiseSystem;
-import com.inf.farlands.simulation.int64.system.terrain.noise.overworld.Cwg.CwgSimulationNoiseSystem;
 import com.inf.farlands.simulation.registry.SimulationRegistries;
 import com.inf.farlands.command.FarlandsCommandRegistry;
 import com.inf.farlands.compat.chunky.ChunkyPregen;
@@ -10,8 +9,6 @@ import com.inf.farlands.register.command.FarLandsCommands;
 import com.inf.farlands.register.packet.*;
 import com.inf.farlands.terrain.registry.SystemRegistries;
 import com.inf.farlands.terrain.system.biome.misc.Void.VoidBiomeSystem;
-import com.inf.farlands.terrain.system.biome.overworld.Oct.OctBiomeSystem;
-import com.inf.farlands.terrain.system.biome.overworld.Sakura.SakuraBiomeSystem;
 import com.inf.farlands.terrain.system.biome.overworld.Vanilla.VanillaBiomeSystem;
 import com.inf.farlands.terrain.system.carver.misc.Void.VoidCarverSystem;
 import com.inf.farlands.terrain.system.carver.overworld.Vanilla.VanillaCarverSystem;
@@ -19,24 +16,9 @@ import com.inf.farlands.terrain.system.common.overworld.Vanilla.VanillaFamilySee
 import com.inf.farlands.terrain.system.decoration.misc.Void.VoidDecorationSystem;
 import com.inf.farlands.terrain.system.decoration.overworld.Vanilla.VanillaDecorationSystem;
 import com.inf.farlands.terrain.system.surface.misc.Void.VoidSurfaceSystem;
-import com.inf.farlands.terrain.system.surface.overworld.Bin.BinSurfaceSystem;
 import com.inf.farlands.terrain.system.surface.overworld.Vanilla.VanillaSurfaceSystem;
-import com.inf.farlands.terrain.system.terrain.block.misc.Inf32768.Inf32768BlockSystem;
-import com.inf.farlands.terrain.system.terrain.block.misc.Sierpinski.SierpinskiPyramidBlockSystem;
-import com.inf.farlands.terrain.system.terrain.block.misc.TheFourthDimension.TheFourthDimensionBlockSystem;
-import com.inf.farlands.terrain.system.terrain.block.misc.V.VBlockSystem;
-import com.inf.farlands.terrain.system.terrain.block.overworld.Infdev.Infdev20100226BlockSystem;
-import com.inf.farlands.terrain.system.terrain.noise.misc.Hex.HexNoiseSystem;
-import com.inf.farlands.terrain.system.terrain.noise.misc.SkyGirl.SkyGirlNoiseSystem;
 import com.inf.farlands.terrain.system.terrain.noise.misc.Void.VoidNoiseSystem;
-import com.inf.farlands.terrain.system.terrain.noise.misc.Weierstrass.WeierstrassNoiseSystem;
-import com.inf.farlands.terrain.system.terrain.noise.overworld.Beta173.Beta173NoiseSystem;
-import com.inf.farlands.terrain.system.terrain.noise.overworld.Cwg.CwgNoiseSystem;
-import com.inf.farlands.terrain.system.terrain.noise.overworld.Oct.OctNoiseSystem;
-import com.inf.farlands.terrain.system.terrain.noise.overworld.TheBeneath.TheBeneathNoiseSystem;
 import com.inf.farlands.terrain.system.terrain.noise.overworld.Vanilla.VanillaNoiseSystem;
-import com.inf.farlands.terrain.system.terrain.noise.overworld.Vanilla263.Vanilla263NoiseSystem;
-import com.inf.farlands.terrain.system.terrain.section.misc.Library.LibrarySectionSystem;
 import com.inf.farlands.terrain.system.terrain.section.misc.Void.VoidSectionSystem;
 
 public class FarlandsRegister {
@@ -87,54 +69,23 @@ public class FarlandsRegister {
         }
     }
 
-    /** 40 个内置系统按五族登记，id 与实现类的对应关系集中在此。 */
+    /** 内置系统按族登记，id 与实现类的对应关系集中在此。 */
     private static void registerSystems() {
-        // 模拟层两个内置系统。登记必须在世界加载之前：档案在 level 构造时才解析。
+        // 模拟层一个内置系统。登记必须在世界加载之前：档案在 level 构造时才解析。
         SimulationRegistries.register(SimulationRegistries.NOISE_VOID, VoidSimulationNoiseSystem.class);
-        SimulationRegistries.register(SimulationRegistries.NOISE_CWG, CwgSimulationNoiseSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_VOID_NOISE_SYSTEM, VoidNoiseSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_VOID_SECTION_SYSTEM,
                 VoidSectionSystem.class);
-        SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_LIBRARY_SECTION_SYSTEM,
-                LibrarySectionSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_OVERWORLD_VANILLA_NOISE_SYSTEM,
                 VanillaNoiseSystem.class);
-        SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_OVERWORLD_BETA_1_7_3_NOISE_SYSTEM,
-                Beta173NoiseSystem.class);
-        SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_HEX_NOISE_SYSTEM, HexNoiseSystem.class);
-        SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_WEIERSTRASS_NOISE_SYSTEM,
-                WeierstrassNoiseSystem.class);
-        SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_OVERWORLD_OCT_NOISE_SYSTEM, OctNoiseSystem.class);
-        SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_OVERWORLD_INFDEV_20100226_BLOCK_SYSTEM,
-                Infdev20100226BlockSystem.class);
-        SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_SIERPINSKI_PYRAMID_BLOCK_SYSTEM,
-                SierpinskiPyramidBlockSystem.class);
-        SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_THE_FOURTH_DIMENSION_BLOCK_SYSTEM,
-                TheFourthDimensionBlockSystem.class);
-        SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_INF32768_BLOCK_SYSTEM,
-                Inf32768BlockSystem.class);
-        SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_V_BLOCK_SYSTEM, VBlockSystem.class);
-        SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_OVERWORLD_CWG_NOISE_SYSTEM,
-                CwgNoiseSystem.class);
-        SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_OVERWORLD_VANILLA_263_NOISE_SYSTEM,
-                Vanilla263NoiseSystem.class);
-        SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_OVERWORLD_THE_BENEATH_NOISE_SYSTEM,
-                TheBeneathNoiseSystem.class);
-        SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_SKY_GIRL_NOISE_SYSTEM,
-                SkyGirlNoiseSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_THE_NETHER_VANILLA_NOISE_SYSTEM,
                 com.inf.farlands.terrain.system.terrain.noise.theNether.Vanilla.VanillaNoiseSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_THE_END_VANILLA_NOISE_SYSTEM,
                 com.inf.farlands.terrain.system.terrain.noise.theEnd.Vanilla.VanillaNoiseSystem.class);
-        SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_THE_END_LAYERS_NOISE_SYSTEM,
-                com.inf.farlands.terrain.system.terrain.noise.theEnd.Layers.LayersNoiseSystem.class);
 
         SystemRegistries.registerBiome(SystemRegistries.BIOME_MISC_VOID_BIOME_SYSTEM, VoidBiomeSystem.class);
         SystemRegistries.registerBiome(SystemRegistries.BIOME_OVERWORLD_VANILLA_BIOME_SYSTEM,
                 VanillaBiomeSystem.class);
-        SystemRegistries.registerBiome(SystemRegistries.BIOME_OVERWORLD_OCT_BIOME_SYSTEM, OctBiomeSystem.class);
-        SystemRegistries.registerBiome(SystemRegistries.BIOME_OVERWORLD_SAKURA_BIOME_SYSTEM,
-                SakuraBiomeSystem.class);
         SystemRegistries.registerBiome(SystemRegistries.BIOME_THE_NETHER_VANILLA_BIOME_SYSTEM,
                 com.inf.farlands.terrain.system.biome.theNether.Vanilla.VanillaBiomeSystem.class);
         SystemRegistries.registerBiome(SystemRegistries.BIOME_THE_END_VANILLA_BIOME_SYSTEM,
@@ -144,8 +95,6 @@ public class FarlandsRegister {
                 VoidSurfaceSystem.class);
         SystemRegistries.registerSurface(SystemRegistries.SURFACE_OVERWORLD_VANILLA_SURFACE_SYSTEM,
                 VanillaSurfaceSystem.class);
-        SystemRegistries.registerSurface(SystemRegistries.SURFACE_OVERWORLD_BIN_SURFACE_SYSTEM,
-                BinSurfaceSystem.class);
         SystemRegistries.registerSurface(SystemRegistries.SURFACE_THE_NETHER_VANILLA_SURFACE_SYSTEM,
                 com.inf.farlands.terrain.system.surface.theNether.Vanilla.VanillaSurfaceSystem.class);
         SystemRegistries.registerSurface(SystemRegistries.SURFACE_THE_END_VANILLA_SURFACE_SYSTEM,
@@ -168,8 +117,6 @@ public class FarlandsRegister {
                 com.inf.farlands.terrain.system.decoration.theNether.Vanilla.VanillaDecorationSystem.class);
         SystemRegistries.registerDecoration(SystemRegistries.DECORATION_THE_END_VANILLA_DECORATION_SYSTEM,
                 com.inf.farlands.terrain.system.decoration.theEnd.Vanilla.VanillaDecorationSystem.class);
-        SystemRegistries.registerDecoration(SystemRegistries.DECORATION_MISC_UNIVERSE_DECORATION_SYSTEM,
-                com.inf.farlands.terrain.system.decoration.misc.Universe.UniverseDecorationSystem.class);
     }
 
     public static void register() {

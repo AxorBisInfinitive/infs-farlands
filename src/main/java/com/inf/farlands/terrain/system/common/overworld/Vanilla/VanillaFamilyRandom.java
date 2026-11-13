@@ -18,8 +18,7 @@ import net.minecraft.world.level.levelgen.RandomState;
  * 雕刻上下文与起点随机的件。三族 seed 相同时共用同一份，默认配置下每个 level 只多建一份而不是三份。
  *
  * <p>
- * 必须返回同一个实例。{@code OctNoiseSystem} 与 {@code CwgNoiseSystem} 的 {@code createRouter} 按
- * router 的身份缓存整条链，只有同一实例复用才能让那份缓存继续有效；每次现建会让身份每次都变。
+ * 必须返回同一个实例：三族从同一条缓存上按 seed 取，重复现建会让每个调用点各持一份，缓存也就失去意义。
  *
  * <p>
  * 键取 server level 的身份，与 {@code SystemsIO.systemsFor} 同形；值不引用 level，弱键可回收。

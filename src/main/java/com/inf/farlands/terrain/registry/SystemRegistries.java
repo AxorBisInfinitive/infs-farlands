@@ -12,7 +12,7 @@ import com.inf.farlands.terrain.TerrainSystem;
 import net.minecraft.resources.Identifier;
 
 /**
- * 系统注册表的静态门面：五张类型化表、40 个内置 id 常量、五个登记入口、五个取用入口与元信息。
+ * 系统注册表的静态门面：五张类型化表、21 个内置 id 常量、五个登记入口、五个取用入口与元信息。
  *
  * <p>
  * 门面不读配置也不引 level：维度到 id 的选择由调用点给出，注册表层因此不依赖任何上层。
@@ -35,41 +35,17 @@ public final class SystemRegistries {
 
     public static final SystemId TERRAIN_MISC_VOID_NOISE_SYSTEM = id("misc_void_noise_system");
     public static final SystemId TERRAIN_MISC_VOID_SECTION_SYSTEM = id("misc_void_section_system");
-    public static final SystemId TERRAIN_MISC_LIBRARY_SECTION_SYSTEM = id("misc_library_section_system");
     public static final SystemId TERRAIN_OVERWORLD_VANILLA_NOISE_SYSTEM = id("overworld_vanilla_noise_system");
-    public static final SystemId TERRAIN_OVERWORLD_BETA_1_7_3_NOISE_SYSTEM = id(
-            "overworld_beta_1_7_3_noise_system");
-    public static final SystemId TERRAIN_MISC_HEX_NOISE_SYSTEM = id("misc_hex_noise_system");
-    public static final SystemId TERRAIN_MISC_WEIERSTRASS_NOISE_SYSTEM = id("misc_weierstrass_noise_system");
-    public static final SystemId TERRAIN_OVERWORLD_OCT_NOISE_SYSTEM = id("overworld_oct_noise_system");
-    public static final SystemId TERRAIN_OVERWORLD_INFDEV_20100226_BLOCK_SYSTEM = id(
-            "overworld_infdev_20100226_block_system");
-    public static final SystemId TERRAIN_MISC_SIERPINSKI_PYRAMID_BLOCK_SYSTEM = id(
-            "misc_sierpinski_pyramid_block_system");
-    public static final SystemId TERRAIN_MISC_THE_FOURTH_DIMENSION_BLOCK_SYSTEM = id(
-            "misc_the_fourth_dimension_block_system");
-    public static final SystemId TERRAIN_MISC_INF32768_BLOCK_SYSTEM = id("misc_inf32768_block_system");
-    public static final SystemId TERRAIN_MISC_V_BLOCK_SYSTEM = id("misc_v_block_system");
-    public static final SystemId TERRAIN_OVERWORLD_CWG_NOISE_SYSTEM = id("overworld_cwg_noise_system");
-    public static final SystemId TERRAIN_OVERWORLD_VANILLA_263_NOISE_SYSTEM = id(
-            "overworld_vanilla_263_noise_system");
-    public static final SystemId TERRAIN_OVERWORLD_THE_BENEATH_NOISE_SYSTEM = id(
-            "overworld_the_beneath_noise_system");
-    public static final SystemId TERRAIN_MISC_SKY_GIRL_NOISE_SYSTEM = id("misc_sky_girl_noise_system");
     public static final SystemId TERRAIN_THE_NETHER_VANILLA_NOISE_SYSTEM = id("the_nether_vanilla_noise_system");
     public static final SystemId TERRAIN_THE_END_VANILLA_NOISE_SYSTEM = id("the_end_vanilla_noise_system");
-    public static final SystemId TERRAIN_THE_END_LAYERS_NOISE_SYSTEM = id("the_end_layers_noise_system");
 
     public static final SystemId BIOME_MISC_VOID_BIOME_SYSTEM = id("misc_void_biome_system");
     public static final SystemId BIOME_OVERWORLD_VANILLA_BIOME_SYSTEM = id("overworld_vanilla_biome_system");
-    public static final SystemId BIOME_OVERWORLD_OCT_BIOME_SYSTEM = id("overworld_oct_biome_system");
-    public static final SystemId BIOME_OVERWORLD_SAKURA_BIOME_SYSTEM = id("overworld_sakura_biome_system");
     public static final SystemId BIOME_THE_NETHER_VANILLA_BIOME_SYSTEM = id("the_nether_vanilla_biome_system");
     public static final SystemId BIOME_THE_END_VANILLA_BIOME_SYSTEM = id("the_end_vanilla_biome_system");
 
     public static final SystemId SURFACE_MISC_VOID_SURFACE_SYSTEM = id("misc_void_surface_system");
     public static final SystemId SURFACE_OVERWORLD_VANILLA_SURFACE_SYSTEM = id("overworld_vanilla_surface_system");
-    public static final SystemId SURFACE_OVERWORLD_BIN_SURFACE_SYSTEM = id("overworld_bin_surface_system");
     public static final SystemId SURFACE_THE_NETHER_VANILLA_SURFACE_SYSTEM = id(
             "the_nether_vanilla_surface_system");
     public static final SystemId SURFACE_THE_END_VANILLA_SURFACE_SYSTEM = id("the_end_vanilla_surface_system");
@@ -86,8 +62,6 @@ public final class SystemRegistries {
             "the_nether_vanilla_decoration_system");
     public static final SystemId DECORATION_THE_END_VANILLA_DECORATION_SYSTEM = id(
             "the_end_vanilla_decoration_system");
-    public static final SystemId DECORATION_MISC_UNIVERSE_DECORATION_SYSTEM = id(
-            "misc_universe_decoration_system");
 
     private SystemRegistries() {
     }

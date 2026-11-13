@@ -10,7 +10,6 @@ import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.debug.StageMetrics;
 import com.inf.farlands.terrain.pipeline.NeighborhoodTickets;
 import com.inf.farlands.terrain.pipeline.Scheduler;
-import com.inf.farlands.terrain.system.terrain.noise.overworld.Beta173.Beta173NoiseSystem;
 import com.inf.farlands.terrain.system.terrain.noise.overworld.Vanilla.VanillaNoiseSystem;
 import com.inf.farlands.util.maps.AquiferUtil;
 import com.inf.farlands.util.maps.BlockUtil;
@@ -150,44 +149,6 @@ public class FarlandsTick {
     }
 
     /**
-     * skys-the-limit 的三项判定与经验：系统是 beta173、顶部渐消关闭、玩家 Y 达到阈值。
-     *
-     * <p>
-     * 三项各是一条 criterion，在同一份进度里各自成一组，都须达成。坐标判定放在 beta173 这一支之内，
-     * 到该 Y 与在该系统下因此是同一瞬间成立。
-     *
-     * <p>
-     * 经验在完成的那一 tick 给一次。award 的返回值只说那一条 criterion 是不是新授予的，三条里任何
-     * 一条都可能早于完成，所以按完成前后各读一次 isDone 判定，与 vanilla 授予 rewards 的判据同形。
-     */
-    private static void awardSkyLimit(MinecraftServer server) {
-        AdvancementHolder holder = server.getAdvancements().get(InfsFarlands.id("skys-the-limit"));
-        if (holder == null) {
-            return;
-        }
-        for (ServerLevel level : server.getAllLevels()) {
-            if (((LevelSystems) level).terrainSystem() instanceof Beta173NoiseSystem beta173) {
-                for (ServerPlayer player : level.players()) {
-                    PlayerAdvancements advancements = player.getAdvancements();
-                    AdvancementProgress progress = advancements.getOrStartProgress(holder);
-                    boolean wasDone = progress.isDone();
-
-                    advancements.award(holder, "beta173_system");
-                    if (!beta173.topFadeEnabled()) {
-                        advancements.award(holder, "top_fade_disabled");
-                    }
-                    if (player.getY() >= 2008131844) {
-                        advancements.award(holder, "y_above_threshold");
-                    }
-                    if (!wasDone && progress.isDone()) {
-                        player.giveExperiencePoints(171103);
-                    }
-                }
-            }
-        }
-    }
-
-    /**
      * 每 tick 末尾要跑一次的钩子，由兼容层在自己初始化时登记。核心不认识登记者，也不 import 它。
      *
      * <p>用途是那些「需要每 tick 推进一步、但又不属于本类职责」的兼容逻辑，例如 Chunky 预生成的驱动
@@ -231,7 +192,6 @@ public class FarlandsTick {
         setRunningServer(server);
         setNow(tickCount);
         awardNewVanillaNoiseSystem(server);
-        awardSkyLimit(server);
         if (tickCount % INTERVAL == 0) {
             swapBlockLookup(server, tickCount);
             trimSectionLookup(tickCount);

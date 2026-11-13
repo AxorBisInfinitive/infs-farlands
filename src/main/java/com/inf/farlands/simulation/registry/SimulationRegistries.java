@@ -30,9 +30,6 @@ public final class SimulationRegistries {
     /** 全空气，与 farlands 的 VoidNoiseSystem 同形。 */
     public static final SystemId NOISE_VOID = id("simulation_void_noise_system");
 
-    /** 四路八度噪声加一条密度链，穹顶按 int32 的索引上界在 int64 域内形成。 */
-    public static final SystemId NOISE_CWG = id("simulation_cwg_noise_system");
-
     private SimulationRegistries() {
     }
 
