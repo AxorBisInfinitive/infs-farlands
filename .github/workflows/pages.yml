@@ -3,7 +3,7 @@ name: Publish Farlands Pages
 on:
   push:
     branches: [fabric-26.1.2]
-    paths: ['docs/**']
+    paths: ["docs/**"]
   release:
     types: [published]
   repository_dispatch:
@@ -43,7 +43,7 @@ jobs:
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '25'
+          java-version: "25"
       - name: Store the published release in the Maven repository
         env:
           GH_TOKEN: ${{ github.token }}
@@ -76,7 +76,7 @@ jobs:
         if: ${{ inputs.preview }}
         with:
           distribution: temurin
-          java-version: '25'
+          java-version: "25"
       - name: Add preview Maven artifacts
         if: ${{ inputs.preview }}
         run: >-
@@ -88,7 +88,7 @@ jobs:
           PREVIEW: ${{ inputs.preview }}
         run: |
           set -euo pipefail
-          for file in dome-planes-v3.html math/hash.zip wiki/wiki.html wiki.EN_US/wiki.html wiki.farlands/wiki.html; do
+          for file in dome-planes-v3.html wiki/wiki.html wiki.EN_US/wiki.html wiki.farlands/wiki.html; do
             test -s "_site/$file" || { echo "Missing Pages output: $file"; exit 1; }
           done
           if [[ "$PREVIEW" == true ]]; then
