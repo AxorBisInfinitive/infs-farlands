@@ -95,6 +95,9 @@ dependencies {
     // Modern UI: 3.13.0.5-fabric
     compileOnly "maven.modrinth:3sjzyvGR:uf6cAgLr"
     localRuntime "maven.modrinth:3sjzyvGR:uf6cAgLr"
+
+    // infs-noise: 本地构建产物，挂开发运行环境，不进 jar
+    localRuntime files("repos/infs-noise/build/libs/infs-noise-0.1.0-alpha.jar")
 }
 
 processResources {
