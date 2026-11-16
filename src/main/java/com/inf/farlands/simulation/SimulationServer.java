@@ -8,6 +8,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
+
 import com.inf.farlands.FarlandsConfig;
 import com.inf.farlands.InfsFarlands;
 import com.inf.farlands.network.simulation.SimulationSectionPacket;
@@ -17,6 +19,7 @@ import com.inf.farlands.simulation.model.SimulationSectionStage;
 import com.inf.farlands.simulation.model.SimulationStore;
 import com.inf.farlands.util.pos.ExactPosition;
 import com.inf.farlands.util.world.WorldBounds;
+import com.inf.long2.ints.Int1024;
 
 import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
 import net.minecraft.resources.ResourceKey;
@@ -61,7 +64,7 @@ public final class SimulationServer {
      * <p>
      * 它同时就是并集：并集是计数大于 0 的键。每 tick 重建这张表的写法与窗口大小成正比，现在只在窗口变化时增减。
      */
-    private static final Map<ResourceKey<Level>, Map<SimulationSectionKey, Integer>> WANT = new HashMap<>();
+    private static final Map<ResourceKey<Level>, Object2IntOpenHashMap<SimulationSectionKey>> WANT = new HashMap<>();
 
     /**
      * 按维度的「内容变更待分发」集合。
@@ -98,15 +101,19 @@ public final class SimulationServer {
      * {@code buckets} 是可变集合，{@link #send} 每 tick 从里面摘走已发的段。窗口变化时整份重建而不是原地挪动：
      * 层号相对玩家中心，中心一动，所有键的层号都可能变。竖直移动只改段带不改层号，地面上每次跨 chunk 才改。
      */
-    private record View(ResourceKey<Level> dimension, long centerX, long centerY, long centerZ, int radius,
+    private record View(ResourceKey<Level> dimension, Int1024 centerX, Int1024 centerY, Int1024 centerZ, int radius,
             boolean positioned, Set<SimulationSectionKey> keys, List<Set<SimulationSectionKey>> buckets) {
 
         /** 缓存是否仍然对应当前这一刻的窗口。 */
-        boolean sameWindow(ResourceKey<Level> dimension, long centerX, long centerY, long centerZ, int radius,
+        boolean sameWindow(ResourceKey<Level> dimension, Int1024 centerX, Int1024 centerY, Int1024 centerZ, int radius,
                 boolean positioned) {
-            return this.dimension.equals(dimension) && this.centerX == centerX && this.centerY == centerY
-                    && this.centerZ == centerZ && this.radius == radius && this.positioned == positioned;
+            return this.dimension.equals(dimension) && this.centerX.equals(centerX) && this.centerY.equals(centerY)
+                    && this.centerZ.equals(centerZ) && this.radius == radius && this.positioned == positioned;
         }
+    }
+
+    /** 一次窗口枚举的产物：窗口内全部键，以及按层分的待发桶。两份在同一次循环里产出。 */
+    private record Window(Set<SimulationSectionKey> keys, List<Set<SimulationSectionKey>> buckets) {
     }
 
     /**
@@ -144,7 +151,8 @@ public final class SimulationServer {
     private static void tickLevel(ServerLevel level) {
         ResourceKey<Level> dimension = level.dimension();
         List<ServerPlayer> players = level.players();
-        Map<SimulationSectionKey, Integer> want = WANT.computeIfAbsent(dimension, k -> new HashMap<>());
+        Object2IntOpenHashMap<SimulationSectionKey> want = WANT.computeIfAbsent(dimension,
+                k -> new Object2IntOpenHashMap<>());
         Set<SimulationSectionKey> dirty = DIRTY.computeIfAbsent(dimension, k -> new HashSet<>());
 
         if (players.isEmpty()) {
@@ -161,9 +169,9 @@ public final class SimulationServer {
         Map<UUID, List<SimulationSectionKey>> removed = new HashMap<>();
         for (ServerPlayer player : players) {
             ExactPosition exact = (ExactPosition) player;
-            long centerX = exact.farlands$cellCoord(ExactPosition.POS_X) >> 4;
-            long centerY = exact.farlands$cellCoord(ExactPosition.POS_Y) >> 4;
-            long centerZ = exact.farlands$cellCoord(ExactPosition.POS_Z) >> 4;
+            Int1024 centerX = exact.farlands$cellCoord1024(ExactPosition.POS_X).shift(-4);
+            Int1024 centerY = exact.farlands$cellCoord1024(ExactPosition.POS_Y).shift(-4);
+            Int1024 centerZ = exact.farlands$cellCoord1024(ExactPosition.POS_Z).shift(-4);
             ChunkTrackingView tracking = player.getChunkTrackingView();
             boolean positioned = tracking instanceof ChunkTrackingView.Positioned;
             int radius = positioned ? ((ChunkTrackingView.Positioned) tracking).viewDistance() : 8;
@@ -171,13 +179,13 @@ public final class SimulationServer {
             if (cached != null && cached.sameWindow(dimension, centerX, centerY, centerZ, radius, positioned)) {
                 continue;
             }
-            Set<SimulationSectionKey> keys = farlands$keys(centerX, centerY, centerZ, radius);
-            List<SimulationSectionKey> out = new ArrayList<>();
-            farlands$applyWindowChange(level, player, dimension, want, cached, keys, out);
-            removed.put(player.getUUID(), out);
             Set<SimulationSectionKey> sent = farlands$sentOf(player, dimension);
-            VIEWS.put(player.getUUID(), new View(dimension, centerX, centerY, centerZ, radius, positioned, keys,
-                    farlands$buckets(keys, sent, centerX, centerZ, radius)));
+            Window window = farlands$window(centerX, centerY, centerZ, radius, sent);
+            List<SimulationSectionKey> out = new ArrayList<>();
+            farlands$applyWindowChange(level, player, dimension, want, cached, window.keys(), out);
+            removed.put(player.getUUID(), out);
+            VIEWS.put(player.getUUID(), new View(dimension, centerX, centerY, centerZ, radius, positioned,
+                    window.keys(), window.buckets()));
         }
 
         if (RESCAN.remove(dimension)) {
@@ -227,7 +235,7 @@ public final class SimulationServer {
      * @param removed 出参：本 tick 离开窗口的键，供派发通知客户端撤回
      */
     private static void farlands$applyWindowChange(ServerLevel level, ServerPlayer player,
-            ResourceKey<Level> dimension, Map<SimulationSectionKey, Integer> want, View cached,
+            ResourceKey<Level> dimension, Object2IntOpenHashMap<SimulationSectionKey> want, View cached,
             Set<SimulationSectionKey> next, List<SimulationSectionKey> removed) {
         if (cached != null && !cached.dimension().equals(dimension)) {
             farlands$retractDimension(player, cached);
@@ -242,12 +250,12 @@ public final class SimulationServer {
             if (sent.remove(key)) {
                 removed.add(key);
             }
-            Integer have = want.get(key);
-            if (have == null) {
+            int have = want.getInt(key);
+            if (have == 0) {
                 continue;
             }
             if (have <= 1) {
-                want.remove(key);
+                want.removeInt(key);
                 SimulationLifecycle.release(level, key);
             } else {
                 want.put(key, have - 1);
@@ -257,7 +265,7 @@ public final class SimulationServer {
             if (previous.contains(key)) {
                 continue;
             }
-            want.merge(key, 1, Integer::sum);
+            want.addTo(key, 1);
             SimulationLifecycle.ensureSection(level, key);
         }
     }
@@ -270,15 +278,15 @@ public final class SimulationServer {
      * 若还有别的玩家，减到 0 的键由旧维度下一次对账收走，所以这里把旧维度排进对账。
      */
     private static void farlands$retractDimension(ServerPlayer player, View cached) {
-        Map<SimulationSectionKey, Integer> want = WANT.get(cached.dimension());
+        Object2IntOpenHashMap<SimulationSectionKey> want = WANT.get(cached.dimension());
         if (want != null) {
             for (SimulationSectionKey key : cached.keys()) {
-                Integer have = want.get(key);
-                if (have == null) {
+                int have = want.getInt(key);
+                if (have == 0) {
                     continue;
                 }
                 if (have <= 1) {
-                    want.remove(key);
+                    want.removeInt(key);
                 } else {
                     want.put(key, have - 1);
                 }
@@ -300,7 +308,7 @@ public final class SimulationServer {
     }
 
     /**
-     * 该玩家视距内的模拟区域：横向按圆盘，纵向取整窗，再与可玩段界取交。
+     * 该玩家视距内的模拟区域：横向按圆盘，纵向取整窗，再与可玩段界取交。键集与层桶在同一次循环里产出。
      *
      * <p>
      * 窗口是玩家窗口与模拟区域的交，不是玩家窗口本身。三轴都在可玩段界之内的段归地形侧，这里既不建也不发；归属
@@ -313,25 +321,52 @@ public final class SimulationServer {
      *
      * <p>
      * 窗口不外扩：边缘的段都是空的，没有面可黑；圆盘边缘朝外的面背向观察者。
+     *
+     * <p>
+     * 三个轴的取值先算成数组，键只引用数组元素，于是每个键只有一次分配。层号由这一圈的 dx 与 dz 直接给出，不必从
+     * 键反算；归属判在造键之前，界内的段连键都不建。
      */
-    private static Set<SimulationSectionKey> farlands$keys(long centerX, long centerY, long centerZ, int radius) {
-        long radiusSqr = (long) radius * radius;
+    private static Window farlands$window(Int1024 centerX, Int1024 centerY, Int1024 centerZ, int radius,
+            Set<SimulationSectionKey> sent) {
         int half = FarlandsConfig.verticalSimulationDistance;
+        long radiusSqr = (long) radius * radius;
+        Int1024[] xs = new Int1024[2 * radius + 1];
+        Int1024[] zs = new Int1024[2 * radius + 1];
+        Int1024[] ys = new Int1024[2 * half + 1];
+        for (int index = 0; index < xs.length; index++) {
+            Int1024 offset = Int1024.of((long) (index - radius));
+            xs[index] = centerX.add(offset);
+            zs[index] = centerZ.add(offset);
+        }
+        for (int index = 0; index < ys.length; index++) {
+            ys[index] = centerY.add(Int1024.of((long) (index - half)));
+        }
         Set<SimulationSectionKey> keys = new HashSet<>();
+        List<Set<SimulationSectionKey>> buckets = new ArrayList<>(radius + 1);
+        for (int layer = 0; layer <= radius; layer++) {
+            buckets.add(new HashSet<>());
+        }
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 if ((long) dx * dx + (long) dz * dz > radiusSqr) {
                     continue;
                 }
-                for (long sy = centerY - half; sy <= centerY + half; sy++) {
-                    SimulationSectionKey key = new SimulationSectionKey(centerX + dx, sy, centerZ + dz);
-                    if (farlands$owned(key)) {
-                        keys.add(key);
+                int layer = Math.max(Math.abs(dx), Math.abs(dz));
+                Int1024 x = xs[dx + radius];
+                Int1024 z = zs[dz + radius];
+                for (Int1024 y : ys) {
+                    if (!farlands$owned(x, y, z)) {
+                        continue;
+                    }
+                    SimulationSectionKey key = new SimulationSectionKey(x, y, z);
+                    keys.add(key);
+                    if (!sent.contains(key)) {
+                        buckets.get(layer).add(key);
                     }
                 }
             }
         }
-        return keys;
+        return new Window(keys, buckets);
     }
 
     /**
@@ -341,8 +376,8 @@ public final class SimulationServer {
      * 与地形侧 {@code Scheduler.sectionsFor} 的剔段判据互为补集：那里用 {@code WorldBounds.inSection} 剔掉界外
      * 段，这里用它的补集剔掉界内段。判据收在 {@code WorldBounds} 一处，三轴写法不在调用点重写。
      */
-    private static boolean farlands$owned(SimulationSectionKey key) {
-        return !WorldBounds.inSection(key.x().toLong(), key.y().toLong(), key.z().toLong());
+    private static boolean farlands$owned(Int1024 x, Int1024 y, Int1024 z) {
+        return !WorldBounds.inSection(x, y, z);
     }
 
     /**
@@ -410,34 +445,15 @@ public final class SimulationServer {
     }
 
     /**
-     * 段键的层号：水平切比雪夫距离。窗口内的键因此落在 0 到 radius，可以直接当下标。
-     */
-    private static int farlands$layer(SimulationSectionKey key, long centerX, long centerZ) {
-        long dx = Math.abs(key.x().toLong() - centerX);
-        long dz = Math.abs(key.z().toLong() - centerZ);
-        return (int) Math.max(dx, dz);
-    }
-
-    /**
-     * 按层分桶：下标是水平切比雪夫距离，内容是「窗口内、尚未发给该玩家」的键。
+     * 段键的层号：水平切比雪夫距离。
      *
      * <p>
-     * 每次窗口变化整份重建，代价是一次键集遍历，与 {@link #farlands$keys} 的建集同量级；换来的稳态是每 tick 只碰
-     * 预算允许的那几段。层用切比雪夫而不是欧氏距离：两者都保证内层先发，切比雪夫能落到定长数组上。
+     * 调用点只传本窗口内的键，水平差因此不超过 radius，落回 long 精确。
      */
-    private static List<Set<SimulationSectionKey>> farlands$buckets(Set<SimulationSectionKey> keys,
-            Set<SimulationSectionKey> sent, long centerX, long centerZ, int radius) {
-        List<Set<SimulationSectionKey>> buckets = new ArrayList<>(radius + 1);
-        for (int layer = 0; layer <= radius; layer++) {
-            buckets.add(new HashSet<>());
-        }
-        for (SimulationSectionKey key : keys) {
-            if (sent.contains(key)) {
-                continue;
-            }
-            buckets.get(farlands$layer(key, centerX, centerZ)).add(key);
-        }
-        return buckets;
+    private static int farlands$layer(SimulationSectionKey key, Int1024 centerX, Int1024 centerZ) {
+        long dx = Math.abs(key.x().subtract(centerX).toLong());
+        long dz = Math.abs(key.z().subtract(centerZ).toLong());
+        return (int) Math.max(dx, dz);
     }
 
     /** 临时读数，用完删除：总量相对上一 tick 掉三成以上就打一行。 */
@@ -466,16 +482,19 @@ public final class SimulationServer {
     private static void farlands$removalReadout(ResourceKey<Level> dimension, View view,
             List<SimulationSectionKey> removed) {
         boolean nearCenter = false;
-        Set<Long> ys = new HashSet<>();
+        Set<Int1024> ys = new HashSet<>();
         int rmin = Integer.MAX_VALUE;
         int rmax = 0;
         for (SimulationSectionKey key : removed) {
-            int distance = (int) Math.max(Math.abs(key.x().toLong() - view.centerX()),
-                    Math.abs(key.z().toLong() - view.centerZ()));
+            Int1024 dx = Int1024.abs(key.x().subtract(view.centerX()));
+            Int1024 dz = Int1024.abs(key.z().subtract(view.centerZ()));
+            Int1024 span = dx.compareTo(dz) >= 0 ? dx : dz;
+            // 换维度或传送时离窗的键可能远在 long 之外，这里统一按 int 上限记，本方法只关心「贴中心」这一档。
+            int distance = span.bitLength() <= 31 ? span.toInt() : Integer.MAX_VALUE;
             if (distance <= 2) {
                 nearCenter = true;
             }
-            ys.add(key.y().toLong());
+            ys.add(key.y());
             rmin = Math.min(rmin, distance);
             rmax = Math.max(rmax, distance);
         }
