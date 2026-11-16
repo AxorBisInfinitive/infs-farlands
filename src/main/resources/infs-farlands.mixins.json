@@ -110,6 +110,7 @@
     "fix.xyz.SpawnPlacementsMixin",
     "fix.xyz.EntityFluidInteractionMixin",
     "fix.xyz.TeleportCommandMixin",
+    "fix.xyz.TeleportEchoMixin",
     "fix.xyz.Vec3ArgumentMixin",
     "fix.xyz.WorldCoordinateSyntaxMixin",
     "fix.xyz.TeleportSendMixin",
