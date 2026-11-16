@@ -5,7 +5,7 @@ import java.util.List;
 
 import com.inf.farlands.InfsFarlands;
 import com.inf.farlands.util.pos.ExactPosition;
-import com.inf.long2.binaries.Binary256;
+import com.inf.long2.binaries.binary256.Binary256;
 import com.inf.long2.ints.Int256;
 
 import net.minecraft.client.Minecraft;
@@ -112,12 +112,12 @@ public class PositionUnitsDebugEntry implements DebugScreenEntry {
      */
     private static Binary256 farlands$largest(Binary256 x, Binary256 y, Binary256 z) {
         Binary256 largest = x;
-        Binary256 magnitude = x.abs();
-        if (y.abs().compareTo(magnitude) > 0) {
+        Binary256 magnitude = Binary256.abs(x);
+        if (Binary256.abs(y).compareTo(magnitude) > 0) {
             largest = y;
-            magnitude = y.abs();
+            magnitude = Binary256.abs(y);
         }
-        if (z.abs().compareTo(magnitude) > 0) {
+        if (Binary256.abs(z).compareTo(magnitude) > 0) {
             largest = z;
         }
         return largest;

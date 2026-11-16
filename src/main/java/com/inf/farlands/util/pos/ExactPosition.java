@@ -1,6 +1,6 @@
 package com.inf.farlands.util.pos;
 
-import com.inf.long2.binaries.Binary256;
+import com.inf.long2.binaries.binary256.Binary256;
 
 import net.minecraft.world.phys.AABB;
 

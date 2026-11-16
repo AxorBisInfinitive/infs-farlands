@@ -5,7 +5,7 @@ import com.inf.farlands.util.network.ServerPacketHandlers;
 import com.inf.farlands.util.network.Serverbounds;
 import com.inf.farlands.util.pos.ExactPosition;
 
-import com.inf.long2.binaries.Binary256;
+import com.inf.long2.binaries.binary256.Binary256;
 
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload.TypeAndCodec;
 import net.minecraft.server.level.ServerPlayer;

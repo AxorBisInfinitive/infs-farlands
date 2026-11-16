@@ -1,6 +1,6 @@
 package com.inf.farlands.util.pos;
 
-import com.inf.long2.binaries.Binary256;
+import com.inf.long2.binaries.binary256.Binary256;
 
 /**
  * 旧位置六轴的 256 位读写，供各实体类的 FIELD 注入共用同一形状。

@@ -3,7 +3,7 @@ package com.inf.farlands.client.mixin.position;
 import com.inf.farlands.network.position.ExactClientPositionPacket;
 import com.inf.farlands.util.pos.ExactPosition;
 
-import com.inf.long2.binaries.Binary256;
+import com.inf.long2.binaries.binary256.Binary256;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;

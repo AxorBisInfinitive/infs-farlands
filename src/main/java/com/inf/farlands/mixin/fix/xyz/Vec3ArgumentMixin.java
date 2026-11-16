@@ -1,7 +1,7 @@
 package com.inf.farlands.mixin.fix.xyz;
 
 import com.inf.farlands.util.pos.ExactTeleport;
-import com.inf.long2.binaries.Binary256;
+import com.inf.long2.binaries.binary256.Binary256;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.context.ParsedCommandNode;
 import com.mojang.brigadier.context.StringRange;

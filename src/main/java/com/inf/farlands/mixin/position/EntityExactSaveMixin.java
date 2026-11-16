@@ -4,7 +4,7 @@ import java.util.Optional;
 
 import com.inf.farlands.util.pos.ExactPosition;
 
-import com.inf.long2.binaries.Binary256;
+import com.inf.long2.binaries.binary256.Binary256;
 
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.storage.ValueInput;
@@ -99,23 +99,30 @@ public abstract class EntityExactSaveMixin {
         holder.farlands$markExactSync();
     }
 
-    /** 一个 256 位值拆成八个 int，高位在前。 */
+    /** 一个 256 位值拆成八个 int，高位在前。四个 long 来自 {@code toBytes} 的 32 字节大端编码。 */
     @Unique
     private static void farlands$put(int[] raw, int offset, Binary256 value) {
+        byte[] bytes = value.toBytes();
         for (int i = 0; i < 4; i++) {
-            long bits = value.getRawLong(i);
+            long bits = 0L;
+            for (int b = 0; b < 8; b++) {
+                bits = (bits << 8) | (bytes[i * 8 + b] & 0xFFL);
+            }
             raw[offset + i * 2] = (int) (bits >>> 32);
             raw[offset + i * 2 + 1] = (int) bits;
         }
     }
 
-    /** 八个 int 还原一个 256 位值。 */
+    /** 八个 int 还原一个 256 位值：摊成 32 字节大端，再交给 {@code of(byte[])}。 */
     @Unique
     private static Binary256 farlands$get(int[] raw, int offset) {
-        long a = ((long) raw[offset] << 32) | (raw[offset + 1] & 0xFFFFFFFFL);
-        long b = ((long) raw[offset + 2] << 32) | (raw[offset + 3] & 0xFFFFFFFFL);
-        long c = ((long) raw[offset + 4] << 32) | (raw[offset + 5] & 0xFFFFFFFFL);
-        long d = ((long) raw[offset + 6] << 32) | (raw[offset + 7] & 0xFFFFFFFFL);
-        return Binary256.fromRawBits(a, b, c, d);
+        byte[] bytes = new byte[32];
+        for (int i = 0; i < 4; i++) {
+            long bits = ((long) raw[offset + i * 2] << 32) | (raw[offset + i * 2 + 1] & 0xFFFFFFFFL);
+            for (int b = 0; b < 8; b++) {
+                bytes[i * 8 + b] = (byte) (bits >>> (56 - b * 8));
+            }
+        }
+        return Binary256.of(bytes);
     }
 }
