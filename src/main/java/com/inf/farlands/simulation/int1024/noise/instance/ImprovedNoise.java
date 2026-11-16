@@ -9,7 +9,8 @@ import net.minecraft.util.RandomSource;
  * <p>格点是 {@code Mth.floor} 取的 int。那个转换在 {@code |x| ≥ 2^31} 时饱和，远处所有坐标因此落回同一条
  * 置换通道，地形按通道重复，这就是边境之地。本类保留它，不换成 long：换掉等于把这个模组要复现的地形删掉。
  *
- * <p>long 只出现在本层之外：{@code Density.compute} 的形参是 long，进本类之前一次性转 double。
+ * <p>比 double 宽的类型只出现在本层之外：{@code Density.compute} 的形参是 {@code Int1024}，进本类之前一次性转
+ * double。
  *
  * <p>角点下标 {@code p(x + 1)}、{@code p(x0 + y + 1)} 那几处也在 int 上做加法、也会回绕。这不改变取值：
  * {@code p} 只取 {@code x & 0xFF}，而 32 位回绕不改低八位。
