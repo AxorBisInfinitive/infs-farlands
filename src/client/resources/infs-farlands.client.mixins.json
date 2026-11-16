@@ -3,6 +3,7 @@
   "package": "com.inf.farlands.client.mixin",
   "compatibilityLevel": "JAVA_25",
   "client": [
+    "chat.ChatScreenMixin",
     "debug.DebugEntryChunkGenerationMixin",
     "debug.DebugEntryPositionMixin",
     "debug.DebugScreenEntriesMixin",

@@ -31,6 +31,11 @@ public final class WorldBounds {
 
     private static final Int1024 PLAYABLE_SECTION_MAX = Int1024.of((long) MAX_PLAYABLE_SECTION);
 
+    /** 可表示方块界的 {@link Int1024} 形态，界值与 `inBlockAbsolute(long)` 同源。 */
+    private static final Int1024 ABSOLUTE_MIN = Int1024.of((long) ~FarlandsConstant.MAX_BLOCK);
+
+    private static final Int1024 ABSOLUTE_MAX = Int1024.of((long) FarlandsConstant.MAX_BLOCK);
+
     public static boolean inBlock(int v) {
         return v >= MIN_PLAYABLE_BLOCK && v <= MAX_PLAYABLE_BLOCK;
     }
@@ -62,6 +67,22 @@ public final class WorldBounds {
      */
     public static boolean inBlockAbsolute(long v) {
         return v >= ~FarlandsConstant.MAX_BLOCK && v <= FarlandsConstant.MAX_BLOCK;
+    }
+
+    /**
+     * 方块坐标是否在可表示范围内，方块坐标是 {@link Int1024}。
+     *
+     * <p>
+     * 与 {@link #inBlockAbsolute(long)} 同界，宽度不同：那一支到 long 为止。1024 域的坐标用本方法，否则界外的坐标会被
+     * 窄化后才比较，判成界内。
+     */
+    public static boolean inBlockAbsolute(Int1024 v) {
+        return v.compareTo(ABSOLUTE_MIN) >= 0 && v.compareTo(ABSOLUTE_MAX) <= 0;
+    }
+
+    /** 三轴方块坐标是否都在可表示范围内，任一轴界外即为假。 */
+    public static boolean inBlockAbsolute(Int1024 x, Int1024 y, Int1024 z) {
+        return inBlockAbsolute(x) && inBlockAbsolute(y) && inBlockAbsolute(z);
     }
 
     /**
