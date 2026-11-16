@@ -2,63 +2,36 @@ package com.inf.farlands.client.mixin.simulation;
 
 import com.inf.long2.ints.Int1024;
 import java.util.ArrayList;
-import com.inf.long2.ints.Int1024;
 import java.util.List;
 
-import com.inf.long2.ints.Int1024;
 import com.google.common.collect.Iterables;
 
-import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.simulation.SectionGetter;
-import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.simulation.SimulatedCollisionContext;
-import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.simulation.Simulation;
-import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.simulation.SimulationBlock;
-import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.simulation.SimulationHolder;
-import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.simulation.SimulationSection;
-import com.inf.long2.ints.Int1024;
 import com.inf.farlands.util.pos.ExactCollisionSource;
-import com.inf.long2.ints.Int1024;
 import com.inf.farlands.util.pos.ExactPosition;
 
-import com.inf.long2.ints.Int1024;
 import net.minecraft.client.Minecraft;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.core.BlockPos;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.util.Mth;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.world.entity.Entity;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.world.level.CollisionGetter;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.world.level.Level;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.world.level.block.Blocks;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.world.level.block.state.BlockState;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.world.phys.AABB;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.world.phys.shapes.BooleanOp;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.world.phys.shapes.CollisionContext;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.world.phys.shapes.Shapes;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
-import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.Mixin;
-import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.At;
-import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.Inject;
-import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
@@ -120,17 +93,17 @@ public interface CollisionGetterMixin extends ExactCollisionSource {
             return List.of();
         }
         // 帧：锚点非零时 box 已经是局部盒，段号要加回锚点；锚点为零时局部即世界，与改动前逐位相同。
-        long ax = 0L;
-        long ay = 0L;
-        long az = 0L;
+        Int1024 anchorX = Int1024.ZERO;
+        Int1024 anchorY = Int1024.ZERO;
+        Int1024 anchorZ = Int1024.ZERO;
         boolean framed = false;
         double localBottomY = 0.0;
         if (source instanceof ExactPosition exact) {
-            // 碰撞枚举的是段表（long）的坐标系，锚点在这里收窄；|x| < 2^63 时无损。
-            ax = exact.farlands$anchor(ExactPosition.POS_X).toLong();
-            ay = exact.farlands$anchor(ExactPosition.POS_Y).toLong();
-            az = exact.farlands$anchor(ExactPosition.POS_Z).toLong();
-            framed = ax != 0L || ay != 0L || az != 0L;
+            // 锚点与段表同宽，这里不做任何收窄；段内偏移在下面按 int 处理。
+            anchorX = exact.farlands$anchor(ExactPosition.POS_X);
+            anchorY = exact.farlands$anchor(ExactPosition.POS_Y);
+            anchorZ = exact.farlands$anchor(ExactPosition.POS_Z);
+            framed = !anchorX.isZero() || !anchorY.isZero() || !anchorZ.isZero();
             localBottomY = exact.farlands$local(ExactPosition.POS_Y);
         }
         long x0 = Mth.lfloor(box.minX - 1.0E-7) - 1L;
@@ -143,9 +116,16 @@ public interface CollisionGetterMixin extends ExactCollisionSource {
         List<VoxelShape> hits = null;
         BlockPos.MutableBlockPos localPos = new BlockPos.MutableBlockPos();
         boolean hasSection = false;
-        long sectionX = 0L;
-        long sectionY = 0L;
-        long sectionZ = 0L;
+        Int1024 sectionX = Int1024.ZERO;
+        Int1024 sectionY = Int1024.ZERO;
+        Int1024 sectionZ = Int1024.ZERO;
+        // 基段由锚点一次算出，段内只用 int；逐格不再把段号乘 16 加绝对坐标，2^63 之外因此不溢出。
+        Int1024 baseSectionX = anchorX.shift(-4);
+        Int1024 baseSectionY = anchorY.shift(-4);
+        Int1024 baseSectionZ = anchorZ.shift(-4);
+        int anchorLocalX = anchorX.and(Int1024.of(15L)).toInt();
+        int anchorLocalY = anchorY.and(Int1024.of(15L)).toInt();
+        int anchorLocalZ = anchorZ.and(Int1024.of(15L)).toInt();
         SimulationSection section = null;
         SectionGetter getter = null;
         CollisionContext context = null;
@@ -157,10 +137,16 @@ public interface CollisionGetterMixin extends ExactCollisionSource {
                     if (type == 3) {
                         continue;
                     }
-                    long sx = Math.floorDiv(ax + x, (long) SimulationSection.SIZE);
-                    long sy = Math.floorDiv(ay + y, (long) SimulationSection.SIZE);
-                    long sz = Math.floorDiv(az + z, (long) SimulationSection.SIZE);
-                    if (!hasSection || sx != sectionX || sy != sectionY || sz != sectionZ) {
+                    long blockX = anchorLocalX + x;
+                    long blockY = anchorLocalY + y;
+                    long blockZ = anchorLocalZ + z;
+                    long sxShift = Math.floorDiv(blockX, (long) SimulationSection.SIZE);
+                    long syShift = Math.floorDiv(blockY, (long) SimulationSection.SIZE);
+                    long szShift = Math.floorDiv(blockZ, (long) SimulationSection.SIZE);
+                    Int1024 sx = baseSectionX.add(Int1024.of(sxShift));
+                    Int1024 sy = baseSectionY.add(Int1024.of(syShift));
+                    Int1024 sz = baseSectionZ.add(Int1024.of(szShift));
+                    if (!hasSection || !sx.equals(sectionX) || !sy.equals(sectionY) || !sz.equals(sectionZ)) {
                         hasSection = true;
                         sectionX = sx;
                         sectionY = sy;
@@ -170,16 +156,15 @@ public interface CollisionGetterMixin extends ExactCollisionSource {
                         context = section == null ? null
                                 : source == null ? CollisionContext.empty()
                                         : framed ? new SimulatedCollisionContext(source,
-                                                localBottomY - (double) (sy * SimulationSection.SIZE - ay))
-                                                : new SimulatedCollisionContext(source,
-                                                        sy * SimulationSection.SIZE);
+                                                localBottomY - sy.shift(4).subtract(anchorY).toDouble())
+                                                : new SimulatedCollisionContext(source, sy.shift(4).toDouble());
                     }
                     if (section == null) {
                         continue;
                     }
-                    int localX = (int) (ax + x - sx * SimulationSection.SIZE);
-                    int localY = (int) (ay + y - sy * SimulationSection.SIZE);
-                    int localZ = (int) (az + z - sz * SimulationSection.SIZE);
+                    int localX = (int) (blockX - sxShift * SimulationSection.SIZE);
+                    int localY = (int) (blockY - syShift * SimulationSection.SIZE);
+                    int localZ = (int) (blockZ - szShift * SimulationSection.SIZE);
                     SimulationBlock block = section.blockAt(localX, localY, localZ);
                     if (block == null) {
                         continue;

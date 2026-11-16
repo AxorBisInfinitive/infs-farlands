@@ -2,25 +2,16 @@ package com.inf.farlands.client.mixin.render;
 
 import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.render.ExactCameraOrigin;
-import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
 import com.inf.farlands.util.pos.ExactPosition;
-import com.inf.long2.ints.Int1024;
 import com.llamalad7.mixinextras.injector.ModifyReturnValue;
 
-import com.inf.long2.ints.Int1024;
 import net.minecraft.client.Camera;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.world.entity.Entity;
 
-import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.Mixin;
-import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.Shadow;
-import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.At;
 
 /**

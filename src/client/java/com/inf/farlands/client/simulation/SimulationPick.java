@@ -1,5 +1,6 @@
 package com.inf.farlands.client.simulation;
 
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.util.pos.ExactPosition;
 
 import net.minecraft.core.BlockPos;
@@ -39,7 +40,7 @@ public final class SimulationPick {
      * <p>
      * 段原点与块内局部坐标分开给：画框那一侧要用相机帧把原点折成相机相对量，局部坐标则是形状的平移量。
      */
-    public record Hit(long originX, long originY, long originZ, int localX, int localY, int localZ,
+    public record Hit(Int1024 originX, Int1024 originY, Int1024 originZ, int localX, int localY, int localZ,
             VoxelShape shape) {
     }
 
@@ -60,43 +61,43 @@ public final class SimulationPick {
             return null;
         }
         ExactPosition holder = (ExactPosition) entity;
-        // 拾取走的是段表（long）的坐标系，锚点在这里收窄。|x| < 2^63 时收窄无损，更远的位置整条路径本就不可用。
-        long eyeAnchorX = holder.farlands$anchor(ExactPosition.POS_X).toLong();
-        long eyeAnchorY = holder.farlands$anchor(ExactPosition.POS_Y).toLong();
-        long eyeAnchorZ = holder.farlands$anchor(ExactPosition.POS_Z).toLong();
+        Int1024 eyeAnchorX = holder.farlands$anchor(ExactPosition.POS_X);
+        Int1024 eyeAnchorY = holder.farlands$anchor(ExactPosition.POS_Y);
+        Int1024 eyeAnchorZ = holder.farlands$anchor(ExactPosition.POS_Z);
         double eyeLocalX = holder.farlands$lerpLocal(ExactPosition.POS_X, partial);
         double eyeLocalY = holder.farlands$lerpLocal(ExactPosition.POS_Y, partial) + (double) entity.getEyeHeight();
         double eyeLocalZ = holder.farlands$lerpLocal(ExactPosition.POS_Z, partial);
         long stepX = (long) Math.floor(eyeLocalX);
         long stepY = (long) Math.floor(eyeLocalY);
         long stepZ = (long) Math.floor(eyeLocalZ);
-        eyeAnchorX += stepX;
-        eyeAnchorY += stepY;
-        eyeAnchorZ += stepZ;
+        Int1024 blockX = eyeAnchorX.add(Int1024.of(stepX));
+        Int1024 blockY = eyeAnchorY.add(Int1024.of(stepY));
+        Int1024 blockZ = eyeAnchorZ.add(Int1024.of(stepZ));
         eyeLocalX -= (double) stepX;
         eyeLocalY -= (double) stepY;
         eyeLocalZ -= (double) stepZ;
         Vec3 delta = view.scale(reach);
-        long startSectionX = Math.floorDiv(eyeAnchorX, (long) SimulationSection.SIZE);
-        long startSectionY = Math.floorDiv(eyeAnchorY, (long) SimulationSection.SIZE);
-        long startSectionZ = Math.floorDiv(eyeAnchorZ, (long) SimulationSection.SIZE);
-        double localEyeX = localIn(startSectionX * SimulationSection.SIZE, eyeAnchorX, eyeLocalX);
-        double localEyeY = localIn(startSectionY * SimulationSection.SIZE, eyeAnchorY, eyeLocalY);
-        double localEyeZ = localIn(startSectionZ * SimulationSection.SIZE, eyeAnchorZ, eyeLocalZ);
+        Int1024 startSectionX = blockX.shift(-4);
+        Int1024 startSectionY = blockY.shift(-4);
+        Int1024 startSectionZ = blockZ.shift(-4);
+        double localEyeX = localIn(startSectionX.shift(4), blockX, eyeLocalX);
+        double localEyeY = localIn(startSectionY.shift(4), blockY, eyeLocalY);
+        double localEyeZ = localIn(startSectionZ.shift(4), blockZ, eyeLocalZ);
         double localToX = localEyeX + delta.x;
         double localToY = localEyeY + delta.y;
         double localToZ = localEyeZ + delta.z;
-        Cursor cursor = new Cursor(simulation, eyeAnchorX, eyeAnchorY, eyeAnchorZ, eyeLocalX, eyeLocalY, eyeLocalZ,
-                delta);
+        Cursor cursor = new Cursor(simulation, startSectionX, startSectionY, startSectionZ, eyeAnchorX, eyeAnchorY,
+                eyeAnchorZ, eyeLocalX, eyeLocalY, eyeLocalZ, delta);
         double toX = Mth.lerp(NUDGE, localToX, localEyeX);
         double toY = Mth.lerp(NUDGE, localToY, localEyeY);
         double toZ = Mth.lerp(NUDGE, localToZ, localEyeZ);
         double fromX = Mth.lerp(NUDGE, localEyeX, localToX);
         double fromY = Mth.lerp(NUDGE, localEyeY, localToY);
         double fromZ = Mth.lerp(NUDGE, localEyeZ, localToZ);
-        long currentX = startSectionX * SimulationSection.SIZE + Mth.lfloor(fromX);
-        long currentY = startSectionY * SimulationSection.SIZE + Mth.lfloor(fromY);
-        long currentZ = startSectionZ * SimulationSection.SIZE + Mth.lfloor(fromZ);
+        // 游标落在「起点段」的段内坐标上，越出 0 到 15 时由 Cursor 换段。
+        int currentX = (int) Mth.lfloor(fromX);
+        int currentY = (int) Mth.lfloor(fromY);
+        int currentZ = (int) Mth.lfloor(fromZ);
         Hit hit = cursor.at(currentX, currentY, currentZ);
         if (hit != null) {
             return hit;
@@ -138,8 +139,8 @@ public final class SimulationPick {
     }
 
     /** 段内坐标：局部量减「段原点相对锚点的位置」，两个量都是小整数加小数，精确。 */
-    private static double localIn(long sectionOrigin, long anchor, double local) {
-        return local - (double) (sectionOrigin - anchor);
+    private static double localIn(Int1024 sectionOrigin, Int1024 anchor, double local) {
+        return local - sectionOrigin.subtract(anchor).toDouble();
     }
 
     /**
@@ -148,9 +149,12 @@ public final class SimulationPick {
     private static final class Cursor {
 
         private final Simulation simulation;
-        private final long eyeAnchorX;
-        private final long eyeAnchorY;
-        private final long eyeAnchorZ;
+        private final Int1024 baseSectionX;
+        private final Int1024 baseSectionY;
+        private final Int1024 baseSectionZ;
+        private final Int1024 eyeAnchorX;
+        private final Int1024 eyeAnchorY;
+        private final Int1024 eyeAnchorZ;
         private final double eyeLocalX;
         private final double eyeLocalY;
         private final double eyeLocalZ;
@@ -159,16 +163,20 @@ public final class SimulationPick {
 
         private SimulationSection section;
         private SectionGetter getter;
-        private long sectionX;
-        private long sectionY;
-        private long sectionZ;
+        private Int1024 sectionX;
+        private Int1024 sectionY;
+        private Int1024 sectionZ;
         private boolean hasSection;
         private Vec3 localFrom;
         private Vec3 localTo;
 
-        Cursor(Simulation simulation, long eyeAnchorX, long eyeAnchorY, long eyeAnchorZ, double eyeLocalX,
-                double eyeLocalY, double eyeLocalZ, Vec3 delta) {
+        Cursor(Simulation simulation, Int1024 baseSectionX, Int1024 baseSectionY, Int1024 baseSectionZ,
+                Int1024 eyeAnchorX, Int1024 eyeAnchorY, Int1024 eyeAnchorZ, double eyeLocalX, double eyeLocalY,
+                double eyeLocalZ, Vec3 delta) {
             this.simulation = simulation;
+            this.baseSectionX = baseSectionX;
+            this.baseSectionY = baseSectionY;
+            this.baseSectionZ = baseSectionZ;
             this.eyeAnchorX = eyeAnchorX;
             this.eyeAnchorY = eyeAnchorY;
             this.eyeAnchorZ = eyeAnchorZ;
@@ -179,30 +187,34 @@ public final class SimulationPick {
         }
 
         /** 该格上的命中；格不属于任何模拟段、为空、形状为空或射线不穿过形状时返回 null。 */
-        Hit at(long x, long y, long z) {
-            long sx = Math.floorDiv(x, (long) SimulationSection.SIZE);
-            long sy = Math.floorDiv(y, (long) SimulationSection.SIZE);
-            long sz = Math.floorDiv(z, (long) SimulationSection.SIZE);
-            if (!this.hasSection || sx != this.sectionX || sy != this.sectionY || sz != this.sectionZ) {
+        Hit at(int x, int y, int z) {
+            int sx = Math.floorDiv(x, SimulationSection.SIZE);
+            int sy = Math.floorDiv(y, SimulationSection.SIZE);
+            int sz = Math.floorDiv(z, SimulationSection.SIZE);
+            Int1024 keyX = this.baseSectionX.add(Int1024.of((long) sx));
+            Int1024 keyY = this.baseSectionY.add(Int1024.of((long) sy));
+            Int1024 keyZ = this.baseSectionZ.add(Int1024.of((long) sz));
+            if (!this.hasSection || !keyX.equals(this.sectionX) || !keyY.equals(this.sectionY)
+                    || !keyZ.equals(this.sectionZ)) {
                 this.hasSection = true;
-                this.sectionX = sx;
-                this.sectionY = sy;
-                this.sectionZ = sz;
-                this.section = this.simulation.sectionOrNull(sx, sy, sz);
+                this.sectionX = keyX;
+                this.sectionY = keyY;
+                this.sectionZ = keyZ;
+                this.section = this.simulation.sectionOrNull(keyX, keyY, keyZ);
                 this.getter = this.section == null ? null : new SectionGetter(this.section, this.simulation);
                 this.localFrom = new Vec3(
-                        localIn(sx * SimulationSection.SIZE, this.eyeAnchorX, this.eyeLocalX),
-                        localIn(sy * SimulationSection.SIZE, this.eyeAnchorY, this.eyeLocalY),
-                        localIn(sz * SimulationSection.SIZE, this.eyeAnchorZ, this.eyeLocalZ));
+                        localIn(keyX.shift(4), this.eyeAnchorX, this.eyeLocalX),
+                        localIn(keyY.shift(4), this.eyeAnchorY, this.eyeLocalY),
+                        localIn(keyZ.shift(4), this.eyeAnchorZ, this.eyeLocalZ));
                 this.localTo = new Vec3(this.localFrom.x + this.delta.x, this.localFrom.y + this.delta.y,
                         this.localFrom.z + this.delta.z);
             }
             if (this.section == null) {
                 return null;
             }
-            int localX = (int) (x - this.sectionX * SimulationSection.SIZE);
-            int localY = (int) (y - this.sectionY * SimulationSection.SIZE);
-            int localZ = (int) (z - this.sectionZ * SimulationSection.SIZE);
+            int localX = x - sx * SimulationSection.SIZE;
+            int localY = y - sy * SimulationSection.SIZE;
+            int localZ = z - sz * SimulationSection.SIZE;
             SimulationBlock block = this.section.blockAt(localX, localY, localZ);
             if (block == null) {
                 return null;
@@ -219,8 +231,8 @@ public final class SimulationPick {
             if (hit == null) {
                 return null;
             }
-            return new Hit(this.sectionX * SimulationSection.SIZE, this.sectionY * SimulationSection.SIZE,
-                    this.sectionZ * SimulationSection.SIZE, localX, localY, localZ, shape);
+            return new Hit(this.sectionX.shift(4), this.sectionY.shift(4), this.sectionZ.shift(4), localX,
+                    localY, localZ, shape);
         }
     }
 }

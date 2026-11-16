@@ -2,85 +2,27 @@ package com.inf.farlands.client.simulation;
 
 import com.inf.farlands.client.render.FrameMath;
 import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import java.util.HashMap;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import java.util.HashSet;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import java.util.List;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import java.util.Map;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import java.util.Set;
 
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.client.render.AnchoredFrustum;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.client.render.simulation.SimulationGeometry;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.simulation.model.SimulationSectionKey;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.util.pos.ExactPosition;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import com.mojang.blaze3d.vertex.VertexSorting;
 
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.client.multiplayer.ClientLevel;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.core.Holder;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.core.registries.Registries;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.world.level.CardinalLighting;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.world.level.biome.Biome;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.world.level.biome.Biomes;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.world.level.chunk.DataLayer;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.world.level.chunk.LevelChunkSection;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.world.level.chunk.PalettedContainerFactory;
 
 /**
@@ -100,13 +42,13 @@ import net.minecraft.world.level.chunk.PalettedContainerFactory;
  */
 public final class Simulation {
 
-    private final Map<SectionKey, SimulationSection> sections = new HashMap<>();
+    private final Map<SimulationSectionKey, SimulationSection> sections = new HashMap<>();
 
     /** 内容变过、等下一次 {@link #commit} 登记进渲染列表的段。 */
-    private final Set<SectionKey> snapDirty = new HashSet<>();
+    private final Set<SimulationSectionKey> snapDirty = new HashSet<>();
 
     /** 27 格邻域缓存，按段键存。只有段集合增删时才整份重建，见 {@link Neighborhood}。 */
-    private final Map<SectionKey, Neighborhood> neighborhoods = new HashMap<>();
+    private final Map<SimulationSectionKey, Neighborhood> neighborhoods = new HashMap<>();
 
     /** 段集合的增删代数。邻域缓存的段引用按它判是否还算数。 */
     private int structureVersion;
@@ -141,7 +83,7 @@ public final class Simulation {
     private ClientLevel clientLevel;
 
     /** 几何尚未烘的段。每 tick 按到相机的距离取最近的一批。 */
-    private final Set<SectionKey> pending = new HashSet<>();
+    private final Set<SimulationSectionKey> pending = new HashSet<>();
 
     /**
      * 关卡代际，{@link #attach} 与 {@link #clear} 时自增。在途烘焙完成时按它判结果是否还属于这一关。
@@ -210,9 +152,9 @@ public final class Simulation {
      * {@code DataLayer} 里，删掉对象邻段就会采到 0 光。所以走 {@code applyAir} 只装群系与光照，跳过 4096 格
      * 方块转换，不进待烘集合，并让邻段重烘一次以拿到新的光。
      */
-    public void applySection(long sectionX, long sectionY, long sectionZ, LevelChunkSection container,
+    public void applySection(Int1024 sectionX, Int1024 sectionY, Int1024 sectionZ, LevelChunkSection container,
             int shapeMode, DataLayer blockLight, DataLayer skyLight) {
-        SectionKey local = new SectionKey(sectionX, sectionY, sectionZ);
+        SimulationSectionKey local = new SimulationSectionKey(sectionX, sectionY, sectionZ);
         if (container.hasOnlyAir()) {
             SimulationSection section = this.section(local);
             long before = section.visibility();
@@ -243,9 +185,9 @@ public final class Simulation {
         this.snapDirty.add(local);
     }
 
-    /** 丢掉服务端撤回的一段。段号在收包处已收窄到 long 并核过范围。 */
-    public void dropSection(long sectionX, long sectionY, long sectionZ) {
-        this.removeSection(new SectionKey(sectionX, sectionY, sectionZ));
+    /** 丢掉服务端撤回的一段。段号与客户端段表同宽，不再收窄。 */
+    public void dropSection(Int1024 sectionX, Int1024 sectionY, Int1024 sectionZ) {
+        this.removeSection(new SimulationSectionKey(sectionX, sectionY, sectionZ));
     }
 
 
@@ -256,7 +198,7 @@ public final class Simulation {
      * 分开的理由是释放的批次：解绑成百上千列时逐列建 fence 会把主线程按在 GPU 上，所以那条路径收集键后调
      * {@link SimulationGeometry#releaseAll}。单列删除走 {@link #removeSection}，它在本方法之后补一次释放。
      */
-    private void farlands$detach(SectionKey key) {
+    private void farlands$detach(SimulationSectionKey key) {
         SimulationSection removed = this.sections.remove(key);
         if (removed != null) {
             this.structureVersion++;
@@ -282,10 +224,10 @@ public final class Simulation {
      * 群系混合取样只在本段所在的 Y 平面上做，横向最远七格，所以纵向邻段不参与，横向两侧各一段就够。段内容一换，
      * 本段与两侧邻段跨边界取样得到的块色就都旧了。
      */
-    private void farlands$clearTintAround(SectionKey key) {
+    private void farlands$clearTintAround(SimulationSectionKey key) {
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
-                SimulationSection neighbor = this.sectionOrNull(key.x() + dx, key.y(), key.z() + dz);
+                SimulationSection neighbor = this.sectionOrNull(key.x().add(Int1024.of((long) dx)), key.y(), key.z().add(Int1024.of((long) dz)));
                 if (neighbor != null) {
                     neighbor.clearTints();
                 }
@@ -303,14 +245,14 @@ public final class Simulation {
      * <p>
      * 只放回存在的六向邻段，对角不需要：剔除与角采样只沿面方向。存在性变化没有脏范围可判，六个面邻段一律带上。
      */
-    private void farlands$requeueNeighbors(SectionKey key) {
+    private void farlands$requeueNeighbors(SimulationSectionKey key) {
         for (int dx = -1; dx <= 1; dx++) {
             for (int dy = -1; dy <= 1; dy++) {
                 for (int dz = -1; dz <= 1; dz++) {
                     if (dx == 0 && dy == 0 && dz == 0) {
                         continue;
                     }
-                    SectionKey neighbor = new SectionKey(key.x() + dx, key.y() + dy, key.z() + dz);
+                    SimulationSectionKey neighbor = new SimulationSectionKey(key.x().add(Int1024.of((long) dx)), key.y().add(Int1024.of((long) dy)), key.z().add(Int1024.of((long) dz)));
                     if (this.sections.containsKey(neighbor)) {
                         this.pending.add(neighbor);
                     }
@@ -330,14 +272,14 @@ public final class Simulation {
      * 这一支只判存在性，不判光：邻段烘制时本格已在，则它的面剔除与跨边界采样都按「有这一段」算过，本格的到达不改变
      * 那些结论。全量的那一支换的是正确性，这一支换的是次数。
      */
-    private void farlands$requeueFilledAround(SectionKey key) {
+    private void farlands$requeueFilledAround(SimulationSectionKey key) {
         for (int dx = -1; dx <= 1; dx++) {
             for (int dy = -1; dy <= 1; dy++) {
                 for (int dz = -1; dz <= 1; dz++) {
                     if (dx == 0 && dy == 0 && dz == 0) {
                         continue;
                     }
-                    SectionKey neighborKey = new SectionKey(key.x() + dx, key.y() + dy, key.z() + dz);
+                    SimulationSectionKey neighborKey = new SimulationSectionKey(key.x().add(Int1024.of((long) dx)), key.y().add(Int1024.of((long) dy)), key.z().add(Int1024.of((long) dz)));
                     SimulationSection neighbor = this.sections.get(neighborKey);
                     if (neighbor == null) {
                         continue;
@@ -362,11 +304,11 @@ public final class Simulation {
         this.farlands$drainCompleted();
         net.minecraft.world.entity.player.Player player = net.minecraft.client.Minecraft.getInstance().player;
         if (player == null) {
-            this.farlands$submit(0L, 0L, false);
+            this.farlands$submit(Int1024.ZERO, Int1024.ZERO, false);
         } else {
             ExactPosition exact = (ExactPosition) player;
-            this.farlands$submit(exact.farlands$cellCoord(ExactPosition.POS_X) >> 4,
-                    exact.farlands$cellCoord(ExactPosition.POS_Z) >> 4, true);
+            this.farlands$submit(exact.farlands$cellCoord1024(ExactPosition.POS_X).shift(-4),
+                    exact.farlands$cellCoord1024(ExactPosition.POS_Z).shift(-4), true);
         }
         this.commit();
     }
@@ -382,7 +324,7 @@ public final class Simulation {
         SimulationMeshPool.Completed done;
         while ((done = SimulationMeshPool.take()) != null) {
             BakeSnapshot snapshot = done.snapshot();
-            SectionKey key = snapshot.key();
+            SimulationSectionKey key = snapshot.key();
             if (snapshot.generation() != this.generation) {
                 SimulationMesher.release(done.build());
                 continue;
@@ -456,19 +398,19 @@ public final class Simulation {
      * 无玩家基准时不排序，按 {@code pending} 的迭代顺序取：段号在模拟之地是两亿级，拿 {@code (0, 0)} 当中心会把
      * 远处的列排到前面。
      */
-    private void farlands$submit(long centerX, long centerZ, boolean positioned) {
+    private void farlands$submit(Int1024 centerX, Int1024 centerZ, boolean positioned) {
         int quota = Math.min(BUILD_PER_TICK, SimulationMeshPool.freeSlots());
         if (quota <= 0 || this.pending.isEmpty()) {
             return;
         }
         int want = Math.min(quota, this.pending.size());
-        SectionKey[] picked = new SectionKey[want];
+        SimulationSectionKey[] picked = new SimulationSectionKey[want];
         int found;
         if (positioned) {
             found = this.farlands$pickNearest(picked, centerX, centerZ);
         } else {
             found = 0;
-            for (SectionKey key : this.pending) {
+            for (SimulationSectionKey key : this.pending) {
                 if (found == want) {
                     break;
                 }
@@ -476,7 +418,7 @@ public final class Simulation {
             }
         }
         for (int i = 0; i < found; i++) {
-            SectionKey key = picked[i];
+            SimulationSectionKey key = picked[i];
             this.pending.remove(key);
             SimulationSection section = this.sections.get(key);
             if (section == null) {
@@ -501,13 +443,14 @@ public final class Simulation {
      * 选取用容量等于本批配额的固定最大堆，堆顶是已选中最差的一个。候选只与堆顶比一次，更好才替换并下沉。逐候选线性找
      * 最大在配额上百、待烘上万时是千万次比较，与烘制本身同量级。
      */
-    private int farlands$pickNearest(SectionKey[] picked, long centerX, long centerZ) {
+    private int farlands$pickNearest(SimulationSectionKey[] picked, Int1024 centerX, Int1024 centerZ) {
         int want = picked.length;
         long[] scores = new long[want];
         int size = 0;
-        for (SectionKey key : this.pending) {
-            long dx = key.x() - centerX;
-            long dz = key.z() - centerZ;
+        for (SimulationSectionKey key : this.pending) {
+            // 待烘集只含窗口内的段，水平差不超过半径，收窄无损。
+            long dx = key.x().subtract(centerX).toLong();
+            long dz = key.z().subtract(centerZ).toLong();
             long score = dx * dx + dz * dz;
             if (!this.visibility.containsVisible(key.x(), key.y(), key.z())) {
                 score += UNREACHABLE_BIAS;
@@ -529,7 +472,7 @@ public final class Simulation {
     }
 
     /** 新入堆的元素上浮到它在最大堆里的位置。 */
-    private static void farlands$siftUp(SectionKey[] keys, long[] scores, int index) {
+    private static void farlands$siftUp(SimulationSectionKey[] keys, long[] scores, int index) {
         while (index > 0) {
             int parent = (index - 1) >>> 1;
             if (scores[parent] >= scores[index]) {
@@ -541,7 +484,7 @@ public final class Simulation {
     }
 
     /** 替换堆顶之后下沉到它在最大堆里的位置。 */
-    private static void farlands$siftDown(SectionKey[] keys, long[] scores, int size) {
+    private static void farlands$siftDown(SimulationSectionKey[] keys, long[] scores, int size) {
         int index = 0;
         while (true) {
             int left = (index << 1) + 1;
@@ -558,8 +501,8 @@ public final class Simulation {
         }
     }
 
-    private static void farlands$swap(SectionKey[] keys, long[] scores, int a, int b) {
-        SectionKey key = keys[a];
+    private static void farlands$swap(SimulationSectionKey[] keys, long[] scores, int a, int b) {
+        SimulationSectionKey key = keys[a];
         keys[a] = keys[b];
         keys[b] = key;
         long score = scores[a];
@@ -574,7 +517,7 @@ public final class Simulation {
      * 27 格邻域在这里解析：工作线程不能查 {@code sections}，那是普通 HashMap。客户端那几样物件也在这里取，
      * 资源重载与设置界面都会换掉它们。
      */
-    private BakeSnapshot farlands$snapshot(SectionKey key, SimulationSection section) {
+    private BakeSnapshot farlands$snapshot(SimulationSectionKey key, SimulationSection section) {
         Neighborhood neighborhood = this.neighborhoods.computeIfAbsent(key, k -> new Neighborhood());
         if (neighborhood.version != this.structureVersion) {
             // 段集合增删过：段引用全部重查一次，再记下当时的版本。
@@ -582,7 +525,7 @@ public final class Simulation {
                 for (int dy = -1; dy <= 1; dy++) {
                     for (int dz = -1; dz <= 1; dz++) {
                         int slot = (dx + 1) * 9 + (dy + 1) * 3 + (dz + 1);
-                        SimulationSection neighbor = this.sectionOrNull(key.x() + dx, key.y() + dy, key.z() + dz);
+                        SimulationSection neighbor = this.sectionOrNull(key.x().add(Int1024.of((long) dx)), key.y().add(Int1024.of((long) dy)), key.z().add(Int1024.of((long) dz)));
                         neighborhood.sections[slot] = neighbor;
                         neighborhood.contents[slot] = neighbor == null ? null : neighbor.content();
                     }
@@ -616,10 +559,10 @@ public final class Simulation {
      * <p>
      * 基准取自提交那一刻的玩家位置：烘制跑在工作线程上，之后相机移动不会让已烘的段重排。
      */
-    private VertexSorting farlands$sorting(SectionKey key) {
-        long originX = key.x() << 4;
-        long originY = key.y() << 4;
-        long originZ = key.z() << 4;
+    private VertexSorting farlands$sorting(SimulationSectionKey key) {
+        Int1024 originX = key.x().shift(4);
+        Int1024 originY = key.y().shift(4);
+        Int1024 originZ = key.z().shift(4);
         net.minecraft.world.entity.player.Player player = net.minecraft.client.Minecraft.getInstance().player;
         if (player == null) {
             return VertexSorting.byDistance(0.0F, 0.0F, 0.0F);
@@ -627,11 +570,11 @@ public final class Simulation {
         ExactPosition exact = (ExactPosition) player;
         return VertexSorting.byDistance(
                 (float) FrameMath.offset(exact.farlands$anchor(ExactPosition.POS_X),
-                        exact.farlands$local(ExactPosition.POS_X), Int1024.of(originX), 0.0),
+                        exact.farlands$local(ExactPosition.POS_X), originX, 0.0),
                 (float) FrameMath.offset(exact.farlands$anchor(ExactPosition.POS_Y),
-                        exact.farlands$local(ExactPosition.POS_Y), Int1024.of(originY), 0.0),
+                        exact.farlands$local(ExactPosition.POS_Y), originY, 0.0),
                 (float) FrameMath.offset(exact.farlands$anchor(ExactPosition.POS_Z),
-                        exact.farlands$local(ExactPosition.POS_Z), Int1024.of(originZ), 0.0));
+                        exact.farlands$local(ExactPosition.POS_Z), originZ, 0.0));
     }
 
     /**
@@ -653,7 +596,7 @@ public final class Simulation {
     }
 
     /** 取或建一段。键已在手上时用这一支，省一次键构造。 */
-    public SimulationSection section(SectionKey key) {
+    public SimulationSection section(SimulationSectionKey key) {
         SimulationSection section = this.sections.get(key);
         if (section == null) {
             section = new SimulationSection(key.x(), key.y(), key.z(), this.biomeFactory, this.defaultBiome);
@@ -672,8 +615,8 @@ public final class Simulation {
      * 建出的段必须由调用方用 {@link #removeSection} 删除。渲染、碰撞、拾取都按 {@code sections} 判存在，所以建了
      * 不删会一直参与三路取数，直到 {@link #clear} 或换层。
      */
-    public SimulationSection section(long sectionX, long sectionY, long sectionZ) {
-        return this.section(new SectionKey(sectionX, sectionY, sectionZ));
+    public SimulationSection section(Int1024 sectionX, Int1024 sectionY, Int1024 sectionZ) {
+        return this.section(new SimulationSectionKey(sectionX, sectionY, sectionZ));
     }
 
     /**
@@ -683,13 +626,13 @@ public final class Simulation {
      * 段的生命周期归调用方：谁建谁删，本类不做任何按时间或按距离的回收。本方法收口四件：从 {@code sections}
      * 摘、从待烘集合摘、释放显存、把邻列放回待烘。必须在客户端主线程调，显存释放走 fence 延迟关闭。
      */
-    public void removeSection(SectionKey key) {
+    public void removeSection(SimulationSectionKey key) {
         this.farlands$detach(key);
     }
 
     /** 摘掉一段。 */
-    public void removeSection(long sectionX, long sectionY, long sectionZ) {
-        this.removeSection(new SectionKey(sectionX, sectionY, sectionZ));
+    public void removeSection(Int1024 sectionX, Int1024 sectionY, Int1024 sectionZ) {
+        this.removeSection(new SimulationSectionKey(sectionX, sectionY, sectionZ));
     }
 
     /** 全部清空。卸关卡时调用。 */
@@ -727,21 +670,21 @@ public final class Simulation {
      * 传播跑在后台线程，由「图输入版本变化」或「相机段变化」驱动，所以这里不再有节流：异步本身就是节流，一次只有一个
      * 任务在途。裁剪在主线程做，只在图发布或相机转动跨 2 度时重跑。
      */
-    public List<SnapSection> visibleSections(long cameraAnchorX, long cameraAnchorY, long cameraAnchorZ,
+    public List<SnapSection> visibleSections(Int1024 cameraAnchorX, Int1024 cameraAnchorY, Int1024 cameraAnchorZ,
             double cameraLocalX, double cameraLocalY, double cameraLocalZ, float xRot, float yRot,
             AnchoredFrustum frustum) {
-        long blockX = cameraAnchorX + (long) Math.floor(cameraLocalX);
-        long blockY = cameraAnchorY + (long) Math.floor(cameraLocalY);
-        long blockZ = cameraAnchorZ + (long) Math.floor(cameraLocalZ);
-        long sectionX = blockX >> 4;
-        long sectionY = blockY >> 4;
-        long sectionZ = blockZ >> 4;
-        double inSectionX = cameraLocalX - Math.floor(cameraLocalX) + (double) (blockX - (sectionX << 4));
-        double inSectionY = cameraLocalY - Math.floor(cameraLocalY) + (double) (blockY - (sectionY << 4));
-        double inSectionZ = cameraLocalZ - Math.floor(cameraLocalZ) + (double) (blockZ - (sectionZ << 4));
+        Int1024 blockX = cameraAnchorX.add(Int1024.of((long) Math.floor(cameraLocalX)));
+        Int1024 blockY = cameraAnchorY.add(Int1024.of((long) Math.floor(cameraLocalY)));
+        Int1024 blockZ = cameraAnchorZ.add(Int1024.of((long) Math.floor(cameraLocalZ)));
+        Int1024 sectionX = blockX.shift(-4);
+        Int1024 sectionY = blockY.shift(-4);
+        Int1024 sectionZ = blockZ.shift(-4);
+        double inSectionX = cameraLocalX - Math.floor(cameraLocalX) + blockX.subtract(sectionX.shift(4)).toDouble();
+        double inSectionY = cameraLocalY - Math.floor(cameraLocalY) + blockY.subtract(sectionY.shift(4)).toDouble();
+        double inSectionZ = cameraLocalZ - Math.floor(cameraLocalZ) + blockZ.subtract(sectionZ.shift(4)).toDouble();
         return this.visibility.update(this, new SimulationVisibility.View(sectionX, sectionY, sectionZ, inSectionX,
-                inSectionY, inSectionZ, cameraAnchorX, cameraAnchorY, cameraAnchorZ, cameraLocalX, cameraLocalY,
-                cameraLocalZ, xRot, yRot, frustum));
+                inSectionY, inSectionZ, cameraAnchorX, cameraAnchorY, cameraAnchorZ,
+                cameraLocalX, cameraLocalY, cameraLocalZ, xRot, yRot, frustum));
     }
 
     /** 图输入的版本，见 {@link #graphVersion}。 */
@@ -773,7 +716,7 @@ public final class Simulation {
     }
 
     /** 段表本体，供 {@link SimulationVisibility} 传播用。同包可见，只在客户端主线程读。 */
-    Map<SectionKey, SimulationSection> sectionMap() {
+    Map<SimulationSectionKey, SimulationSection> sectionMap() {
         return this.sections;
     }
 
@@ -793,8 +736,8 @@ public final class Simulation {
     }
 
     /** 只查不建。该列没有模拟段时返回 null。 */
-    public SimulationSection sectionOrNull(long sectionX, long sectionY, long sectionZ) {
-        return this.sections.get(new SectionKey(sectionX, sectionY, sectionZ));
+    public SimulationSection sectionOrNull(Int1024 sectionX, Int1024 sectionY, Int1024 sectionZ) {
+        return this.sections.get(new SimulationSectionKey(sectionX, sectionY, sectionZ));
     }
 
     /**
@@ -820,7 +763,7 @@ public final class Simulation {
         }
         int reach = Math.max(2, net.minecraft.client.Minecraft.getInstance().options.biomeBlendRadius().get());
         Set<SnapSection> live = this.snapshot.sectionsMutable();
-        for (SectionKey key : this.snapDirty) {
+        for (SimulationSectionKey key : this.snapDirty) {
             SimulationSection section = this.sections.get(key);
             if (section == null || !section.eligible()) {
                 continue;
@@ -860,9 +803,9 @@ public final class Simulation {
      * 只放回存在的段：未建的段放回去也只会在烘制时被跳过。
      */
     private void farlands$requeueGeometry(SimulationSection section, SimulationSection.Dirty dirty, int reach) {
-        long centerX = section.sectionX();
-        long centerY = section.sectionY();
-        long centerZ = section.sectionZ();
+        Int1024 centerX = section.sectionX();
+        Int1024 centerY = section.sectionY();
+        Int1024 centerZ = section.sectionZ();
         boolean west = dirty.minX() < reach;
         boolean east = dirty.maxX() > SimulationSection.SIZE - 1 - reach;
         boolean down = dirty.minY() < reach;
@@ -881,7 +824,7 @@ public final class Simulation {
                     if (dz < 0 && !north || dz > 0 && !south) {
                         continue;
                     }
-                    SectionKey key = new SectionKey(centerX + dx, centerY + dy, centerZ + dz);
+                    SimulationSectionKey key = new SimulationSectionKey(centerX.add(Int1024.of((long) dx)), centerY.add(Int1024.of((long) dy)), centerZ.add(Int1024.of((long) dz)));
                     SimulationSection neighbor = this.sections.get(key);
                     if (neighbor == null) {
                         continue;
@@ -905,8 +848,7 @@ public final class Simulation {
      * <p>
      * 公开是因为 {@code SimulationGeometry} 与 {@code SimulationRenderPass} 在另一个包里要用它做显存表的键。
      */
-    public record SectionKey(long x, long y, long z) {
-    }
+
 
     /**
      * 渲染列表。内容按段存在，列表只记「哪些段有内容」，所以只随段的空与非空转换增删，不随内容变化重建。
@@ -939,20 +881,20 @@ public final class Simulation {
      * 引用而不是逐块拷贝：渲染读的是上传好的段几何，碰撞与拾取按 {@code occupiedIndex} 现取。代价是快照从
      * 完全不可变退成「引用不可变」，那两张容器只在客户端主线程写，碰撞与拾取也在主线程调，所以读侧不跨线程。
      */
-    public record SnapSection(long sectionX, long sectionY, long sectionZ, SectionKey key,
+    public record SnapSection(Int1024 sectionX, Int1024 sectionY, Int1024 sectionZ, SimulationSectionKey key,
             SimulationSection section) {
 
         /** 世界坐标的段原点。 */
-        public long originX() {
-            return this.sectionX * SimulationSection.SIZE;
+        public Int1024 originX() {
+            return this.sectionX.shift(4);
         }
 
-        public long originY() {
-            return this.sectionY * SimulationSection.SIZE;
+        public Int1024 originY() {
+            return this.sectionY.shift(4);
         }
 
-        public long originZ() {
-            return this.sectionZ * SimulationSection.SIZE;
+        public Int1024 originZ() {
+            return this.sectionZ.shift(4);
         }
     }
 }

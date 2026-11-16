@@ -2,33 +2,20 @@ package com.inf.farlands.client.mixin.position;
 
 import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
 import com.inf.farlands.util.pos.ExactPosition;
 
-import com.inf.long2.ints.Int1024;
 import net.minecraft.client.Minecraft;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.client.renderer.entity.FishingHookRenderer;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.client.renderer.entity.state.FishingHookRenderState;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.util.Mth;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.world.entity.HumanoidArm;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.world.entity.player.Player;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.world.entity.projectile.FishingHook;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.world.phys.Vec3;
 
-import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.Mixin;
-import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.At;
-import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.Inject;
-import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**

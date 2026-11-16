@@ -1,5 +1,6 @@
 package com.inf.farlands.client.simulation;
 
+import com.inf.farlands.simulation.model.SimulationSectionKey;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
@@ -7,6 +8,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import com.inf.farlands.simulation.model.SimulationSectionData;
 import com.inf.farlands.util.world.WorldBounds;
+import com.inf.long2.ints.Int1024;
 import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.vertex.VertexFormat;
 
@@ -77,9 +79,9 @@ public final class SimulationSection {
         }
     }
 
-    private final long sectionX;
-    private final long sectionY;
-    private final long sectionZ;
+    private final Int1024 sectionX;
+    private final Int1024 sectionY;
+    private final Int1024 sectionZ;
 
     /** 可玩界外为真，界内为假。界内的段静默失效。 */
     private final boolean eligible;
@@ -184,7 +186,7 @@ public final class SimulationSection {
      */
     private final Map<ColorResolver, int[][]> tints = new ConcurrentHashMap<>();
 
-    SimulationSection(long sectionX, long sectionY, long sectionZ, PalettedContainerFactory biomeFactory,
+    SimulationSection(Int1024 sectionX, Int1024 sectionY, Int1024 sectionZ, PalettedContainerFactory biomeFactory,
             Holder<Biome> defaultBiome) {
         this.sectionX = sectionX;
         this.sectionY = sectionY;
@@ -196,29 +198,29 @@ public final class SimulationSection {
                 this.shapeMode);
     }
 
-    public long sectionX() {
+    public Int1024 sectionX() {
         return this.sectionX;
     }
 
-    public long sectionY() {
+    public Int1024 sectionY() {
         return this.sectionY;
     }
 
-    public long sectionZ() {
+    public Int1024 sectionZ() {
         return this.sectionZ;
     }
 
-    /** 世界坐标的段原点，段坐标乘 16，long 上精确。 */
-    public long originX() {
-        return this.sectionX * SIZE;
+    /** 世界坐标的段原点，段坐标左移四位，1024 位上精确。 */
+    public Int1024 originX() {
+        return this.sectionX.shift(4);
     }
 
-    public long originY() {
-        return this.sectionY * SIZE;
+    public Int1024 originY() {
+        return this.sectionY.shift(4);
     }
 
-    public long originZ() {
-        return this.sectionZ * SIZE;
+    public Int1024 originZ() {
+        return this.sectionZ.shift(4);
     }
 
     /** 已发布的内容，工作线程读它。 */
@@ -753,7 +755,7 @@ public final class SimulationSection {
             return;
         }
         this.snap = new Simulation.SnapSection(this.sectionX, this.sectionY, this.sectionZ,
-                new Simulation.SectionKey(this.sectionX, this.sectionY, this.sectionZ), this);
+                new SimulationSectionKey(this.sectionX, this.sectionY, this.sectionZ), this);
     }
 
     /**
@@ -812,8 +814,7 @@ public final class SimulationSection {
         return (localX << 8) | (localY << 4) | localZ;
     }
 
-    private static boolean farlands$playable(long sectionCoord) {
-        return sectionCoord >= WorldBounds.MIN_PLAYABLE_SECTION
-                && sectionCoord <= WorldBounds.MAX_PLAYABLE_SECTION;
+    private static boolean farlands$playable(Int1024 sectionCoord) {
+        return WorldBounds.inSection(sectionCoord);
     }
 }

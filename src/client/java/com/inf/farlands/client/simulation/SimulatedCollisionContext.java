@@ -6,12 +6,13 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.shapes.EntityCollisionContext;
 
 /**
- * 模拟层的碰撞上下文：把实体脚部的高度折算到段内局部坐标。
+ * 模拟层的碰撞上下文：实体脚部高度已经折算到段内局部坐标。
  *
  * <p>
  * {@code EntityCollisionContext.isAbove} 的比较式是 {@code entityBottom > pos.getY() + shape.max(Y)}，vanilla 里
- * 两侧都是世界量。模拟层的 {@code pos} 是段内局部坐标，所以必须把 {@code entityBottom} 减去段原点，否则该比较式
- * 在 {@code 2^40} 处恒真。
+ * 两侧都是世界量。模拟层的 {@code pos} 是段内局部坐标，所以调用方必须先把 {@code entityBottom} 折算成本段的局部量，
+ * 否则该比较式在任何量级上恒真。折算在 {@code CollisionGetterMixin} 里做：锚点非零时用
+ * {@code localBottomY - (段原点 - 锚点)}，锚点为零时用 {@code 段原点}。
  *
  * <p>
  * 必须是 {@code EntityCollisionContext} 的子类而不是直接实现 {@code CollisionContext}：vanilla 有两处把上下文
@@ -23,15 +24,12 @@ import net.minecraft.world.phys.shapes.EntityCollisionContext;
  */
 public final class SimulatedCollisionContext extends EntityCollisionContext {
 
-    public SimulatedCollisionContext(Entity source, long sectionOriginY) {
-        this(source, source.getY() - (double) sectionOriginY);
-    }
-
     /**
-     * 帧内版本：{@code entityBottom} 已经折算成段内局部量，不再减段原点。
+     * 入参 {@code entityBottom} 已经是段内局部量，本类不再做任何坐标折算。
      *
      * <p>
-     * 帧的锚点非零时 {@code source.getY()} 是 double 投影，在 int64 上误差可达 1024，不能再用它减段原点。
+     * 折算不能放在这里由 {@code source.getY()} 现减：帧的锚点非零时那个值是 double 投影，误差随量级增长，减出来的
+     * 局部量已经不是本段的那一格。
      */
     public SimulatedCollisionContext(Entity source, double entityBottom) {
         super(source.isDescending(), false, entityBottom,

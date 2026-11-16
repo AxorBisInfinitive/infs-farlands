@@ -11,6 +11,8 @@ import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 
 import com.inf.farlands.client.render.AnchoredFrustum;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
 
 import net.minecraft.core.Direction;
 import net.minecraft.util.Util;
@@ -100,8 +102,8 @@ final class SimulationVisibility {
     private static final float ROTATION_STEP = 2.0F;
 
     /** 一次调用要用的相机与视锥，全部由主线程给出。 */
-    record View(long sectionX, long sectionY, long sectionZ, double inSectionX, double inSectionY,
-            double inSectionZ, long anchorX, long anchorY, long anchorZ, double localX, double localY,
+    record View(Int1024 sectionX, Int1024 sectionY, Int1024 sectionZ, double inSectionX, double inSectionY,
+            double inSectionZ, Int1024 anchorX, Int1024 anchorY, Int1024 anchorZ, double localX, double localY,
             double localZ, float xRot, float yRot, AnchoredFrustum frustum) {
     }
 
@@ -112,12 +114,12 @@ final class SimulationVisibility {
      * {@code keys} 是按图自己的 base 打包的「到达过」的全集，供 {@link #containsVisible} 用；{@code snaps} 只留 snap
      * 非空的段，供裁剪用。两组都按同一个 base 打包，所以相机跨段之后仍能与图里的键对上。
      */
-    private record Graph(long baseX, long baseY, long baseZ, LongOpenHashSet keys,
+    private record Graph(Int1024 baseX, Int1024 baseY, Int1024 baseZ, LongOpenHashSet keys,
             Simulation.SnapSection[] snaps) {
     }
 
     /** 一次传播的输入。主线程填，后台只读。 */
-    private record Job(long baseX, long baseY, long baseZ, double cameraX, double cameraY, double cameraZ,
+    private record Job(Int1024 baseX, Int1024 baseY, Int1024 baseZ, double cameraX, double cameraY, double cameraZ,
             int generation, int request, long[] packed, long[] masks, Simulation.SnapSection[] snaps) {
     }
 
@@ -152,16 +154,16 @@ final class SimulationVisibility {
     /** 上次请求时看到的图输入版本与相机段，用来决定要不要推高请求计数。 */
     private int lastGraphVersion = -1;
 
-    private long lastSectionX = Long.MIN_VALUE;
+    private Int1024 lastSectionX;
 
-    private long lastSectionY = Long.MIN_VALUE;
+    private Int1024 lastSectionY;
 
-    private long lastSectionZ = Long.MIN_VALUE;
+    private Int1024 lastSectionZ;
 
     /** 每帧调一次：按需提交后台传播、按需重裁，返回裁剪集。 */
     List<Simulation.SnapSection> update(Simulation simulation, View view) {
-        boolean moved = view.sectionX() != this.lastSectionX || view.sectionY() != this.lastSectionY
-                || view.sectionZ() != this.lastSectionZ;
+        boolean moved = this.lastSectionX == null || !view.sectionX().equals(this.lastSectionX)
+                || !view.sectionY().equals(this.lastSectionY) || !view.sectionZ().equals(this.lastSectionZ);
         int version = simulation.graphVersion();
         if (version != this.lastGraphVersion || moved) {
             this.lastGraphVersion = version;
@@ -189,12 +191,14 @@ final class SimulationVisibility {
      * 按图自带的 base 打包，不用当前相机段：图在途期间相机可能已经跨段，用当前段打包会与图里的键对不上。图还没发布时
      * 返回假，调用方据此退回「不区分可达性」的顺序。
      */
-    boolean containsVisible(long sectionX, long sectionY, long sectionZ) {
+
+    boolean containsVisible(Int1024 sectionX, Int1024 sectionY, Int1024 sectionZ) {
         Graph graph = this.current;
         if (graph == null) {
             return false;
         }
-        long key = farlands$pack(sectionX - graph.baseX(), sectionY - graph.baseY(), sectionZ - graph.baseZ());
+        long key = farlands$pack(sectionX.subtract(graph.baseX()).toLong(),
+                sectionY.subtract(graph.baseY()).toLong(), sectionZ.subtract(graph.baseZ()).toLong());
         return key != PACK_OUT_OF_RANGE && graph.keys().contains(key);
     }
 
@@ -206,9 +210,9 @@ final class SimulationVisibility {
         this.culledVersion++;
         this.needsCull = true;
         this.lastGraphVersion = -1;
-        this.lastSectionX = Long.MIN_VALUE;
-        this.lastSectionY = Long.MIN_VALUE;
-        this.lastSectionZ = Long.MIN_VALUE;
+        this.lastSectionX = null;
+        this.lastSectionY = null;
+        this.lastSectionZ = null;
         this.lastXRot = Float.NaN;
         this.lastYRot = Float.NaN;
     }
@@ -223,8 +227,10 @@ final class SimulationVisibility {
         Simulation.SnapSection[] snaps = new Simulation.SnapSection[count];
         int at = 0;
         for (SimulationSection section : simulation.sectionMap().values()) {
-            packed[at] = farlands$pack(section.sectionX() - view.sectionX(),
-                    section.sectionY() - view.sectionY(), section.sectionZ() - view.sectionZ());
+            // 相对任务的基段：窗口内差不超过几十，收窄无损。
+            packed[at] = farlands$pack(section.sectionX().subtract(view.sectionX()).toLong(),
+                    section.sectionY().subtract(view.sectionY()).toLong(),
+                    section.sectionZ().subtract(view.sectionZ()).toLong());
             masks[at] = section.visibility();
             snaps[at] = section.snap();
             at++;
@@ -348,9 +354,9 @@ final class SimulationVisibility {
         this.lastYRot = view.yRot();
         this.needsCull = false;
         AnchoredFrustum frustum = view.frustum();
-        long anchorX = view.anchorX();
-        long anchorY = view.anchorY();
-        long anchorZ = view.anchorZ();
+        Int1024 anchorX = view.anchorX();
+        Int1024 anchorY = view.anchorY();
+        Int1024 anchorZ = view.anchorZ();
         double localX = view.localX();
         double localY = view.localY();
         double localZ = view.localZ();
@@ -361,9 +367,9 @@ final class SimulationVisibility {
                 next.add(snap);
                 continue;
             }
-            double originX = (double) (snap.originX() - anchorX) - localX;
-            double originY = (double) (snap.originY() - anchorY) - localY;
-            double originZ = (double) (snap.originZ() - anchorZ) - localZ;
+            double originX = FrameMath.offset(snap.originX(), 0.0, anchorX, 0.0) - localX;
+            double originY = FrameMath.offset(snap.originY(), 0.0, anchorY, 0.0) - localY;
+            double originZ = FrameMath.offset(snap.originZ(), 0.0, anchorZ, 0.0) - localZ;
             if (frustum.farlands$isVisibleRelative(originX, originY, originZ, originX + SimulationSection.SIZE,
                     originY + SimulationSection.SIZE, originZ + SimulationSection.SIZE)) {
                 next.add(snap);

@@ -1,5 +1,6 @@
 package com.inf.farlands.client.simulation;
 
+import com.inf.long2.ints.Int1024;
 import java.util.List;
 
 import net.minecraft.client.Minecraft;
@@ -49,9 +50,9 @@ public final class SectionGetter implements BlockAndTintGetter {
     private final SimulationSection.Content[] neighborContents;
 
     /** 段坐标。快照模式下活段不存在，色温采样要的段原点从这里算。 */
-    private final long sectionX;
-    private final long sectionY;
-    private final long sectionZ;
+    private final Int1024 sectionX;
+    private final Int1024 sectionY;
+    private final Int1024 sectionZ;
 
     private final BakeSnapshot snapshot;
     private final BlockPos.MutableBlockPos unused = new BlockPos.MutableBlockPos();
@@ -73,6 +74,7 @@ public final class SectionGetter implements BlockAndTintGetter {
         this.snapshot = null;
         this.content = null;
         this.neighborContents = null;
+        // 段号是 1024 位，本类整条取数路径都按它走，不做收窄。
         this.sectionX = section.sectionX();
         this.sectionY = section.sectionY();
         this.sectionZ = section.sectionZ();
@@ -142,8 +144,8 @@ public final class SectionGetter implements BlockAndTintGetter {
         if (sameCell(cellX, cellY, cellZ)) {
             return this.section;
         }
-        return this.simulation.sectionOrNull(this.sectionX + cellX, this.sectionY + cellY,
-                this.sectionZ + cellZ);
+        return this.simulation.sectionOrNull(this.sectionX.add(Int1024.of(cellX)),
+                this.sectionY.add(Int1024.of(cellY)), this.sectionZ.add(Int1024.of(cellZ)));
     }
 
     /** 局部坐标折回 0 到 15。 */
@@ -151,12 +153,14 @@ public final class SectionGetter implements BlockAndTintGetter {
         return localCoord & 15;
     }
 
-    private long originX() {
-        return this.sectionX * SimulationSection.SIZE;
+    /** 段原点的 X，tint 取样用，按 double 交给方块色表。 */
+    private double originX() {
+        return this.sectionX.shift(4).toDouble();
     }
 
-    private long originZ() {
-        return this.sectionZ * SimulationSection.SIZE;
+    /** 段原点的 Z，tint 取样用。 */
+    private double originZ() {
+        return this.sectionZ.shift(4).toDouble();
     }
 
     private net.minecraft.client.color.block.BlockColors blockColors() {

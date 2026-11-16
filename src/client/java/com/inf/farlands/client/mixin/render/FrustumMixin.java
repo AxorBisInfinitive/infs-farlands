@@ -3,31 +3,19 @@ package com.inf.farlands.client.mixin.render;
 import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.render.AnchoredFrustum;
 
-import com.inf.long2.ints.Int1024;
 import net.minecraft.client.renderer.culling.Frustum;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.world.level.levelgen.structure.BoundingBox;
 
-import com.inf.long2.ints.Int1024;
 import org.joml.FrustumIntersection;
-import com.inf.long2.ints.Int1024;
 import org.joml.Vector4f;
 
-import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.Final;
-import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.Mixin;
-import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.Shadow;
-import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.Unique;
-import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.At;
-import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.Inject;
-import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**

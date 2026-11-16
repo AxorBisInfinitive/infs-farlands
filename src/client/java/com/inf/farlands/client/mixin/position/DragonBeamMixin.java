@@ -2,29 +2,18 @@ package com.inf.farlands.client.mixin.position;
 
 import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
 import com.inf.farlands.util.pos.ExactPosition;
 
-import com.inf.long2.ints.Int1024;
 import net.minecraft.client.renderer.entity.EnderDragonRenderer;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.client.renderer.entity.EndCrystalRenderer;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.client.renderer.entity.state.EnderDragonRenderState;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
-import com.inf.long2.ints.Int1024;
 import net.minecraft.world.phys.Vec3;
 
-import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.Mixin;
-import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.At;
-import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.Inject;
-import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**

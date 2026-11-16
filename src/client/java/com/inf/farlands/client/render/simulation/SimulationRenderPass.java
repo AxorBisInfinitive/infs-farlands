@@ -1,120 +1,38 @@
 package com.inf.farlands.client.render.simulation;
 
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import java.nio.ByteBuffer;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import java.util.ArrayList;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import java.util.EnumMap;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import java.util.LinkedHashMap;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import java.util.List;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import java.util.Map;
 
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import com.mojang.blaze3d.buffers.GpuBuffer;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import com.mojang.blaze3d.buffers.Std140Builder;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import com.mojang.blaze3d.buffers.Std140SizeCalculator;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import com.mojang.blaze3d.systems.RenderPass;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import com.mojang.blaze3d.textures.GpuTextureView;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import com.mojang.blaze3d.vertex.VertexFormat;
 
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.client.render.AnchoredFrustum;
 import com.inf.farlands.client.render.FrameMath;
 import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.client.render.ExactCameraOrigin;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.client.simulation.Simulation;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.client.simulation.SimulationHolder;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.client.simulation.SimulationSection;
 
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.client.Minecraft;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.client.renderer.DynamicUniformStorage;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.util.Mth;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.world.phys.Vec3;
 
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import org.joml.Matrix4f;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import org.joml.Matrix4fc;
-import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
-import com.inf.farlands.client.render.FrameMath;
 import org.lwjgl.system.MemoryUtil;
 
 /**
@@ -202,11 +120,11 @@ public final class SimulationRenderPass {
 
     private int cacheGeometryVersion = -1;
 
-    private long cacheAnchorX;
+    private Int1024 cacheAnchorX;
 
-    private long cacheAnchorY;
+    private Int1024 cacheAnchorY;
 
-    private long cacheAnchorZ;
+    private Int1024 cacheAnchorZ;
 
     private double cacheLocalX;
 
@@ -283,11 +201,11 @@ public final class SimulationRenderPass {
                 ? candidate
                 : null;
         // 可见集由遮挡传播与视锥裁剪给出，裁剪只在图更新或相机转动跨 2 度时重跑，所以这里不再逐段试视锥。
-        List<Simulation.SnapSection> sections = simulation.visibleSections(camAnchorX.toLong(), camAnchorY.toLong(), camAnchorZ.toLong(),
+        List<Simulation.SnapSection> sections = simulation.visibleSections(camAnchorX, camAnchorY, camAnchorZ,
                 camLocalX, camLocalY, camLocalZ, camera.xRot, camera.yRot, frustum);
         int visibleVersion = simulation.visibleVersion();
         int geometryVersion = SimulationGeometry.instance().version();
-        if (this.farlands$cacheHit(visibleVersion, geometryVersion, camAnchorX.toLong(), camAnchorY.toLong(), camAnchorZ.toLong(), camLocalX,
+        if (this.farlands$cacheHit(visibleVersion, geometryVersion, camAnchorX, camAnchorY, camAnchorZ, camLocalX,
                 camLocalY, camLocalZ, view, atlasWidth, atlasHeight)) {
             if (this.cachedGroups == null) {
                 return;
@@ -296,7 +214,7 @@ public final class SimulationRenderPass {
             this.batch = new Batch(this.cachedGroups, hitSlices, this.cachedIndices);
             return;
         }
-        this.farlands$storeCache(visibleVersion, geometryVersion, camAnchorX.toLong(), camAnchorY.toLong(), camAnchorZ.toLong(), camLocalX,
+        this.farlands$storeCache(visibleVersion, geometryVersion, camAnchorX, camAnchorY, camAnchorZ, camLocalX,
                 camLocalY, camLocalZ, view, atlasWidth, atlasHeight);
         this.cachedGroups = null;
         this.cachedInfos = null;
@@ -319,10 +237,12 @@ public final class SimulationRenderPass {
         SectionInfo[] infos = new SectionInfo[count];
         for (int i = 0; i < count; i++) {
             Simulation.SnapSection section = drawn.get(i);
+            // 段减相机：着色器算的是 Position + SimOffset，段内顶点是 0 到 16 的局部坐标，SimOffset 必须是段原点相对
+            // 相机的位移。写成相机减段会把整层画到相机另一侧，表现为世界随移动反向平移。
             infos[i] = new SectionInfo(view, 1.0F, atlasWidth, atlasHeight,
-                    (float) FrameMath.offset(camAnchorX, camLocalX, Int1024.of(section.originX()), 0.0),
-                    (float) FrameMath.offset(camAnchorY, camLocalY, Int1024.of(section.originY()), 0.0),
-                    (float) FrameMath.offset(camAnchorZ, camLocalZ, Int1024.of(section.originZ()), 0.0));
+                    (float) FrameMath.offset(section.originX(), 0.0, camAnchorX, camLocalX),
+                    (float) FrameMath.offset(section.originY(), 0.0, camAnchorY, camLocalY),
+                    (float) FrameMath.offset(section.originZ(), 0.0, camAnchorZ, camLocalZ));
         }
         GpuBufferSlice[] slices = this.farlands$storage().writeUniforms(infos);
         int indices = 0;
@@ -365,19 +285,20 @@ public final class SimulationRenderPass {
      * 位姿三项缺一不可：视锥测试依赖位置与朝向，段 UBO 的偏移依赖位置、{@code modelView} 依赖朝向。图集尺寸进 UBO，
      * 资源重载换图集时会连带清几何、版本自增，所以它是第二道闸而不是主闸。
      */
-    private boolean farlands$cacheHit(int visibleVersion, int geometryVersion, long anchorX, long anchorY,
-            long anchorZ, double localX, double localY, double localZ, Matrix4f view, int atlasWidth,
+    private boolean farlands$cacheHit(int visibleVersion, int geometryVersion, Int1024 anchorX, Int1024 anchorY,
+            Int1024 anchorZ, double localX, double localY, double localZ, Matrix4f view, int atlasWidth,
             int atlasHeight) {
+        // cacheValid 成立即意味着三个锚点都已写入，这里不再逐个判空。
         return this.cacheValid && this.cacheVisibleVersion == visibleVersion
-                && this.cacheGeometryVersion == geometryVersion && this.cacheAnchorX == anchorX
-                && this.cacheAnchorY == anchorY && this.cacheAnchorZ == anchorZ && this.cacheLocalX == localX
+                && this.cacheGeometryVersion == geometryVersion && this.cacheAnchorX.equals(anchorX)
+                && this.cacheAnchorY.equals(anchorY) && this.cacheAnchorZ.equals(anchorZ) && this.cacheLocalX == localX
                 && this.cacheLocalY == localY && this.cacheLocalZ == localZ
                 && this.cacheView.equals(view, 0.0F) && this.cacheAtlasWidth == atlasWidth
                 && this.cacheAtlasHeight == atlasHeight;
     }
 
-    private void farlands$storeCache(int visibleVersion, int geometryVersion, long anchorX, long anchorY,
-            long anchorZ, double localX, double localY, double localZ, Matrix4f view, int atlasWidth,
+    private void farlands$storeCache(int visibleVersion, int geometryVersion, Int1024 anchorX, Int1024 anchorY,
+            Int1024 anchorZ, double localX, double localY, double localZ, Matrix4f view, int atlasWidth,
             int atlasHeight) {
         this.cacheValid = true;
         this.cacheVisibleVersion = visibleVersion;

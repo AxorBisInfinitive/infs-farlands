@@ -1,5 +1,6 @@
 package com.inf.farlands.client.simulation;
 
+import com.inf.farlands.simulation.model.SimulationSectionKey;
 import com.mojang.blaze3d.vertex.VertexSorting;
 
 import net.minecraft.client.color.block.BlockColors;
@@ -38,7 +39,7 @@ import net.minecraft.world.level.biome.Biome;
  * 前者判内容是否在烘制期间变过，后者判关卡是否换过。
  */
 record BakeSnapshot(
-        Simulation.SectionKey key,
+        SimulationSectionKey key,
         int generation,
         int revision,
         SimulationSection owner,
