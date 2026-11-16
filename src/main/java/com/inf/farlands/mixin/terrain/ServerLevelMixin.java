@@ -10,6 +10,7 @@ import com.inf.farlands.FarlandsTick;
 import com.inf.farlands.simulation.SimulationLevels;
 import com.inf.farlands.simulation.int64.SimulationNoiseSystem;
 import com.inf.farlands.simulation.registry.SimulationRegistries;
+import com.inf.farlands.simulation.serialize.SimulationFileIndex;
 import com.inf.farlands.simulation.serialize.SimulationIO;
 import com.inf.farlands.terrain.BiomeSystem;
 import com.inf.farlands.terrain.CarverSystem;
@@ -100,6 +101,9 @@ public abstract class ServerLevelMixin implements LevelSystems, SystemsHolder, S
                 SimulationIO.systemsFor(server), level.dimension().identifier());
         this.farlandsSimulationSystem = SimulationRegistries.newInstance(
                 new SystemId(simulationSelection.id()), SimulationIO.args(simulationSelection));
+        // 映射表在这里读一次，触发点因此前移到打开世界：键形状与代码约定不符时世界打不开，而不是先进去、每段
+        // 一次抛出、被薄封装吞成刷屏加静默重建。例外是本类的 SsaMappingException，它不被任何 catch 接住。
+        SimulationFileIndex.of(level);
         // 群系源换出：系统在这里算一次，按生成器实例登记，getter 之后一律返回它。此处取到的仍是字段里
         // 那份原源，因为登记表此刻还没有该生成器的条目。
         ChunkGenerator generator = level.getChunkSource().getGenerator();

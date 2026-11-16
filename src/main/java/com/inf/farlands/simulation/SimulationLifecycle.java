@@ -21,6 +21,7 @@ import com.inf.farlands.simulation.model.SimulationStore;
 import com.inf.farlands.simulation.serialize.SimulationSectionIO;
 import com.inf.farlands.simulation.serialize.SimulationSerializer;
 import com.inf.farlands.simulation.serialize.SimulationStorage;
+import com.inf.farlands.simulation.serialize.SsaMappingException;
 import com.inf.farlands.simulation.terrain.SimulationPool;
 import com.inf.farlands.simulation.terrain.SimulationTask;
 
@@ -75,7 +76,10 @@ public final class SimulationLifecycle {
         }
         SimulationStorage.SlotRef ref;
         try {
-            ref = SimulationSectionIO.slotAt(level, key.x().toLong(), key.y().toLong(), key.z().toLong());
+            ref = SimulationSectionIO.slotAt(level, key.x(), key.y(), key.z());
+        } catch (SsaMappingException e) {
+            // 表内容错，不可按未命中重建：重建会把盘上那一份永久覆盖。放行由上层中止。
+            throw e;
         } catch (RuntimeException e) {
             InfsFarlands.LOGGER.error("farlands: ssa slot lookup failed section={},{},{}", key.x(), key.y(),
                     key.z(), e);
@@ -88,7 +92,7 @@ public final class SimulationLifecycle {
             produce(level, key);
             return;
         }
-        Path path = SimulationSectionIO.findPath(level, key.x().toLong(), key.y().toLong(), key.z().toLong());
+        Path path = SimulationSectionIO.findPath(level, key.x(), key.y(), key.z());
         if (path == null) {
             // 槽位查得到就说明映射里有这个区域，这里落空只可能是表在两次调用之间被换掉。
             LOADING.remove(pending);
@@ -96,7 +100,7 @@ public final class SimulationLifecycle {
             return;
         }
         List<SimulationSectionIO.SlotKey> keys = List
-                .of(new SimulationSectionIO.SlotKey(key.x().toLong(), key.y().toLong(), key.z().toLong(), ref));
+                .of(new SimulationSectionIO.SlotKey(key.x(), key.y(), key.z(), ref));
         try {
             SimulationSectionIO.submitRead(level, path, keys, level.palettedContainerFactory(),
                     decoded -> finishRead(level, key, pending, decoded));
@@ -148,7 +152,9 @@ public final class SimulationLifecycle {
         ResourceKey<Level> dimension = level.dimension();
         Path path;
         try {
-            path = SimulationSectionIO.pathForWrite(level, key.x().toLong(), key.y().toLong(), key.z().toLong());
+            path = SimulationSectionIO.pathForWrite(level, key.x(), key.y(), key.z());
+        } catch (SsaMappingException e) {
+            throw e;
         } catch (RuntimeException e) {
             InfsFarlands.LOGGER.error("farlands: ssa path failed section={},{},{}", key.x(), key.y(), key.z(), e);
             data.clearReleasing();
@@ -172,8 +178,7 @@ public final class SimulationLifecycle {
         SimulationStorage.PendingWrite pw;
         try {
             storage = SimulationSectionIO.getOrOpen(path);
-            pw = storage.prepareWrite(
-                    SimulationSectionIO.slotIndex(key.x().toLong(), key.y().toLong(), key.z().toLong()), entry);
+            pw = storage.prepareWrite(SimulationSectionIO.slotIndex(key.x(), key.y(), key.z()), entry);
         } catch (RuntimeException e) {
             InfsFarlands.LOGGER.error("farlands: ssa open failed {}", path, e);
             data.clearReleasing();
@@ -247,8 +252,9 @@ public final class SimulationLifecycle {
                 }
                 Path path;
                 try {
-                    path = SimulationSectionIO.pathForWrite(level, key.x().toLong(), key.y().toLong(),
-                            key.z().toLong());
+                    path = SimulationSectionIO.pathForWrite(level, key.x(), key.y(), key.z());
+                } catch (SsaMappingException e) {
+                    throw e;
                 } catch (RuntimeException e) {
                     InfsFarlands.LOGGER.error("farlands: ssa shutdown path failed section={},{},{}", key.x(),
                             key.y(), key.z(), e);
@@ -271,8 +277,7 @@ public final class SimulationLifecycle {
                 SimulationStorage.PendingWrite pw;
                 try {
                     storage = SimulationSectionIO.getOrOpen(path);
-                    pw = storage.prepareWrite(
-                    SimulationSectionIO.slotIndex(key.x().toLong(), key.y().toLong(), key.z().toLong()), entry);
+                    pw = storage.prepareWrite(SimulationSectionIO.slotIndex(key.x(), key.y(), key.z()), entry);
                 } catch (RuntimeException e) {
                     InfsFarlands.LOGGER.error("farlands: ssa shutdown open failed {}", path, e);
                     continue;

@@ -22,6 +22,7 @@ import net.minecraft.world.level.storage.LevelStorageSource;
 
 import com.inf.farlands.InfsFarlands;
 import com.inf.farlands.simulation.model.SimulationConfig;
+import com.inf.long2.ints.Int1024;
 
 /**
  * ssa 异步 IO 层。与 fsa 的 {@code SectionIO} 同形，只服务仿真段。
@@ -56,16 +57,19 @@ public final class SimulationSectionIO {
         return t;
     });
 
+    /** 段号低五位的掩码，文件内槽位下标用。 */
+    private static final Int1024 SLOT_MASK = Int1024.of(31L);
+
     /** 主线程独占。LinkedHashMap 访问序，即 LRU，getOrOpen 会提升命中项。 */
     private static final Map<Path, SimulationStorage> cache = new LinkedHashMap<>(
             SimulationConfig.ssaCacheLimit, 0.75f, true);
 
     /** 一个待读槽位：段的三轴段号，加它在文件里的引用。 */
-    public record SlotKey(long sectionX, long sectionY, long sectionZ, SimulationStorage.SlotRef ref) {
+    public record SlotKey(Int1024 sectionX, Int1024 sectionY, Int1024 sectionZ, SimulationStorage.SlotRef ref) {
     }
 
     /** 一份读回结果：段号加解码内容。 */
-    public record DecodedEntry(long sectionX, long sectionY, long sectionZ,
+    public record DecodedEntry(Int1024 sectionX, Int1024 sectionY, Int1024 sectionZ,
             SimulationSerializer.DecodedSection decoded) {
     }
 
@@ -110,7 +114,7 @@ public final class SimulationSectionIO {
      * 该区域还没有 ssa 文件时返回 null。读路必须用它：若在这里分配编号，视距探测会给「还没有任何数据的区域」
      * 建出映射条目，表就会按访问过的区域增长，而不是按有文件的区域。
      */
-    public static Path findPath(ServerLevel level, long sectionX, long sectionY, long sectionZ) {
+    public static Path findPath(ServerLevel level, Int1024 sectionX, Int1024 sectionY, Int1024 sectionZ) {
         String id = SimulationFileIndex.of(level).find(regionOf(sectionX, sectionY, sectionZ));
         return id == null ? null : dimensionDir(level).resolve(fileName(id));
     }
@@ -122,7 +126,7 @@ public final class SimulationSectionIO {
      * 映射表这一轮没写出去时返回 null：调用方跳过这一段，不建文件、不读盘，等下一次周期刷盘重新分配。
      * 不在这里抛，是因为这个失败点落在服务端 tick 里，一次瞬时的文件拒绝不该终止服务器。
      */
-    public static Path pathForWrite(ServerLevel level, long sectionX, long sectionY, long sectionZ) {
+    public static Path pathForWrite(ServerLevel level, Int1024 sectionX, Int1024 sectionY, Int1024 sectionZ) {
         String id = SimulationFileIndex.of(level).ensure(regionOf(sectionX, sectionY, sectionZ));
         if (id == null) {
             return null;
@@ -136,8 +140,8 @@ public final class SimulationSectionIO {
      * <p>
      * 一个 ssa 文件覆盖 32 个段，所以区域号是段号右移五位。读、落盘、关服三条路各写一遍就是三次犯错机会。
      */
-    static SimulationFileIndex.Region regionOf(long sectionX, long sectionY, long sectionZ) {
-        return new SimulationFileIndex.Region(sectionX >> 5, sectionY >> 5, sectionZ >> 5);
+    static SimulationFileIndex.Region regionOf(Int1024 sectionX, Int1024 sectionY, Int1024 sectionZ) {
+        return new SimulationFileIndex.Region(sectionX.shift(-5), sectionY.shift(-5), sectionZ.shift(-5));
     }
 
     /** ssa 文件名：编号来自映射表，恒 26 个字符。 */
@@ -149,10 +153,11 @@ public final class SimulationSectionIO {
      * 该段在文件里的槽位索引。形参顺序是 x、z、y，与格式层同规。
      *
      * <p>
-     * 低位掩码在 long 上做再落成 int，段号超出 int 时低五位仍然对。
+     * 低位掩码在 1024 位上做，再落成 int：段号超出 int 时低五位仍然对。
      */
-    public static int slotIndex(long sectionX, long sectionY, long sectionZ) {
-        return SimulationStorage.slotIndex((int) (sectionX & 31), (int) (sectionZ & 31), (int) (sectionY & 31));
+    public static int slotIndex(Int1024 sectionX, Int1024 sectionY, Int1024 sectionZ) {
+        return SimulationStorage.slotIndex(sectionX.and(SLOT_MASK).toInt(), sectionZ.and(SLOT_MASK).toInt(),
+                sectionY.and(SLOT_MASK).toInt());
     }
 
     // ---- 主线程：文件缓存 ----
@@ -196,7 +201,8 @@ public final class SimulationSectionIO {
      * <p>
      * 只查偏移表，不读盘，不做 IO，供读回判定用。
      */
-    public static SimulationStorage.SlotRef slotAt(ServerLevel level, long sectionX, long sectionY, long sectionZ) {
+    public static SimulationStorage.SlotRef slotAt(ServerLevel level, Int1024 sectionX, Int1024 sectionY,
+            Int1024 sectionZ) {
         Path path = findPath(level, sectionX, sectionY, sectionZ);
         if (path == null || !Files.exists(path)) {
             return null;
@@ -261,7 +267,8 @@ public final class SimulationSectionIO {
                     byte[] entry = storage.readData(key.ref().sectorOffset(), key.ref().sectorCount());
                     if (entry != null) {
                         SimulationSerializer.DecodedSection d = SimulationSerializer.decode(entry,
-                                containerFactory, key.sectionX(), key.sectionY(), key.sectionZ());
+                                containerFactory, key.sectionX().toLong(), key.sectionY().toLong(),
+                                key.sectionZ().toLong());
                         decoded.add(new DecodedEntry(key.sectionX(), key.sectionY(), key.sectionZ(), d));
                     }
                 } catch (Exception e) {

@@ -12,6 +12,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.regex.Pattern;
 
 import com.google.gson.Gson;
@@ -23,6 +24,8 @@ import com.google.gson.JsonParser;
 import net.minecraft.server.level.ServerLevel;
 
 import com.inf.farlands.InfsFarlands;
+import com.inf.long2.ints.Int1024;
+import com.inf.long2.ints.Int1024Strict;
 
 /**
  * ssa 文件名的映射表：三个区域坐标到 16 位小写十六进制编号。
@@ -34,9 +37,13 @@ import com.inf.farlands.InfsFarlands;
  *
  * <p>
  * 表在 {@code <维度目录>/ssa/mapping.json}，一个维度一份，形状是
- * {@code {"mapping": {"<x>.<y>.<z>": "<16 位十六进制>"}}}。key 是区域坐标，不是段号：一个 ssa 文件覆盖
+ * {@code {"mapping": {"<0x…>.<0x…>.<0x…>": "<16 位十六进制>"}}}。key 是区域坐标，不是段号：一个 ssa 文件覆盖
  * 32 乘 32 乘 32 个段，键的粒度必须与文件粒度一致。段号到区域号的换算收在
  * {@code SimulationSectionIO.regionOf} 一处。
+ *
+ * <p>
+ * 键用十六进制而不是十进制：单键 776 字符，十进制要 929；更关键的是 1024 位上的十进制解析与格式化要反复做乘除，
+ * 十六进制只是逐组移位与 {@code %016x}。解析走 {@link Int1024Strict#parseHexStrict}，有效位超宽即抛。
  *
  * <p>
  * 四条不变式：
@@ -65,12 +72,75 @@ public final class SimulationFileIndex {
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
-    /** 一个 ssa 文件覆盖的区域：三段都是段号右移五位的结果。 */
-    public record Region(long x, long y, long z) {
+    /**
+     * 一个 ssa 文件覆盖的区域：三段都是段号右移五位的结果。
+     *
+     * <p>
+     * 键文本是十六进制，构造时不生成，首次 {@link #key()} 时才格式化并缓存。读路每段都要按区域查表，若在构造时算
+     * 文本，一次查询就多出三段共 776 个字符的格式化；写路每分配一个新区域都要全表重写，缓存之后第二次起只是引用。
+     *
+     * <p>
+     * 相等与哈希只看三轴，不看文本：文本只是三轴的派生。
+     */
+    public static final class Region {
 
-        /** 表里的键形状。 */
+        private final Int1024 x;
+
+        private final Int1024 y;
+
+        private final Int1024 z;
+
+        private final int hash;
+
+        /** 十六进制键文本，首次 {@link #key()} 时生成。 */
+        private String text;
+
+        public Region(Int1024 x, Int1024 y, Int1024 z) {
+            this.x = Objects.requireNonNull(x);
+            this.y = Objects.requireNonNull(y);
+            this.z = Objects.requireNonNull(z);
+            int hash = this.x.hashCode();
+            hash = 31 * hash + this.y.hashCode();
+            this.hash = 31 * hash + this.z.hashCode();
+        }
+
+        public Int1024 x() {
+            return this.x;
+        }
+
+        public Int1024 y() {
+            return this.y;
+        }
+
+        public Int1024 z() {
+            return this.z;
+        }
+
+        /** 表里的键形状，三段定宽十六进制用点连接。 */
         String key() {
-            return this.x + "." + this.y + "." + this.z;
+            String cached = this.text;
+            if (cached == null) {
+                cached = this.x.toHexString() + "." + this.y.toHexString() + "." + this.z.toHexString();
+                this.text = cached;
+            }
+            return cached;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) {
+                return true;
+            }
+            if (!(obj instanceof Region other)) {
+                return false;
+            }
+            return this.hash == other.hash && this.x.equals(other.x) && this.y.equals(other.y)
+                    && this.z.equals(other.z);
+        }
+
+        @Override
+        public int hashCode() {
+            return this.hash;
         }
     }
 
@@ -211,17 +281,18 @@ public final class SimulationFileIndex {
         return index;
     }
 
-    /** {@code x.y.z} 三段十进制，逐段严格解析。 */
+    /** {@code 0x….0x….0x…} 三段十六进制，逐段严格解析；超出定宽或旧十进制一律抛。 */
     private static Region parseRegion(String key, Path file) {
         String[] parts = key.split("\\.", -1);
         if (parts.length != 3) {
-            throw new RuntimeException("farlands: ssa mapping key must be x.y.z, got " + key + " in " + file);
+            throw new SsaMappingException("farlands: ssa mapping key must be x.y.z, got " + key + " in " + file);
         }
         try {
-            return new Region(Long.parseLong(parts[0]), Long.parseLong(parts[1]), Long.parseLong(parts[2]));
+            return new Region(Int1024Strict.parseHexStrict(parts[0]), Int1024Strict.parseHexStrict(parts[1]),
+                    Int1024Strict.parseHexStrict(parts[2]));
         } catch (NumberFormatException e) {
-            throw new RuntimeException("farlands: ssa mapping key is not three integers, got " + key + " in " + file,
-                    e);
+            throw new SsaMappingException(
+                    "farlands: ssa mapping key is not three hex ints, got " + key + " in " + file, e);
         }
     }
 
