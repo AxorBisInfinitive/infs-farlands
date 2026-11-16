@@ -4,7 +4,7 @@ import java.util.List;
 import java.util.function.Function;
 
 import com.inf.farlands.InfsFarlands;
-import com.inf.farlands.simulation.int64.SimulationNoiseSystem;
+import com.inf.farlands.simulation.int1024.SimulationNoiseSystem;
 import com.inf.farlands.terrain.registry.SystemArgs;
 import com.inf.farlands.terrain.registry.SystemId;
 import com.inf.farlands.terrain.registry.SystemRegistry;

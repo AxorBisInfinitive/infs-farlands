@@ -1,7 +1,7 @@
 package com.inf.farlands.register;
 
 import com.inf.farlands.InfsFarlands;
-import com.inf.farlands.simulation.int64.system.terrain.noise.misc.Void.VoidSimulationNoiseSystem;
+import com.inf.farlands.simulation.int1024.system.terrain.noise.misc.Void.VoidSimulationNoiseSystem;
 import com.inf.farlands.simulation.registry.SimulationRegistries;
 import com.inf.farlands.command.FarlandsCommandRegistry;
 import com.inf.farlands.compat.chunky.ChunkyPregen;

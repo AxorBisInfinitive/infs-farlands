@@ -1,6 +1,6 @@
 package com.inf.farlands.simulation.registry;
 
-import com.inf.farlands.simulation.int64.SimulationNoiseSystem;
+import com.inf.farlands.simulation.int1024.SimulationNoiseSystem;
 import com.inf.farlands.terrain.registry.SystemId;
 
 /**

@@ -12,8 +12,8 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.PalettedContainerFactory;
 
 import com.inf.farlands.InfsFarlands;
-import com.inf.farlands.simulation.int64.terrainFiller.SimulationFiller;
-import com.inf.farlands.simulation.int64.terrainFiller.StandardSimulationFiller;
+import com.inf.farlands.simulation.int1024.terrainFiller.SimulationFiller;
+import com.inf.farlands.simulation.int1024.terrainFiller.StandardSimulationFiller;
 import com.inf.farlands.simulation.model.SimulationSectionData;
 import com.inf.farlands.simulation.model.SimulationSectionKey;
 import com.inf.farlands.simulation.model.SimulationSectionStage;

@@ -1,6 +1,6 @@
 package com.inf.farlands.simulation.terrain;
 
-import com.inf.farlands.simulation.int64.terrainFiller.SimulationFiller;
+import com.inf.farlands.simulation.int1024.terrainFiller.SimulationFiller;
 import com.inf.farlands.simulation.model.SimulationSectionData;
 import com.inf.farlands.simulation.model.SimulationSectionKey;
 

@@ -8,7 +8,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import com.inf.farlands.FarlandsTick;
 import com.inf.farlands.simulation.SimulationLevels;
-import com.inf.farlands.simulation.int64.SimulationNoiseSystem;
+import com.inf.farlands.simulation.int1024.SimulationNoiseSystem;
 import com.inf.farlands.simulation.registry.SimulationRegistries;
 import com.inf.farlands.simulation.serialize.SimulationFileIndex;
 import com.inf.farlands.simulation.serialize.SimulationIO;

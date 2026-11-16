@@ -42,16 +42,6 @@ public final class SimulationSectionKey {
         this.hash = farlands$hash(this.x, this.y, this.z);
     }
 
-    /**
-     * long 构造器：迁移期桥接，等调用点把段号换成 {@link Int1024} 之后删除。
-     *
-     * <p>
-     * 三个实参都要过一遍 {@code of(long)}，每个键因此多三次分配。新代码不要用这一支。
-     */
-    public SimulationSectionKey(long x, long y, long z) {
-        this(Int1024.of(x), Int1024.of(y), Int1024.of(z));
-    }
-
     public Int1024 x() {
         return this.x;
     }

@@ -1,6 +1,6 @@
 package com.inf.farlands.simulation;
 
-import com.inf.farlands.simulation.int64.SimulationNoiseSystem;
+import com.inf.farlands.simulation.int1024.SimulationNoiseSystem;
 
 /**
  * 模拟系统实例的取值入口，由 {@code ServerLevel} 注入，与 farlands 的 {@code SystemsHolder} 同职责。
