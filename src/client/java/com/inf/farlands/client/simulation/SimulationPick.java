@@ -86,8 +86,8 @@ public final class SimulationPick {
         double localToX = localEyeX + delta.x;
         double localToY = localEyeY + delta.y;
         double localToZ = localEyeZ + delta.z;
-        Cursor cursor = new Cursor(simulation, startSectionX, startSectionY, startSectionZ, eyeAnchorX, eyeAnchorY,
-                eyeAnchorZ, eyeLocalX, eyeLocalY, eyeLocalZ, delta);
+        Cursor cursor = new Cursor(simulation, startSectionX, startSectionY, startSectionZ, blockX, blockY, blockZ,
+                eyeLocalX, eyeLocalY, eyeLocalZ, delta);
         double toX = Mth.lerp(NUDGE, localToX, localEyeX);
         double toY = Mth.lerp(NUDGE, localToY, localEyeY);
         double toZ = Mth.lerp(NUDGE, localToZ, localEyeZ);
@@ -138,13 +138,19 @@ public final class SimulationPick {
         return null;
     }
 
-    /** 段内坐标：局部量减「段原点相对锚点的位置」，两个量都是小整数加小数，精确。 */
-    private static double localIn(Int1024 sectionOrigin, Int1024 anchor, double local) {
-        return local - sectionOrigin.subtract(anchor).toDouble();
+    /**
+     * 段内坐标：方块坐标减段原点，再加那一格的小数部分。{@code block} 必须是方块坐标，不是帧锚点。
+     */
+    private static double localIn(Int1024 sectionOrigin, Int1024 block, double local) {
+        return local - sectionOrigin.subtract(block).toDouble();
     }
 
     /**
      * 逐格取形状的上下文：缓存当前段、它的 getter 与段内起点终点，跨段时才重建。
+     *
+     * <p>
+     * 三个 {@code eyeBlock} 是眼睛所在方块的坐标，即帧锚点加整数步长，不是帧锚点本身；小数部分另外传。两个量必须
+     * 同源取自同一轴，漏掉步长会让段内起点整体平移，表现为判交永远落空、选择框画不出来。
      */
     private static final class Cursor {
 
@@ -152,9 +158,9 @@ public final class SimulationPick {
         private final Int1024 baseSectionX;
         private final Int1024 baseSectionY;
         private final Int1024 baseSectionZ;
-        private final Int1024 eyeAnchorX;
-        private final Int1024 eyeAnchorY;
-        private final Int1024 eyeAnchorZ;
+        private final Int1024 eyeBlockX;
+        private final Int1024 eyeBlockY;
+        private final Int1024 eyeBlockZ;
         private final double eyeLocalX;
         private final double eyeLocalY;
         private final double eyeLocalZ;
@@ -171,15 +177,15 @@ public final class SimulationPick {
         private Vec3 localTo;
 
         Cursor(Simulation simulation, Int1024 baseSectionX, Int1024 baseSectionY, Int1024 baseSectionZ,
-                Int1024 eyeAnchorX, Int1024 eyeAnchorY, Int1024 eyeAnchorZ, double eyeLocalX, double eyeLocalY,
+                Int1024 eyeBlockX, Int1024 eyeBlockY, Int1024 eyeBlockZ, double eyeLocalX, double eyeLocalY,
                 double eyeLocalZ, Vec3 delta) {
             this.simulation = simulation;
             this.baseSectionX = baseSectionX;
             this.baseSectionY = baseSectionY;
             this.baseSectionZ = baseSectionZ;
-            this.eyeAnchorX = eyeAnchorX;
-            this.eyeAnchorY = eyeAnchorY;
-            this.eyeAnchorZ = eyeAnchorZ;
+            this.eyeBlockX = eyeBlockX;
+            this.eyeBlockY = eyeBlockY;
+            this.eyeBlockZ = eyeBlockZ;
             this.eyeLocalX = eyeLocalX;
             this.eyeLocalY = eyeLocalY;
             this.eyeLocalZ = eyeLocalZ;
@@ -203,9 +209,9 @@ public final class SimulationPick {
                 this.section = this.simulation.sectionOrNull(keyX, keyY, keyZ);
                 this.getter = this.section == null ? null : new SectionGetter(this.section, this.simulation);
                 this.localFrom = new Vec3(
-                        localIn(keyX.shift(4), this.eyeAnchorX, this.eyeLocalX),
-                        localIn(keyY.shift(4), this.eyeAnchorY, this.eyeLocalY),
-                        localIn(keyZ.shift(4), this.eyeAnchorZ, this.eyeLocalZ));
+                        localIn(keyX.shift(4), this.eyeBlockX, this.eyeLocalX),
+                        localIn(keyY.shift(4), this.eyeBlockY, this.eyeLocalY),
+                        localIn(keyZ.shift(4), this.eyeBlockZ, this.eyeLocalZ));
                 this.localTo = new Vec3(this.localFrom.x + this.delta.x, this.localFrom.y + this.delta.y,
                         this.localFrom.z + this.delta.z);
             }
