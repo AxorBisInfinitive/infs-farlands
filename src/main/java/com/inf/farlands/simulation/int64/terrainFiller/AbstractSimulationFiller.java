@@ -60,7 +60,7 @@ public abstract class AbstractSimulationFiller implements SimulationFiller {
     @Override
     public void fill(ServerLevel level, SimulationSectionKey key, SimulationSectionData data) {
         SimulationNoiseSystem system = ((SimulationLevels) level).simulationSystem();
-        Settings settings = prototypeFor(system).withRange(key.y() * 16L, 16L);
+        Settings settings = prototypeFor(system).withRange(key.y().toLong() * 16L, 16L);
         Router router = system.createRouter(BASE_ROUTER);
         Density density = router.finalDensity();
         FluidPicker picker = system.createFluidPicker(settings);
@@ -68,12 +68,13 @@ public abstract class AbstractSimulationFiller implements SimulationFiller {
             picker = FluidPickers.standard(settings.seaLevel(), settings.defaultFluid());
         }
         // Random 传 null：现有两个系统都不读它。接真实含水层时补一个实现。
-        Aquifer aquifer = system.createAquifer(settings, key.x(), key.y(), key.z(), router, null, picker);
+        Aquifer aquifer = system.createAquifer(settings, key.x().toLong(), key.y().toLong(), key.z().toLong(), router,
+                null, picker);
         if (aquifer == null) {
             aquifer = Aquifers.disabled(picker);
         }
         BlockState fallback = system.defaultBlock(settings);
-        LongBox box = LongBox.ofSection(key.x(), key.y(), key.z());
+        LongBox box = LongBox.ofSection(key.x().toLong(), key.y().toLong(), key.z().toLong());
         SectionSink sink = new SectionSink(data.section, aquifer, fallback);
         int cellWidth = settings.cellWidth();
         int cellHeight = settings.cellHeight();

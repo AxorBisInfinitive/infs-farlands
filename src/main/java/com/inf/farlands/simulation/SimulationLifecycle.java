@@ -75,7 +75,7 @@ public final class SimulationLifecycle {
         }
         SimulationStorage.SlotRef ref;
         try {
-            ref = SimulationSectionIO.slotAt(level, key.x(), key.y(), key.z());
+            ref = SimulationSectionIO.slotAt(level, key.x().toLong(), key.y().toLong(), key.z().toLong());
         } catch (RuntimeException e) {
             InfsFarlands.LOGGER.error("farlands: ssa slot lookup failed section={},{},{}", key.x(), key.y(),
                     key.z(), e);
@@ -88,7 +88,7 @@ public final class SimulationLifecycle {
             produce(level, key);
             return;
         }
-        Path path = SimulationSectionIO.findPath(level, key.x(), key.y(), key.z());
+        Path path = SimulationSectionIO.findPath(level, key.x().toLong(), key.y().toLong(), key.z().toLong());
         if (path == null) {
             // 槽位查得到就说明映射里有这个区域，这里落空只可能是表在两次调用之间被换掉。
             LOADING.remove(pending);
@@ -96,7 +96,7 @@ public final class SimulationLifecycle {
             return;
         }
         List<SimulationSectionIO.SlotKey> keys = List
-                .of(new SimulationSectionIO.SlotKey(key.x(), key.y(), key.z(), ref));
+                .of(new SimulationSectionIO.SlotKey(key.x().toLong(), key.y().toLong(), key.z().toLong(), ref));
         try {
             SimulationSectionIO.submitRead(level, path, keys, level.palettedContainerFactory(),
                     decoded -> finishRead(level, key, pending, decoded));
@@ -148,7 +148,7 @@ public final class SimulationLifecycle {
         ResourceKey<Level> dimension = level.dimension();
         Path path;
         try {
-            path = SimulationSectionIO.pathForWrite(level, key.x(), key.y(), key.z());
+            path = SimulationSectionIO.pathForWrite(level, key.x().toLong(), key.y().toLong(), key.z().toLong());
         } catch (RuntimeException e) {
             InfsFarlands.LOGGER.error("farlands: ssa path failed section={},{},{}", key.x(), key.y(), key.z(), e);
             data.clearReleasing();
@@ -162,7 +162,7 @@ public final class SimulationLifecycle {
         byte[] entry;
         try {
             entry = SimulationSerializer.encode(data.section, data.blockLight, data.skyLight, data.shapeMode(),
-                    data.stage(), factory, key.x(), key.y(), key.z());
+                    data.stage(), factory, key.x().toLong(), key.y().toLong(), key.z().toLong());
         } catch (RuntimeException e) {
             InfsFarlands.LOGGER.error("farlands: ssa encode failed section={},{},{}", key.x(), key.y(), key.z(), e);
             data.clearReleasing();
@@ -172,7 +172,8 @@ public final class SimulationLifecycle {
         SimulationStorage.PendingWrite pw;
         try {
             storage = SimulationSectionIO.getOrOpen(path);
-            pw = storage.prepareWrite(SimulationSectionIO.slotIndex(key.x(), key.y(), key.z()), entry);
+            pw = storage.prepareWrite(
+                    SimulationSectionIO.slotIndex(key.x().toLong(), key.y().toLong(), key.z().toLong()), entry);
         } catch (RuntimeException e) {
             InfsFarlands.LOGGER.error("farlands: ssa open failed {}", path, e);
             data.clearReleasing();
@@ -246,7 +247,8 @@ public final class SimulationLifecycle {
                 }
                 Path path;
                 try {
-                    path = SimulationSectionIO.pathForWrite(level, key.x(), key.y(), key.z());
+                    path = SimulationSectionIO.pathForWrite(level, key.x().toLong(), key.y().toLong(),
+                            key.z().toLong());
                 } catch (RuntimeException e) {
                     InfsFarlands.LOGGER.error("farlands: ssa shutdown path failed section={},{},{}", key.x(),
                             key.y(), key.z(), e);
@@ -258,7 +260,8 @@ public final class SimulationLifecycle {
                 byte[] entry;
                 try {
                     entry = SimulationSerializer.encode(data.section, data.blockLight, data.skyLight,
-                            data.shapeMode(), data.stage(), factory, key.x(), key.y(), key.z());
+                            data.shapeMode(), data.stage(), factory, key.x().toLong(), key.y().toLong(),
+                            key.z().toLong());
                 } catch (RuntimeException e) {
                     InfsFarlands.LOGGER.error("farlands: ssa shutdown encode failed section={},{},{}", key.x(),
                             key.y(), key.z(), e);
@@ -268,7 +271,8 @@ public final class SimulationLifecycle {
                 SimulationStorage.PendingWrite pw;
                 try {
                     storage = SimulationSectionIO.getOrOpen(path);
-                    pw = storage.prepareWrite(SimulationSectionIO.slotIndex(key.x(), key.y(), key.z()), entry);
+                    pw = storage.prepareWrite(
+                    SimulationSectionIO.slotIndex(key.x().toLong(), key.y().toLong(), key.z().toLong()), entry);
                 } catch (RuntimeException e) {
                     InfsFarlands.LOGGER.error("farlands: ssa shutdown open failed {}", path, e);
                     continue;

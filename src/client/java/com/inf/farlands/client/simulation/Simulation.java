@@ -152,7 +152,7 @@ public final class Simulation {
      */
     public void applySection(SimulationSectionKey key, LevelChunkSection container,
             int shapeMode, DataLayer blockLight, DataLayer skyLight) {
-        SectionKey local = new SectionKey(key.x(), key.y(), key.z());
+        SectionKey local = new SectionKey(key.x().toLong(), key.y().toLong(), key.z().toLong());
         if (container.hasOnlyAir()) {
             SimulationSection section = this.section(local);
             long before = section.visibility();
@@ -185,7 +185,7 @@ public final class Simulation {
 
     /** 丢掉服务端撤回的一段。 */
     public void dropSection(SimulationSectionKey key) {
-        this.removeSection(new SectionKey(key.x(), key.y(), key.z()));
+        this.removeSection(new SectionKey(key.x().toLong(), key.y().toLong(), key.z().toLong()));
     }
 
 

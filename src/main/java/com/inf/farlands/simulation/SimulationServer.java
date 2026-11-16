@@ -342,7 +342,7 @@ public final class SimulationServer {
      * 段，这里用它的补集剔掉界内段。判据收在 {@code WorldBounds} 一处，三轴写法不在调用点重写。
      */
     private static boolean farlands$owned(SimulationSectionKey key) {
-        return !WorldBounds.inSection(key.x(), key.y(), key.z());
+        return !WorldBounds.inSection(key.x().toLong(), key.y().toLong(), key.z().toLong());
     }
 
     /**
@@ -413,8 +413,8 @@ public final class SimulationServer {
      * 段键的层号：水平切比雪夫距离。窗口内的键因此落在 0 到 radius，可以直接当下标。
      */
     private static int farlands$layer(SimulationSectionKey key, long centerX, long centerZ) {
-        long dx = Math.abs(key.x() - centerX);
-        long dz = Math.abs(key.z() - centerZ);
+        long dx = Math.abs(key.x().toLong() - centerX);
+        long dz = Math.abs(key.z().toLong() - centerZ);
         return (int) Math.max(dx, dz);
     }
 
@@ -470,12 +470,12 @@ public final class SimulationServer {
         int rmin = Integer.MAX_VALUE;
         int rmax = 0;
         for (SimulationSectionKey key : removed) {
-            int distance = (int) Math.max(Math.abs(key.x() - view.centerX()),
-                    Math.abs(key.z() - view.centerZ()));
+            int distance = (int) Math.max(Math.abs(key.x().toLong() - view.centerX()),
+                    Math.abs(key.z().toLong() - view.centerZ()));
             if (distance <= 2) {
                 nearCenter = true;
             }
-            ys.add(key.y());
+            ys.add(key.y().toLong());
             rmin = Math.min(rmin, distance);
             rmax = Math.max(rmax, distance);
         }

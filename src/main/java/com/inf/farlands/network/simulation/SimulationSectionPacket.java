@@ -56,7 +56,7 @@ public record SimulationSectionPacket(
             data.section.write(buffer);
             byte[] bytes = new byte[buffer.readableBytes()];
             buffer.readBytes(bytes);
-            return new SectionEntry(key.x(), key.y(), key.z(), data.shapeMode(), bytes,
+            return new SectionEntry(key.x().toLong(), key.y().toLong(), key.z().toLong(), data.shapeMode(), bytes,
                     ChunkDataPacket.encodeLight(data.blockLight),
                     ChunkDataPacket.encodeLight(data.skyLight));
         } finally {
@@ -92,9 +92,9 @@ public record SimulationSectionPacket(
         }
         buffer.writeVarInt(pkt.removed().size());
         for (SimulationSectionKey key : pkt.removed()) {
-            buffer.writeLong(key.x());
-            buffer.writeLong(key.y());
-            buffer.writeLong(key.z());
+            buffer.writeLong(key.x().toLong());
+            buffer.writeLong(key.y().toLong());
+            buffer.writeLong(key.z().toLong());
         }
     }
 
