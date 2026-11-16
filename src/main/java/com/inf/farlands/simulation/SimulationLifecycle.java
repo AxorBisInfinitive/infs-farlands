@@ -168,7 +168,7 @@ public final class SimulationLifecycle {
         byte[] entry;
         try {
             entry = SimulationSerializer.encode(data.section, data.blockLight, data.skyLight, data.shapeMode(),
-                    data.stage(), factory, key.x().toLong(), key.y().toLong(), key.z().toLong());
+                    data.stage(), factory, key.x(), key.y(), key.z());
         } catch (RuntimeException e) {
             InfsFarlands.LOGGER.error("farlands: ssa encode failed section={},{},{}", key.x(), key.y(), key.z(), e);
             data.clearReleasing();
@@ -266,8 +266,7 @@ public final class SimulationLifecycle {
                 byte[] entry;
                 try {
                     entry = SimulationSerializer.encode(data.section, data.blockLight, data.skyLight,
-                            data.shapeMode(), data.stage(), factory, key.x().toLong(), key.y().toLong(),
-                            key.z().toLong());
+                            data.shapeMode(), data.stage(), factory, key.x(), key.y(), key.z());
                 } catch (RuntimeException e) {
                     InfsFarlands.LOGGER.error("farlands: ssa shutdown encode failed section={},{},{}", key.x(),
                             key.y(), key.z(), e);

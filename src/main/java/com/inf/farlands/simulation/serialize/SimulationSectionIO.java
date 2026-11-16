@@ -267,8 +267,7 @@ public final class SimulationSectionIO {
                     byte[] entry = storage.readData(key.ref().sectorOffset(), key.ref().sectorCount());
                     if (entry != null) {
                         SimulationSerializer.DecodedSection d = SimulationSerializer.decode(entry,
-                                containerFactory, key.sectionX().toLong(), key.sectionY().toLong(),
-                                key.sectionZ().toLong());
+                                containerFactory, key.sectionX(), key.sectionY(), key.sectionZ());
                         decoded.add(new DecodedEntry(key.sectionX(), key.sectionY(), key.sectionZ(), d));
                     }
                 } catch (Exception e) {

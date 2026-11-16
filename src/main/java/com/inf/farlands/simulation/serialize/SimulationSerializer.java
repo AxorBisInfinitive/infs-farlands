@@ -24,6 +24,7 @@ import net.minecraft.world.level.chunk.PalettedContainerRO;
 import com.inf.farlands.network.expand.y.ChunkDataPacket;
 import com.inf.farlands.simulation.model.SimulationSectionData;
 import com.inf.farlands.simulation.model.SimulationSectionStage;
+import com.inf.long2.ints.Int1024;
 
 /**
  * ssa 条目编解码。条目字节与 {@link LevelChunkSection}、两层光照、形状模式与阶段互转。
@@ -38,7 +39,9 @@ import com.inf.farlands.simulation.model.SimulationSectionStage;
  *
  * <ul>
  * <li>多了 X 与 Z。fsa 只存 Y，坐标由文件名与槽位隐含，写错一格就是把数据搬到另一段且没有任何检测。ssa
- * 是自己设计的格式，八字节换一个当场炸出来的自检。</li>
+ * 是自己设计的格式，三段各 128 字节，换一个当场炸出来的自检。</li>
+ * <li>坐标是 128 字节大端补码，不是 long：段号可到 2^1019，long 装不下；{@code Int1024.of(byte[])} 与
+ * {@code toBytes()} 逐位互逆，所以整条链上不经过任何窄化。</li>
  * <li>多了 shapeMode 与 stage。形状模式是段级的，容器里没有它；阶段要随数据一起落盘，读回时按盘上值恢复。</li>
  * <li>光照的省略判据是 {@code isEmpty} 而不是 {@code isDefinitelyHomogenous}。同质非零的层，例如全 15 的
  * 天光，在后者下也会被省略，而省掉的键解码时只能还原成全 0，值就此静默丢掉。</li>
@@ -70,14 +73,14 @@ public final class SimulationSerializer {
      * 坐标三段都写进去，供解码自检。chunkKey 不需要：本类不取打包锁。
      */
     public static byte[] encode(LevelChunkSection section, DataLayer blockLight, DataLayer skyLight,
-            int shapeMode, int stage, PalettedContainerFactory containerFactory, long sectionX, long sectionY,
-            long sectionZ) {
+            int shapeMode, int stage, PalettedContainerFactory containerFactory, Int1024 sectionX, Int1024 sectionY,
+            Int1024 sectionZ) {
         CompoundTag tag = new CompoundTag();
         tag.putInt("DataVersion", SharedConstants.getCurrentVersion().dataVersion().version());
-        // 三段用 long：段号可以超出 int，方块位置在这个 port 里本来就能到十的十八次方量级
-        tag.putLong("X", sectionX);
-        tag.putLong("Y", sectionY);
-        tag.putLong("Z", sectionZ);
+        // 三段用 128 字节大端补码：段号可到 2^1019，long 装不下
+        tag.putByteArray("X", sectionX.toBytes());
+        tag.putByteArray("Y", sectionY.toBytes());
+        tag.putByteArray("Z", sectionZ.toBytes());
         tag.put("block_states",
                 containerFactory.blockStatesContainerCodec().encodeStart(NbtOps.INSTANCE, section.getStates())
                         .getOrThrow());
@@ -127,8 +130,8 @@ public final class SimulationSerializer {
      * 数据损坏一律抛，不返回半个结果。调用方的语义是「读不到就当盘上没有」。
      */
     @SuppressWarnings("deprecation")
-    public static DecodedSection decode(byte[] entry, PalettedContainerFactory containerFactory, long sectionX,
-            long sectionY, long sectionZ) {
+    public static DecodedSection decode(byte[] entry, PalettedContainerFactory containerFactory, Int1024 sectionX,
+            Int1024 sectionY, Int1024 sectionZ) {
         try {
             DataInputStream in = new DataInputStream(new ByteArrayInputStream(entry));
             int len = in.readInt();
@@ -145,10 +148,16 @@ public final class SimulationSerializer {
             CompoundTag tag = NbtIo.read(nbtIn);
             nbtIn.close();
 
-            long haveX = tag.getLongOr("X", Long.MIN_VALUE);
-            long haveY = tag.getLongOr("Y", Long.MIN_VALUE);
-            long haveZ = tag.getLongOr("Z", Long.MIN_VALUE);
-            if (haveX != sectionX || haveY != sectionY || haveZ != sectionZ) {
+            Optional<byte[]> rawX = tag.getByteArray("X");
+            Optional<byte[]> rawY = tag.getByteArray("Y");
+            Optional<byte[]> rawZ = tag.getByteArray("Z");
+            if (rawX.isEmpty() || rawY.isEmpty() || rawZ.isEmpty()) {
+                throw new IllegalStateException("ssa entry has no 128-byte coordinate key");
+            }
+            Int1024 haveX = Int1024.of(rawX.get());
+            Int1024 haveY = Int1024.of(rawY.get());
+            Int1024 haveZ = Int1024.of(rawZ.get());
+            if (!haveX.equals(sectionX) || !haveY.equals(sectionY) || !haveZ.equals(sectionZ)) {
                 throw new IllegalStateException("ssa entry coordinate mismatch: asked " + sectionX + ","
                         + sectionY + "," + sectionZ + " but entry holds " + haveX + "," + haveY + ","
                         + haveZ);
