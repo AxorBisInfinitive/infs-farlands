@@ -150,9 +150,9 @@ public final class Simulation {
      * {@code DataLayer} 里，删掉对象邻段就会采到 0 光。所以走 {@code applyAir} 只装群系与光照，跳过 4096 格
      * 方块转换，不进待烘集合，并让邻段重烘一次以拿到新的光。
      */
-    public void applySection(SimulationSectionKey key, LevelChunkSection container,
+    public void applySection(long sectionX, long sectionY, long sectionZ, LevelChunkSection container,
             int shapeMode, DataLayer blockLight, DataLayer skyLight) {
-        SectionKey local = new SectionKey(key.x().toLong(), key.y().toLong(), key.z().toLong());
+        SectionKey local = new SectionKey(sectionX, sectionY, sectionZ);
         if (container.hasOnlyAir()) {
             SimulationSection section = this.section(local);
             long before = section.visibility();
@@ -183,9 +183,9 @@ public final class Simulation {
         this.snapDirty.add(local);
     }
 
-    /** 丢掉服务端撤回的一段。 */
-    public void dropSection(SimulationSectionKey key) {
-        this.removeSection(new SectionKey(key.x().toLong(), key.y().toLong(), key.z().toLong()));
+    /** 丢掉服务端撤回的一段。段号在收包处已收窄到 long 并核过范围。 */
+    public void dropSection(long sectionX, long sectionY, long sectionZ) {
+        this.removeSection(new SectionKey(sectionX, sectionY, sectionZ));
     }
 
 

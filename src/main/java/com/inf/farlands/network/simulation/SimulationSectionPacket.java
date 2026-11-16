@@ -7,6 +7,7 @@ import com.inf.farlands.InfsFarlands;
 import com.inf.farlands.network.expand.y.ChunkDataPacket;
 import com.inf.farlands.simulation.model.SimulationSectionData;
 import com.inf.farlands.simulation.model.SimulationSectionKey;
+import com.inf.long2.ints.Int1024;
 
 import io.netty.buffer.Unpooled;
 import net.minecraft.core.registries.Registries;
@@ -23,7 +24,7 @@ import net.minecraft.world.level.Level;
  *
  * <p>
  * 一段的块与群系直接沿用原版的段容器线格式，写进 {@code data}；光照沿用 section 包那一套一字节或 2049 字节的
- * 编码。坐标三轴用 long，因为段号可以超出 int。
+ * 编码。坐标三轴各十六个 long，即 128 字节大端补码：段号可到 2^1019，long 装不下。
  *
  * <p>
  * 装载与卸载放在一条包里：同一 tick 里进出视距的段常常同时发生，拆两条会让同一玩家的包数翻倍。
@@ -34,8 +35,14 @@ public record SimulationSectionPacket(
         List<SimulationSectionKey> removed) implements CustomPacketPayload {
 
     /** 一段的线上表示。{@code data} 是段容器的原始字节，{@code shapeMode} 见 {@link SimulationSectionData}。 */
-    public record SectionEntry(long x, long y, long z, int shapeMode, byte[] data, byte[] blockLight, byte[] skyLight) {
+    public record SectionEntry(Int1024 x, Int1024 y, Int1024 z, int shapeMode, byte[] data, byte[] blockLight,
+            byte[] skyLight) {
     }
+
+    /** 一条坐标的组数与字节数：十六个 long 即 128 字节。 */
+    private static final int COORDINATE_LONGS = 16;
+
+    private static final int COORDINATE_BYTES = COORDINATE_LONGS * Long.BYTES;
 
     public static final Type<SimulationSectionPacket> TYPE = new Type<>(
             Identifier.fromNamespaceAndPath(InfsFarlands.MOD_ID, "simulation_section"));
@@ -56,7 +63,7 @@ public record SimulationSectionPacket(
             data.section.write(buffer);
             byte[] bytes = new byte[buffer.readableBytes()];
             buffer.readBytes(bytes);
-            return new SectionEntry(key.x().toLong(), key.y().toLong(), key.z().toLong(), data.shapeMode(), bytes,
+            return new SectionEntry(key.x(), key.y(), key.z(), data.shapeMode(), bytes,
                     ChunkDataPacket.encodeLight(data.blockLight),
                     ChunkDataPacket.encodeLight(data.skyLight));
         } finally {
@@ -72,7 +79,7 @@ public record SimulationSectionPacket(
      * 分叉，预算就会按大于实发的字节记账，优化发不出去。
      */
     public static int encodedSize(SectionEntry entry) {
-        int size = 24 + 1 + VarInt.getByteSize(entry.data().length) + entry.data().length;
+        int size = COORDINATE_BYTES * 3 + 1 + VarInt.getByteSize(entry.data().length) + entry.data().length;
         size += ChunkDataPacket.encodedLightSize(entry.blockLight());
         size += ChunkDataPacket.encodedLightSize(entry.skyLight());
         return size;
@@ -82,9 +89,9 @@ public record SimulationSectionPacket(
         buffer.writeResourceKey(pkt.dimension());
         buffer.writeVarInt(pkt.loaded().size());
         for (SectionEntry e : pkt.loaded()) {
-            buffer.writeLong(e.x());
-            buffer.writeLong(e.y());
-            buffer.writeLong(e.z());
+            writeCoordinate(buffer, e.x());
+            writeCoordinate(buffer, e.y());
+            writeCoordinate(buffer, e.z());
             buffer.writeByte(e.shapeMode());
             buffer.writeByteArray(e.data());
             writeLight(buffer, e.blockLight());
@@ -92,9 +99,9 @@ public record SimulationSectionPacket(
         }
         buffer.writeVarInt(pkt.removed().size());
         for (SimulationSectionKey key : pkt.removed()) {
-            buffer.writeLong(key.x().toLong());
-            buffer.writeLong(key.y().toLong());
-            buffer.writeLong(key.z().toLong());
+            writeCoordinate(buffer, key.x());
+            writeCoordinate(buffer, key.y());
+            writeCoordinate(buffer, key.z());
         }
     }
 
@@ -103,9 +110,9 @@ public record SimulationSectionPacket(
         int count = buffer.readVarInt();
         List<SectionEntry> loaded = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
-            long x = buffer.readLong();
-            long y = buffer.readLong();
-            long z = buffer.readLong();
+            Int1024 x = readCoordinate(buffer);
+            Int1024 y = readCoordinate(buffer);
+            Int1024 z = readCoordinate(buffer);
             int shapeMode = buffer.readByte();
             byte[] data = buffer.readByteArray();
             byte[] blockLight = readLight(buffer);
@@ -115,9 +122,26 @@ public record SimulationSectionPacket(
         int removedCount = buffer.readVarInt();
         List<SimulationSectionKey> removed = new ArrayList<>(removedCount);
         for (int i = 0; i < removedCount; i++) {
-            removed.add(new SimulationSectionKey(buffer.readLong(), buffer.readLong(), buffer.readLong()));
+            removed.add(new SimulationSectionKey(readCoordinate(buffer), readCoordinate(buffer),
+                    readCoordinate(buffer)));
         }
         return new SimulationSectionPacket(dimension, loaded, removed);
+    }
+
+    /** 一条坐标：十六个 long 的大端序列，与 {@code Int1024.toBytes()} 逐字节相同。 */
+    private static void writeCoordinate(FriendlyByteBuf buffer, Int1024 value) {
+        for (int group = 0; group < COORDINATE_LONGS; group++) {
+            buffer.writeLong(value.getLong(group));
+        }
+    }
+
+    /** 一条 128 字节坐标的反向：读十六个 long，按大端交给 {@code Int1024.of(long[])}。 */
+    private static Int1024 readCoordinate(FriendlyByteBuf buffer) {
+        long[] words = new long[COORDINATE_LONGS];
+        for (int group = 0; group < COORDINATE_LONGS; group++) {
+            words[group] = buffer.readLong();
+        }
+        return Int1024.of(words);
     }
 
     private static void writeLight(FriendlyByteBuf buffer, byte[] light) {
