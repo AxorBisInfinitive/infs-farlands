@@ -29,9 +29,9 @@ import org.spongepowered.asm.mixin.injection.Redirect;
  * regionZ，与括号里的文件名逐段对应，可直接到 fsa 目录对号。
  *
  * <p>
- * 原版 XYZ 行是 {@code %.3f / %.5f / %.3f}，三个实参是 256 位槽位的 double 投影。{@code 2^60} 处那个投影等于
+ * 原版 XYZ 行是 {@code %.3f / %.5f / %.3f}，三个实参是 1280 位槽位的 double 投影。{@code 2^60} 处那个投影等于
  * {@code 2^60} 本身，小数位永远是 0，所以三行各自改成槽位精确值的十进制写法，小数位数与原来对齐：x 与 z 三位、
- * y 五位。NaN 与无穷由 {@code Binary256} 自己给写法，这里不做任何甄别。
+ * y 五位。NaN 与无穷由 {@code Binary1280} 自己给写法，这里不做任何甄别。
  *
  * <p>
  * 绝对界外不能用 blockPosition 的数字：它是 setPosRaw 经 Mth.floor 落过 int 的缓存字段，界外一律饱和到

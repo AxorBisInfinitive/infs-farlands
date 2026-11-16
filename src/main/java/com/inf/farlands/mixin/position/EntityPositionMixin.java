@@ -5,7 +5,7 @@ import com.inf.farlands.util.pos.ExactCollisionSource;
 import com.inf.farlands.util.pos.ExactDoubles;
 import com.inf.farlands.util.pos.ExactPosition;
 import com.inf.farlands.util.pos.ExactTeleport;
-import com.inf.long2.binaries.binary256.Binary256;
+import com.inf.long2.binaries.binary1280.Binary1280;
 import com.inf.long2.ints.Int1024;
 
 import java.util.List;
@@ -41,7 +41,7 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * 实体位置的内部表示改成 256 位，出口仍是 double；移动与碰撞的加法在帧里做。
+ * 实体位置的内部表示改成 1280 位，出口仍是 double；移动与碰撞的加法在帧里做。
  *
  * <p>
  * 捕获点取 {@code setPosRaw} 的头部，它是位置唯一的写入口：正文里 {@code this.position} 的赋值只有构造器的
@@ -111,10 +111,10 @@ public abstract class EntityPositionMixin implements ExactPosition {
     }
 
     /**
-     * 九槽 256 位存储。不写初始化器：{@code @Unique} 字段的初始化器可能被静默丢弃，见仓库既有约定。
+     * 九槽 1280 位存储。不写初始化器：{@code @Unique} 字段的初始化器可能被静默丢弃，见仓库既有约定。
      */
     @Unique
-    private Binary256[] farlands$slots;
+    private Binary1280[] farlands$slots;
 
     @Unique
     private long farlands$anchorX;
@@ -140,7 +140,7 @@ public abstract class EntityPositionMixin implements ExactPosition {
 
     /** 本次传送的精确目标，三轴。命令层没放侧通道时为 null。 */
     @Unique
-    private Binary256[] farlands$teleportExact;
+    private Binary1280[] farlands$teleportExact;
 
     /** 有精确位置待同步到客户端，发过一次即清。 */
     @Unique
@@ -155,10 +155,10 @@ public abstract class EntityPositionMixin implements ExactPosition {
     private Vec3 farlands$pendingMovement;
 
     @Override
-    public Binary256[] farlands$exactSlots() {
-        Binary256[] slots = this.farlands$slots;
+    public Binary1280[] farlands$exactSlots() {
+        Binary1280[] slots = this.farlands$slots;
         if (slots == null) {
-            slots = new Binary256[9];
+            slots = new Binary1280[9];
             this.farlands$slots = slots;
         }
         return slots;
@@ -186,14 +186,14 @@ public abstract class EntityPositionMixin implements ExactPosition {
      * 旧位置与当前位置在 {@code partial} 刻的插值，返回相对当前锚点的局部量。
      *
      * <p>
-     * 两端都是 256 位值时，先把锚点差与局部差分别算出来再乘权重。若旧位置还没记过，退回当前局部量，
+     * 两端都是 1280 位值时，先把锚点差与局部差分别算出来再乘权重。若旧位置还没记过，退回当前局部量，
      * 等价于不插值。
      */
     @Override
     public double farlands$lerpLocal(int axis, float partial) {
         this.farlands$syncFrame();
-        Binary256[] slots = this.farlands$exactSlots();
-        Binary256 old = slots[axis == POS_X ? OLD_XO : axis == POS_Y ? OLD_YO : OLD_ZO];
+        Binary1280[] slots = this.farlands$exactSlots();
+        Binary1280 old = slots[axis == POS_X ? OLD_XO : axis == POS_Y ? OLD_YO : OLD_ZO];
         if (old == null) {
             return farlands$local(axis);
         }
@@ -214,8 +214,8 @@ public abstract class EntityPositionMixin implements ExactPosition {
     @Override
     public double farlands$frameDelta(int axis) {
         this.farlands$syncFrame();
-        Binary256[] slots = this.farlands$exactSlots();
-        Binary256 old = slots[axis == POS_X ? OLD_XO : axis == POS_Y ? OLD_YO : OLD_ZO];
+        Binary1280[] slots = this.farlands$exactSlots();
+        Binary1280 old = slots[axis == POS_X ? OLD_XO : axis == POS_Y ? OLD_YO : OLD_ZO];
         if (old == null) {
             return 0.0;
         }
@@ -231,12 +231,12 @@ public abstract class EntityPositionMixin implements ExactPosition {
      *
      * <p>
      * 逐轴幂等：入参与当前槽位的 double 投影相等时保留槽位。`reapplyPosition`、`snapTo(getX(), ...)`、
-     * `teleportSetPosition` 这几条会把投影原样回填，若无条件按入参重写，256 位值就被投影替换，
+     * `teleportSetPosition` 这几条会把投影原样回填，若无条件按入参重写，1280 位值就被投影替换，
      * {@code 5e18} 处一次回填最多跳 512 格。
      */
     @Inject(method = "setPosRaw(DDD)V", at = @At("HEAD"))
     private void farlands$storePosition(double x, double y, double z, CallbackInfo ci) {
-        Binary256[] slots = this.farlands$exactSlots();
+        Binary1280[] slots = this.farlands$exactSlots();
         slots[POS_X] = farlands$keepIfProjection(slots[POS_X], x);
         slots[POS_Y] = farlands$keepIfProjection(slots[POS_Y], y);
         slots[POS_Z] = farlands$keepIfProjection(slots[POS_Z], z);
@@ -282,19 +282,19 @@ public abstract class EntityPositionMixin implements ExactPosition {
 
     @Overwrite
     public final double getX() {
-        Binary256 exact = this.farlands$exactSlots()[POS_X];
+        Binary1280 exact = this.farlands$exactSlots()[POS_X];
         return exact != null ? exact.toDouble() : this.position.x;
     }
 
     @Overwrite
     public final double getY() {
-        Binary256 exact = this.farlands$exactSlots()[POS_Y];
+        Binary1280 exact = this.farlands$exactSlots()[POS_Y];
         return exact != null ? exact.toDouble() : this.position.y;
     }
 
     @Overwrite
     public final double getZ() {
-        Binary256 exact = this.farlands$exactSlots()[POS_Z];
+        Binary1280 exact = this.farlands$exactSlots()[POS_Z];
         return exact != null ? exact.toDouble() : this.position.z;
     }
 
@@ -391,13 +391,13 @@ public abstract class EntityPositionMixin implements ExactPosition {
      */
     @Inject(method = "setOldPos(Lnet/minecraft/world/phys/Vec3;)V", at = @At("HEAD"))
     private void farlands$storeOldPos(Vec3 pos, CallbackInfo ci) {
-        Binary256[] slots = this.farlands$exactSlots();
+        Binary1280[] slots = this.farlands$exactSlots();
         // 入参是当前位置时直接引用精确槽位，插值两端就都精确。入参是别的值时按该 double 记：
         // setOldPosAndRot 的插值路径与客户端报文路径会给到这种值，语义要跟着入参走。
         boolean current = pos.x == this.position.x && pos.y == this.position.y && pos.z == this.position.z;
-        Binary256 x = current && slots[POS_X] != null ? slots[POS_X] : Binary256.of(pos.x);
-        Binary256 y = current && slots[POS_Y] != null ? slots[POS_Y] : Binary256.of(pos.y);
-        Binary256 z = current && slots[POS_Z] != null ? slots[POS_Z] : Binary256.of(pos.z);
+        Binary1280 x = current && slots[POS_X] != null ? slots[POS_X] : Binary1280.of(pos.x);
+        Binary1280 y = current && slots[POS_Y] != null ? slots[POS_Y] : Binary1280.of(pos.y);
+        Binary1280 z = current && slots[POS_Z] != null ? slots[POS_Z] : Binary1280.of(pos.z);
         slots[OLD_XO] = x;
         slots[OLD_X] = x;
         slots[OLD_YO] = y;
@@ -464,10 +464,10 @@ public abstract class EntityPositionMixin implements ExactPosition {
         if (this.farlands$frameReady) {
             return;
         }
-        Binary256[] slots = this.farlands$exactSlots();
-        Binary256 px = slots[POS_X] != null ? slots[POS_X] : Binary256.of(this.position.x);
-        Binary256 py = slots[POS_Y] != null ? slots[POS_Y] : Binary256.of(this.position.y);
-        Binary256 pz = slots[POS_Z] != null ? slots[POS_Z] : Binary256.of(this.position.z);
+        Binary1280[] slots = this.farlands$exactSlots();
+        Binary1280 px = slots[POS_X] != null ? slots[POS_X] : Binary1280.of(this.position.x);
+        Binary1280 py = slots[POS_Y] != null ? slots[POS_Y] : Binary1280.of(this.position.y);
+        Binary1280 pz = slots[POS_Z] != null ? slots[POS_Z] : Binary1280.of(this.position.z);
         this.farlands$anchorX = farlands$anchorOf(px);
         this.farlands$anchorY = farlands$anchorOf(py);
         this.farlands$anchorZ = farlands$anchorOf(pz);
@@ -486,7 +486,11 @@ public abstract class EntityPositionMixin implements ExactPosition {
      * {@code farlands$exactFloor(v) == Mth.lfloor(v.toDouble())}，对全定义域成立。
      */
     @Unique
-    private static long farlands$exactFloor(Binary256 value) {
+    private static long farlands$exactFloor(Binary1280 value) {
+        // 正负零都归零：equals 比的是位模式，负零与正零不等，会落到下面的补一步变成 -1。
+        if (value.isZero()) {
+            return 0L;
+        }
         long truncated = value.toLong();
         if (!value.signBit()) {
             return truncated;
@@ -494,25 +498,25 @@ public abstract class EntityPositionMixin implements ExactPosition {
         if (truncated == Long.MIN_VALUE) {
             return Long.MIN_VALUE;
         }
-        return value.equals(Binary256.of(truncated)) ? truncated : truncated - 1L;
+        return value.equals(Binary1280.of(truncated)) ? truncated : truncated - 1L;
     }
 
     /** 阈值内取零，阈值外取精确下取整。 */
     @Unique
-    private static long farlands$anchorOf(Binary256 value) {
+    private static long farlands$anchorOf(Binary1280 value) {
         long floor = farlands$exactFloor(value);
         return floor > -farlands$FRAME_LIMIT && floor < farlands$FRAME_LIMIT ? 0L : floor;
     }
 
     @Unique
-    private static double farlands$localOf(Binary256 value, long anchor) {
-        return anchor == 0L ? value.toDouble() : value.subtract(Binary256.of(anchor)).toDouble();
+    private static double farlands$localOf(Binary1280 value, long anchor) {
+        return anchor == 0L ? value.toDouble() : value.subtract(Binary1280.of(anchor)).toDouble();
     }
 
     /** 入参等于当前槽位的 double 投影时保留槽位，否则按入参写。写侧幂等靠这一句。 */
     @Unique
-    private static Binary256 farlands$keepIfProjection(Binary256 current, double value) {
-        return current != null && current.toDouble() == value ? current : Binary256.of(value);
+    private static Binary1280 farlands$keepIfProjection(Binary1280 current, double value) {
+        return current != null && current.toDouble() == value ? current : Binary1280.of(value);
     }
 
     /** 当前帧下的局部包围盒，碰撞探测用。 */
@@ -526,9 +530,9 @@ public abstract class EntityPositionMixin implements ExactPosition {
     @Override
     public boolean farlands$crossedCell(int axis) {
         this.farlands$syncFrame();
-        Binary256[] slots = this.farlands$exactSlots();
-        Binary256 old = slots[axis == POS_X ? OLD_XO : axis == POS_Y ? OLD_YO : OLD_ZO];
-        Binary256 current = slots[axis == POS_X ? POS_X : axis == POS_Y ? POS_Y : POS_Z];
+        Binary1280[] slots = this.farlands$exactSlots();
+        Binary1280 old = slots[axis == POS_X ? OLD_XO : axis == POS_Y ? OLD_YO : OLD_ZO];
+        Binary1280 current = slots[axis == POS_X ? POS_X : axis == POS_Y ? POS_Y : POS_Z];
         if (old == null || current == null) {
             return false;
         }
@@ -539,7 +543,7 @@ public abstract class EntityPositionMixin implements ExactPosition {
     @Override
     public long farlands$cellCoord(int axis) {
         int slot = axis == POS_X ? POS_X : axis == POS_Y ? POS_Y : POS_Z;
-        Binary256 value = this.farlands$exactSlots()[slot];
+        Binary1280 value = this.farlands$exactSlots()[slot];
         if (value != null) {
             return farlands$exactFloor(value);
         }
@@ -552,30 +556,30 @@ public abstract class EntityPositionMixin implements ExactPosition {
      *
      * <p>
      * 与 {@code farlands$cellCoord} 的差别只有宽度：那一支经 {@code farlands$exactFloor} 落回 long，超出 long 的
-     * 坐标饱和；本方法把 256 位值直接交给 {@code Int1024.ofFloor}，全 1024 域都不丢。
+     * 坐标饱和；本方法把 1280 位值直接交给 {@code Int1024.ofFloor}，全 1024 域都不丢。
      */
     @Override
     public Int1024 farlands$cellCoord1024(int axis) {
         return Int1024.ofFloor(this.farlands$exactValue(axis));
     }
 
-    /** 该轴的 256 位值。槽位未写过时按位置字段建一个，此后槽位一直有值。 */
+    /** 该轴的 1280 位值。槽位未写过时按位置字段建一个，此后槽位一直有值。 */
     @Override
-    public Binary256 farlands$exactValue(int axis) {
+    public Binary1280 farlands$exactValue(int axis) {
         int slot = axis == POS_X ? POS_X : axis == POS_Y ? POS_Y : POS_Z;
-        Binary256 value = this.farlands$exactSlots()[slot];
+        Binary1280 value = this.farlands$exactSlots()[slot];
         if (value != null) {
             return value;
         }
         double fallback = axis == POS_X ? this.position.x : axis == POS_Y ? this.position.y : this.position.z;
-        return Binary256.of(fallback);
+        return Binary1280.of(fallback);
     }
 
     /** 只写九个槽位，投影与缓存不动。旧位置一组值写两处，与 {@code setOldPos} 同形。 */
     @Override
-    public void farlands$adoptExact(Binary256 x, Binary256 y, Binary256 z,
-            Binary256 oldX, Binary256 oldY, Binary256 oldZ) {
-        Binary256[] slots = this.farlands$exactSlots();
+    public void farlands$adoptExact(Binary1280 x, Binary1280 y, Binary1280 z,
+            Binary1280 oldX, Binary1280 oldY, Binary1280 oldZ) {
+        Binary1280[] slots = this.farlands$exactSlots();
         slots[POS_X] = x;
         slots[POS_Y] = y;
         slots[POS_Z] = z;
@@ -611,14 +615,14 @@ public abstract class EntityPositionMixin implements ExactPosition {
     @Inject(method = "teleportSetPosition(Lnet/minecraft/world/entity/PositionMoveRotation;Lnet/minecraft/world/entity/PositionMoveRotation;Ljava/util/Set;)V", at = @At("HEAD"))
     private void farlands$captureTeleportExact(PositionMoveRotation current, PositionMoveRotation destination,
             Set<Relative> relatives, CallbackInfo ci) {
-        Binary256[] pending = ExactTeleport.pending();
+        Binary1280[] pending = ExactTeleport.pending();
         if (pending == null) {
             this.farlands$teleportExact = null;
             return;
         }
-        Binary256[] target = new Binary256[3];
+        Binary1280[] target = new Binary1280[3];
         for (int axis = 0; axis < 3; axis++) {
-            Binary256 value = pending[axis];
+            Binary1280 value = pending[axis];
             Relative relative = axis == POS_X ? Relative.X : axis == POS_Y ? Relative.Y : Relative.Z;
             target[axis] = relatives.contains(relative) ? this.farlands$exactValue(axis).add(value) : value;
         }
@@ -629,7 +633,7 @@ public abstract class EntityPositionMixin implements ExactPosition {
     @Inject(method = "teleportSetPosition(Lnet/minecraft/world/entity/PositionMoveRotation;Lnet/minecraft/world/entity/PositionMoveRotation;Ljava/util/Set;)V", at = @At("RETURN"))
     private void farlands$adoptTeleportExact(PositionMoveRotation current, PositionMoveRotation destination,
             Set<Relative> relatives, CallbackInfo ci) {
-        Binary256[] target = this.farlands$teleportExact;
+        Binary1280[] target = this.farlands$teleportExact;
         if (target == null) {
             return;
         }
@@ -639,8 +643,8 @@ public abstract class EntityPositionMixin implements ExactPosition {
     }
 
     @Override
-    public void farlands$applyExactPosition(Binary256 x, Binary256 y, Binary256 z) {
-        Binary256[] slots = this.farlands$exactSlots();
+    public void farlands$applyExactPosition(Binary1280 x, Binary1280 y, Binary1280 z) {
+        Binary1280[] slots = this.farlands$exactSlots();
         slots[POS_X] = x;
         slots[POS_Y] = y;
         slots[POS_Z] = z;
@@ -651,18 +655,18 @@ public abstract class EntityPositionMixin implements ExactPosition {
      * 在帧里加一段位移并写回。
      *
      * <p>
-     * 先按槽位做 256 位加法，再交 {@link #farlands$writeExact} 重新定帧。位移量级是每 tick 一格上下，所以那次
+     * 先按槽位做 1280 位加法，再交 {@link #farlands$writeExact} 重新定帧。位移量级是每 tick 一格上下，所以那次
      * 加法不改变量级，只是把小数位保住。
      */
     @Unique
     private void farlands$moveExact(double dx, double dy, double dz) {
-        Binary256[] slots = this.farlands$exactSlots();
-        Binary256 nx = (slots[POS_X] != null ? slots[POS_X] : Binary256.of(this.position.x))
-                .add(Binary256.of(dx));
-        Binary256 ny = (slots[POS_Y] != null ? slots[POS_Y] : Binary256.of(this.position.y))
-                .add(Binary256.of(dy));
-        Binary256 nz = (slots[POS_Z] != null ? slots[POS_Z] : Binary256.of(this.position.z))
-                .add(Binary256.of(dz));
+        Binary1280[] slots = this.farlands$exactSlots();
+        Binary1280 nx = (slots[POS_X] != null ? slots[POS_X] : Binary1280.of(this.position.x))
+                .add(Binary1280.of(dx));
+        Binary1280 ny = (slots[POS_Y] != null ? slots[POS_Y] : Binary1280.of(this.position.y))
+                .add(Binary1280.of(dy));
+        Binary1280 nz = (slots[POS_Z] != null ? slots[POS_Z] : Binary1280.of(this.position.z))
+                .add(Binary1280.of(dz));
         this.farlands$writeExact(nx, ny, nz);
     }
 
@@ -674,8 +678,8 @@ public abstract class EntityPositionMixin implements ExactPosition {
      * 与改动前一致。
      */
     @Unique
-    private void farlands$writeExact(Binary256 nx, Binary256 ny, Binary256 nz) {
-        Binary256[] slots = this.farlands$exactSlots();
+    private void farlands$writeExact(Binary1280 nx, Binary1280 ny, Binary1280 nz) {
+        Binary1280[] slots = this.farlands$exactSlots();
         slots[POS_X] = nx;
         slots[POS_Y] = ny;
         slots[POS_Z] = nz;

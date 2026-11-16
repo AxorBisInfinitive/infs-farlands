@@ -4,7 +4,7 @@ import java.util.Locale;
 
 import com.inf.farlands.util.pos.ExactPosition;
 
-import com.inf.long2.binaries.binary256.Binary256;
+import com.inf.long2.binaries.binary1280.Binary1280;
 
 import net.minecraft.client.KeyboardHandler;
 import net.minecraft.client.Minecraft;
@@ -15,7 +15,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
 
 /**
- * F3+C 复制的坐标改成读 Binary256。
+ * F3+C 复制的坐标改成读 Binary1280。
  *
  * <p>
  * 原版那一句 {@code String.format} 吃的是玩家的 {@code getX}、{@code getY}、{@code getZ} 的 double 投影：本 port 的位置
@@ -36,9 +36,9 @@ public class KeyboardHandlerExactCopyMixin {
             return String.format(locale, format, args);
         }
         ExactPosition holder = (ExactPosition) player;
-        Binary256 x = holder.farlands$exactValue(ExactPosition.POS_X);
-        Binary256 y = holder.farlands$exactValue(ExactPosition.POS_Y);
-        Binary256 z = holder.farlands$exactValue(ExactPosition.POS_Z);
+        Binary1280 x = holder.farlands$exactValue(ExactPosition.POS_X);
+        Binary1280 y = holder.farlands$exactValue(ExactPosition.POS_Y);
+        Binary1280 z = holder.farlands$exactValue(ExactPosition.POS_Z);
         return String.format(Locale.ROOT, "/execute in %s run tp @s %s %s %s %.2f %.2f", args[0],
                 x.toString(2), y.toString(2), z.toString(2), args[4], args[5]);
     }

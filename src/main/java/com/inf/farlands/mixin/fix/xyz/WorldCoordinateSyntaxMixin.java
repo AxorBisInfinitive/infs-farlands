@@ -1,6 +1,6 @@
 package com.inf.farlands.mixin.fix.xyz;
 
-import com.inf.long2.binaries.binary256.Binary256;
+import com.inf.long2.binaries.binary1280.Binary1280;
 import com.mojang.brigadier.StringReader;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 
@@ -11,7 +11,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
 
 /**
- * 坐标字面量的接受范围改成与 {@code Binary256.isValid} 一致。
+ * 坐标字面量的接受范围改成与 {@code Binary1280.isValid} 一致。
  *
  * <p>
  * 原版的数字扫描是 Brigadier 的 {@code StringReader.readDouble}，字符集只有数字、{@code .} 与 {@code -}。
@@ -19,8 +19,8 @@ import org.spongepowered.asm.mixin.injection.Redirect;
  * 退回 {@code /tp <targets> <destination>} 那一支，把 {@code 2e7} 当实体名。
  *
  * <p>
- * 这里只换 {@code parseDouble} 里那一次读数：先按空格切出整段，再交给 {@code Binary256.isValid} 裁决，通过
- * 就用 {@code Binary256.of} 的舍入结果当 double。于是接受范围与库完全同集，不再是手工维护的字符表。
+ * 这里只换 {@code parseDouble} 里那一次读数：先按空格切出整段，再交给 {@code Binary1280.isValid} 裁决，通过
+ * 就用 {@code Binary1280.of} 的舍入结果当 double。于是接受范围与库完全同集，不再是手工维护的字符表。
  *
  * <p>
  * 三处因此与原来不同，都写在库的语法里：
@@ -47,10 +47,10 @@ public class WorldCoordinateSyntaxMixin {
             reader.skip();
         }
         String text = reader.getString().substring(start, reader.getCursor());
-        if (!Binary256.isValid(text)) {
+        if (!Binary1280.isValid(text)) {
             reader.setCursor(start);
             throw WorldCoordinate.ERROR_EXPECTED_DOUBLE.createWithContext(reader);
         }
-        return Binary256.of(text).toDouble();
+        return Binary1280.of(text).toDouble();
     }
 }

@@ -1,6 +1,6 @@
 package com.inf.farlands.util.pos;
 
-import com.inf.long2.binaries.binary256.Binary256;
+import com.inf.long2.binaries.binary1280.Binary1280;
 
 /**
  * 命令层到传送层的精确目标侧通道。
@@ -15,19 +15,19 @@ import com.inf.long2.binaries.binary256.Binary256;
  */
 public final class ExactTeleport {
 
-    private static final ThreadLocal<Binary256[]> PENDING = new ThreadLocal<>();
+    private static final ThreadLocal<Binary1280[]> PENDING = new ThreadLocal<>();
 
     private ExactTeleport() {
     }
 
     /** 三轴精确目标，未设置时为 null。相对坐标存的是增量。 */
-    public static Binary256[] pending() {
+    public static Binary1280[] pending() {
         return PENDING.get();
     }
 
     /** 写入三轴精确目标。 */
-    public static void set(Binary256 x, Binary256 y, Binary256 z) {
-        PENDING.set(new Binary256[] { x, y, z });
+    public static void set(Binary1280 x, Binary1280 y, Binary1280 z) {
+        PENDING.set(new Binary1280[] { x, y, z });
     }
 
     /** 清掉本次命令的精确目标。 */

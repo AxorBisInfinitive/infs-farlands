@@ -4,7 +4,7 @@ import java.util.Set;
 
 import com.inf.farlands.network.position.ExactPositionPacket;
 import com.inf.farlands.util.pos.ExactPosition;
-import com.inf.long2.binaries.binary256.Binary256;
+import com.inf.long2.binaries.binary1280.Binary1280;
 
 import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
 import net.minecraft.server.level.ServerPlayer;
@@ -39,7 +39,7 @@ public class TeleportSendMixin {
         if (!(this.player instanceof ExactPosition holder) || !holder.farlands$takeExactSync()) {
             return;
         }
-        Binary256[] slots = holder.farlands$exactSlots();
+        Binary1280[] slots = holder.farlands$exactSlots();
         this.player.connection.send(new ClientboundCustomPayloadPacket(new ExactPositionPacket(
                 this.player.getId(),
                 ExactPositionPacket.pack(slots[ExactPosition.POS_X], slots[ExactPosition.POS_Y],

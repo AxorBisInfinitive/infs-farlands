@@ -17,7 +17,7 @@ import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.Redirect;
 
 /**
- * LivingEntity 里读旧位置的字段指令改读 256 位槽位；步幅距离改在帧里相减。
+ * LivingEntity 里读旧位置的字段指令改读 1280 位槽位；步幅距离改在帧里相减。
  *
  * <p>
  * {@code calculateEntityAnimation} 整体覆写：原式是两个世界量级的 double 相减，{@code 5e18} 处 ulp 是 1024，

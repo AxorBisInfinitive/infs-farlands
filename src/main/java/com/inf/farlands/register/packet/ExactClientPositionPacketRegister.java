@@ -5,7 +5,7 @@ import com.inf.farlands.util.network.ServerPacketHandlers;
 import com.inf.farlands.util.network.Serverbounds;
 import com.inf.farlands.util.pos.ExactPosition;
 
-import com.inf.long2.binaries.binary256.Binary256;
+import com.inf.long2.binaries.binary1280.Binary1280;
 
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload.TypeAndCodec;
 import net.minecraft.server.level.ServerPlayer;
@@ -40,7 +40,7 @@ public final class ExactClientPositionPacketRegister {
             if (player == null || !(player instanceof ExactPosition holder)) {
                 return;
             }
-            Binary256[] values = payload.unpack();
+            Binary1280[] values = payload.unpack();
             if (Math.abs(values[0].toDouble() - player.getX()) > TOLERANCE
                     || Math.abs(values[1].toDouble() - player.getY()) > TOLERANCE
                     || Math.abs(values[2].toDouble() - player.getZ()) > TOLERANCE) {

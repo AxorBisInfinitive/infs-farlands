@@ -1,19 +1,19 @@
 package com.inf.farlands.util.pos;
 
-import com.inf.long2.binaries.binary256.Binary256;
+import com.inf.long2.binaries.binary1280.Binary1280;
 import com.inf.long2.ints.Int1024;
 
 import net.minecraft.world.phys.AABB;
 
 /**
- * 实体坐标的 256 位存储面，由 {@code mixin.position.EntityPositionMixin} 注入到 Entity 实现。
+ * 实体坐标的 1280 位存储面，由 {@code mixin.position.EntityPositionMixin} 注入到 Entity 实现。
  *
  * <p>
  * 九个槽位分成两组：位置三轴与旧位置六轴。位置三轴的读者是覆写后的 {@code getX} 一族，旧位置六轴的读者与写者
  * 是各实体类方法体里那些直取字段的指令，两边都经 {@link #farlands$exactSlots()} 取同一个数组。
  *
  * <p>
- * 槽位是惰性建的，未写过时为 null。调用方必须把 null 当作「没有 256 位值」，回落到对应的 double 字段，因为
+ * 槽位是惰性建的，未写过时为 null。调用方必须把 null 当作「没有 1280 位值」，回落到对应的 double 字段，因为
  * Entity 构造器在建出第一个槽位之前就会写一次位置，子类构造器也会在 {@code setPosRaw} 之前写旧位置。
  */
 public interface ExactPosition {
@@ -38,8 +38,8 @@ public interface ExactPosition {
 
     int OLD_Z = 8;
 
-    /** 九槽 256 位存储，首次调用时建数组。槽位常量见上。 */
-    Binary256[] farlands$exactSlots();
+    /** 九槽 1280 位存储，首次调用时建数组。槽位常量见上。 */
+    Binary1280[] farlands$exactSlots();
 
     /**
      * 帧锚点，三轴 long。位置等于锚点加槽位里的局部偏移，局部偏移恒在 {@code [0, 1)}。
@@ -61,7 +61,7 @@ public interface ExactPosition {
      * 上一 tick 到当前在 {@code partial} 刻的插值，返回值相对当前帧锚点。
      *
      * <p>
-     * 插值必须在帧里做：两端的世界坐标都是 256 位值，落到 double 之前先相减，差量只有一 tick 的位移。
+     * 插值必须在帧里做：两端的世界坐标都是 1280 位值，落到 double 之前先相减，差量只有一 tick 的位移。
      * 返回值不保证落在 {@code [0, 1)}，调用方允许它为负。
      */
     double farlands$lerpLocal(int axis, float partial);
@@ -106,23 +106,23 @@ public interface ExactPosition {
     Int1024 farlands$cellCoord1024(int axis);
 
     /**
-     * 该轴的 256 位值。
+     * 该轴的 1280 位值。
      *
      * <p>
      * 槽位未写过时按位置字段的 double 建一个，调用方不必判空。特殊值原样返回，NaN 与无穷的十进制写法由
-     * {@code Binary256} 自己给，调用方不必单独甄别。
+     * {@code Binary1280} 自己给，调用方不必单独甄别。
      */
-    Binary256 farlands$exactValue(int axis);
+    Binary1280 farlands$exactValue(int axis);
 
     /**
      * 只写九个槽位，不动投影、包围盒与缓存。
      *
      * <p>
-     * 给网络侧的精确位置用：vanilla 的包已经把位置、包围盒、方块与区块缓存、旧位置都落好，这里只把 256 位真值
+     * 给网络侧的精确位置用：vanilla 的包已经把位置、包围盒、方块与区块缓存、旧位置都落好，这里只把 1280 位真值
      * 补回去。旧位置一组值写两处，与 {@code setOldPos} 同形，所以 {@code xo} 与 {@code xOld} 不会分叉。
      */
-    void farlands$adoptExact(Binary256 x, Binary256 y, Binary256 z,
-            Binary256 oldX, Binary256 oldY, Binary256 oldZ);
+    void farlands$adoptExact(Binary1280 x, Binary1280 y, Binary1280 z,
+            Binary1280 oldX, Binary1280 oldY, Binary1280 oldZ);
 
     /**
      * 只写位置三槽，不动旧位置、不动 double 投影与缓存。
@@ -131,7 +131,7 @@ public interface ExactPosition {
      * 给客户端上报的精确位置用：服务端的位置与物理仍由原版移动包驱动，这里只把真值补进槽位，供
      * {@code cellCoord} 与段枚举取用。旧位置属于服务端自己，这条不碰。
      */
-    void farlands$applyExactPosition(Binary256 x, Binary256 y, Binary256 z);
+    void farlands$applyExactPosition(Binary1280 x, Binary1280 y, Binary1280 z);
 
     /** 标记该实体这一 tick 有精确位置待同步。 */
     void farlands$markExactSync();

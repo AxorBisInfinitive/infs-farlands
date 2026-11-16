@@ -12,7 +12,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
 
 /**
- * 相机每帧插值读 {@code entity.xo/yo/zo} 的三条指令，改读 256 位槽位。
+ * 相机每帧插值读 {@code entity.xo/yo/zo} 的三条指令，改读 1280 位槽位。
  */
 @Mixin(Camera.class)
 public abstract class CameraPositionMixin {

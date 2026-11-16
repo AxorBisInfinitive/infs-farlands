@@ -1,7 +1,7 @@
 package com.inf.farlands.mixin.fix.xyz;
 
 import com.inf.farlands.util.pos.ExactTeleport;
-import com.inf.long2.binaries.binary256.Binary256;
+import com.inf.long2.binaries.binary1280.Binary1280;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.context.ParsedCommandNode;
 import com.mojang.brigadier.context.StringRange;
@@ -41,7 +41,7 @@ public class Vec3ArgumentMixin {
         if (text == null) {
             return;
         }
-        Binary256[] values = farlands$parse(text);
+        Binary1280[] values = farlands$parse(text);
         if (values != null) {
             ExactTeleport.set(values[0], values[1], values[2]);
         }
@@ -63,20 +63,20 @@ public class Vec3ArgumentMixin {
     }
 
     /** 三个 token。相对记号存增量，绝对记号按原版补半格。 */
-    private static Binary256[] farlands$parse(String text) {
+    private static Binary1280[] farlands$parse(String text) {
         String[] tokens = text.trim().split(" +");
         if (tokens.length != 3) {
             return null;
         }
-        Binary256[] values = new Binary256[3];
+        Binary1280[] values = new Binary1280[3];
         for (int axis = 0; axis < 3; axis++) {
             String token = tokens[axis];
             boolean relative = token.startsWith("~");
             String number = relative ? token.substring(1) : token;
             boolean centered = axis != 1 && !relative && !number.contains(".");
             try {
-                Binary256 value = number.isEmpty() ? Binary256.ZERO : Binary256.of(number);
-                values[axis] = centered ? value.add(Binary256.of(0.5)) : value;
+                Binary1280 value = number.isEmpty() ? Binary1280.ZERO : Binary1280.of(number);
+                values[axis] = centered ? value.add(Binary1280.of(0.5)) : value;
             } catch (RuntimeException malformed) {
                 return null;
             }
