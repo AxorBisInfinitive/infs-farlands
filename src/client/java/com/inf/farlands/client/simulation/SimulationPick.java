@@ -60,9 +60,10 @@ public final class SimulationPick {
             return null;
         }
         ExactPosition holder = (ExactPosition) entity;
-        long eyeAnchorX = holder.farlands$anchor(ExactPosition.POS_X);
-        long eyeAnchorY = holder.farlands$anchor(ExactPosition.POS_Y);
-        long eyeAnchorZ = holder.farlands$anchor(ExactPosition.POS_Z);
+        // 拾取走的是段表（long）的坐标系，锚点在这里收窄。|x| < 2^63 时收窄无损，更远的位置整条路径本就不可用。
+        long eyeAnchorX = holder.farlands$anchor(ExactPosition.POS_X).toLong();
+        long eyeAnchorY = holder.farlands$anchor(ExactPosition.POS_Y).toLong();
+        long eyeAnchorZ = holder.farlands$anchor(ExactPosition.POS_Z).toLong();
         double eyeLocalX = holder.farlands$lerpLocal(ExactPosition.POS_X, partial);
         double eyeLocalY = holder.farlands$lerpLocal(ExactPosition.POS_Y, partial) + (double) entity.getEyeHeight();
         double eyeLocalZ = holder.farlands$lerpLocal(ExactPosition.POS_Z, partial);

@@ -1,18 +1,30 @@
 package com.inf.farlands.client.mixin.position;
 
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.util.pos.ExactPosition;
 
+import com.inf.long2.ints.Int1024;
 import net.minecraft.client.renderer.entity.EnderDragonRenderer;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.client.renderer.entity.EndCrystalRenderer;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.client.renderer.entity.state.EnderDragonRenderState;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.phys.Vec3;
 
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.Mixin;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.At;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.Inject;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
@@ -39,12 +51,12 @@ public class DragonBeamMixin {
                 || !(crystal instanceof ExactPosition beamTarget)) {
             return;
         }
-        long dragonX = dragon.farlands$anchor(ExactPosition.POS_X);
-        long dragonY = dragon.farlands$anchor(ExactPosition.POS_Y);
-        long dragonZ = dragon.farlands$anchor(ExactPosition.POS_Z);
-        long crystalX = beamTarget.farlands$anchor(ExactPosition.POS_X);
-        long crystalY = beamTarget.farlands$anchor(ExactPosition.POS_Y);
-        long crystalZ = beamTarget.farlands$anchor(ExactPosition.POS_Z);
+        Int1024 dragonX = dragon.farlands$anchor(ExactPosition.POS_X);
+        Int1024 dragonY = dragon.farlands$anchor(ExactPosition.POS_Y);
+        Int1024 dragonZ = dragon.farlands$anchor(ExactPosition.POS_Z);
+        Int1024 crystalX = beamTarget.farlands$anchor(ExactPosition.POS_X);
+        Int1024 crystalY = beamTarget.farlands$anchor(ExactPosition.POS_Y);
+        Int1024 crystalZ = beamTarget.farlands$anchor(ExactPosition.POS_Z);
         double dx = FrameMath.offset(crystalX, beamTarget.farlands$lerpLocal(ExactPosition.POS_X, partialTicks),
                 dragonX, dragon.farlands$lerpLocal(ExactPosition.POS_X, partialTicks));
         double dy = FrameMath.offset(crystalY, beamTarget.farlands$lerpLocal(ExactPosition.POS_Y, partialTicks),

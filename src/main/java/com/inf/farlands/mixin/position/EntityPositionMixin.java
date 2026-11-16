@@ -68,9 +68,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(value = Entity.class, priority = 900)
 public abstract class EntityPositionMixin implements ExactPosition {
 
-    /** 锚点为零的上界。下界是方块坐标的 int 界，上界远低于 double 的 2^53。 */
+    /** 锚点为零的上界与它的相反数。上界远低于 double 的 2^53，那一段里局部量就是世界值本身。 */
     @Unique
-    private static final long farlands$FRAME_LIMIT = 1_000_000_000_000L;
+    private static final Int1024 farlands$FRAME_LIMIT = Int1024.of(1_000_000_000_000L);
+
+    @Unique
+    private static final Int1024 farlands$NEG_FRAME_LIMIT = farlands$FRAME_LIMIT.negate();
 
     @Shadow
     private Vec3 position;
@@ -117,13 +120,13 @@ public abstract class EntityPositionMixin implements ExactPosition {
     private Binary1280[] farlands$slots;
 
     @Unique
-    private long farlands$anchorX;
+    private Int1024 farlands$anchorX;
 
     @Unique
-    private long farlands$anchorY;
+    private Int1024 farlands$anchorY;
 
     @Unique
-    private long farlands$anchorZ;
+    private Int1024 farlands$anchorZ;
 
     @Unique
     private double farlands$localX;
@@ -165,7 +168,7 @@ public abstract class EntityPositionMixin implements ExactPosition {
     }
 
     @Override
-    public long farlands$anchor(int axis) {
+    public Int1024 farlands$anchor(int axis) {
         this.farlands$syncFrame();
         if (axis == POS_X) {
             return this.farlands$anchorX;
@@ -197,11 +200,11 @@ public abstract class EntityPositionMixin implements ExactPosition {
         if (old == null) {
             return farlands$local(axis);
         }
-        long newAnchor = farlands$anchor(axis);
+        Int1024 newAnchor = farlands$anchor(axis);
         double newLocal = farlands$local(axis);
-        long oldAnchor = farlands$anchorOf(old);
+        Int1024 oldAnchor = farlands$anchorOf(old);
         double oldLocal = farlands$localOf(old, oldAnchor);
-        double oldRelative = (double) (oldAnchor - newAnchor) + oldLocal;
+        double oldRelative = farlands$anchorGap(oldAnchor, newAnchor) + oldLocal;
         return oldRelative + (double) partial * (newLocal - oldRelative);
     }
 
@@ -219,11 +222,11 @@ public abstract class EntityPositionMixin implements ExactPosition {
         if (old == null) {
             return 0.0;
         }
-        long newAnchor = farlands$anchor(axis);
+        Int1024 newAnchor = farlands$anchor(axis);
         double newLocal = farlands$local(axis);
-        long oldAnchor = farlands$anchorOf(old);
+        Int1024 oldAnchor = farlands$anchorOf(old);
         double oldLocal = farlands$localOf(old, oldAnchor);
-        return (double) (newAnchor - oldAnchor) + (newLocal - oldLocal);
+        return farlands$anchorGap(newAnchor, oldAnchor) + (newLocal - oldLocal);
     }
 
     /**
@@ -355,17 +358,19 @@ public abstract class EntityPositionMixin implements ExactPosition {
             colliders.addAll(entityColliders);
         }
         AABB absoluteBox = boundingBox;
-        long ax = 0L;
-        long ay = 0L;
-        long az = 0L;
+        Int1024 ax = Int1024.ZERO;
+        Int1024 ay = Int1024.ZERO;
+        Int1024 az = Int1024.ZERO;
         if (source instanceof ExactPosition exact) {
             ax = exact.farlands$anchor(POS_X);
             ay = exact.farlands$anchor(POS_Y);
             az = exact.farlands$anchor(POS_Z);
-            if (ax != 0L || ay != 0L || az != 0L) {
-                absoluteBox = new AABB(boundingBox.minX + (double) ax, boundingBox.minY + (double) ay,
-                        boundingBox.minZ + (double) az, boundingBox.maxX + (double) ax,
-                        boundingBox.maxY + (double) ay, boundingBox.maxZ + (double) az);
+            if (!ax.isZero() || !ay.isZero() || !az.isZero()) {
+                double dx = ax.toDouble();
+                double dy = ay.toDouble();
+                double dz = az.toDouble();
+                absoluteBox = new AABB(boundingBox.minX + dx, boundingBox.minY + dy, boundingBox.minZ + dz,
+                        boundingBox.maxX + dx, boundingBox.maxY + dy, boundingBox.maxZ + dz);
             }
         }
         WorldBorder worldBorder = level.getWorldBorder();
@@ -373,7 +378,7 @@ public abstract class EntityPositionMixin implements ExactPosition {
         if (isEntityInsideCloseToBorder) {
             colliders.add(worldBorder.getCollisionShape());
         }
-        if ((ax != 0L || ay != 0L || az != 0L) && level instanceof ExactCollisionSource frameSource) {
+        if ((!ax.isZero() || !ay.isZero() || !az.isZero()) && level instanceof ExactCollisionSource frameSource) {
             colliders.addAll(frameSource.farlands$frameCollisions(source, boundingBox));
         } else {
             colliders.addAll(level.getBlockCollisions(source, absoluteBox));
@@ -501,16 +506,24 @@ public abstract class EntityPositionMixin implements ExactPosition {
         return value.equals(Binary1280.of(truncated)) ? truncated : truncated - 1L;
     }
 
-    /** 阈值内取零，阈值外取精确下取整。 */
+    /** 阈值内取零，阈值外取 1024 位精确下取整。 */
     @Unique
-    private static long farlands$anchorOf(Binary1280 value) {
-        long floor = farlands$exactFloor(value);
-        return floor > -farlands$FRAME_LIMIT && floor < farlands$FRAME_LIMIT ? 0L : floor;
+    private static Int1024 farlands$anchorOf(Binary1280 value) {
+        Int1024 floor = Int1024.ofFloor(value);
+        return floor.compareTo(farlands$NEG_FRAME_LIMIT) > 0 && floor.compareTo(farlands$FRAME_LIMIT) < 0
+                ? Int1024.ZERO
+                : floor;
     }
 
     @Unique
-    private static double farlands$localOf(Binary1280 value, long anchor) {
-        return anchor == 0L ? value.toDouble() : value.subtract(Binary1280.of(anchor)).toDouble();
+    private static double farlands$localOf(Binary1280 value, Int1024 anchor) {
+        return anchor.isZero() ? value.toDouble() : value.subtract(Binary1280.of(anchor)).toDouble();
+    }
+
+    /** 两个锚点之间的差。锚点相等时为零，且不分配。 */
+    @Unique
+    private static double farlands$anchorGap(Int1024 from, Int1024 to) {
+        return from.equals(to) ? 0.0 : from.subtract(to).toDouble();
     }
 
     /** 入参等于当前槽位的 double 投影时保留槽位，否则按入参写。写侧幂等靠这一句。 */
@@ -536,7 +549,7 @@ public abstract class EntityPositionMixin implements ExactPosition {
         if (old == null || current == null) {
             return false;
         }
-        return farlands$exactFloor(old) != farlands$exactFloor(current);
+        return !Int1024.ofFloor(old).equals(Int1024.ofFloor(current));
     }
 
     /** 该轴的精确下取整。槽位在就用槽位，不在就用位置字段的下取整。 */

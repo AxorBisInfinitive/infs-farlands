@@ -1,34 +1,115 @@
 package com.inf.farlands.client.mixin.simulation;
 
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import com.mojang.blaze3d.vertex.PoseStack;
 
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.client.render.ExactCameraOrigin;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.client.render.simulation.SimulationRenderPass;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.client.simulation.Simulation;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.client.simulation.SimulationHolder;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.client.simulation.SimulationMesher;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.client.simulation.SimulationPick;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.util.pos.ExactPosition;
 
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.client.Camera;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.client.DeltaTracker;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.client.Minecraft;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.client.renderer.LevelRenderer;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.client.renderer.MultiBufferSource;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.client.renderer.ShapeRenderer;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.client.renderer.state.level.LevelRenderState;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.util.ARGB;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.util.Mth;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.world.entity.Entity;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.world.phys.BlockHitResult;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.world.phys.HitResult;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.world.phys.Vec3;
 
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import org.spongepowered.asm.mixin.Mixin;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import org.spongepowered.asm.mixin.Unique;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import org.spongepowered.asm.mixin.injection.At;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import org.spongepowered.asm.mixin.injection.Inject;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
@@ -62,13 +143,13 @@ public class LevelRendererMixin {
     private boolean farlands$cameraValid;
 
     @Unique
-    private long farlands$cameraAnchorX;
+    private Int1024 farlands$cameraAnchorX;
 
     @Unique
-    private long farlands$cameraAnchorY;
+    private Int1024 farlands$cameraAnchorY;
 
     @Unique
-    private long farlands$cameraAnchorZ;
+    private Int1024 farlands$cameraAnchorZ;
 
     @Unique
     private double farlands$cameraLocalX;
@@ -217,9 +298,12 @@ public class LevelRendererMixin {
         double y;
         double z;
         if (this.farlands$cameraValid) {
-            x = (double) (hit.originX() + hit.localX() - this.farlands$cameraAnchorX) - this.farlands$cameraLocalX;
-            y = (double) (hit.originY() + hit.localY() - this.farlands$cameraAnchorY) - this.farlands$cameraLocalY;
-            z = (double) (hit.originZ() + hit.localZ() - this.farlands$cameraAnchorZ) - this.farlands$cameraLocalZ;
+            x = FrameMath.offset(Int1024.of(hit.originX() + hit.localX()), 0.0, this.farlands$cameraAnchorX,
+                    this.farlands$cameraLocalX);
+            y = FrameMath.offset(Int1024.of(hit.originY() + hit.localY()), 0.0, this.farlands$cameraAnchorY,
+                    this.farlands$cameraLocalY);
+            z = FrameMath.offset(Int1024.of(hit.originZ() + hit.localZ()), 0.0, this.farlands$cameraAnchorZ,
+                    this.farlands$cameraLocalZ);
         } else {
             x = farlands$cameraRelative(hit.originX() + hit.localX(), camera.x);
             y = farlands$cameraRelative(hit.originY() + hit.localY(), camera.y);

@@ -1,20 +1,33 @@
 package com.inf.farlands.client.mixin.render;
 
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.render.AnchoredFrustum;
 
+import com.inf.long2.ints.Int1024;
 import net.minecraft.client.renderer.culling.Frustum;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.level.levelgen.structure.BoundingBox;
 
+import com.inf.long2.ints.Int1024;
 import org.joml.FrustumIntersection;
+import com.inf.long2.ints.Int1024;
 import org.joml.Vector4f;
 
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.Final;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.Mixin;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.Shadow;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.Unique;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.At;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.Inject;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
@@ -62,28 +75,28 @@ public abstract class FrustumMixin implements AnchoredFrustum {
     @Final
     public static int OFFSET_STEP;
 
-    /** 锚点三轴，8 的倍数。 */
+    /** 锚点三轴。 */
     @Unique
-    private long farlands$anchorX;
+    private Int1024 farlands$anchorX;
 
     @Unique
-    private long farlands$anchorY;
+    private Int1024 farlands$anchorY;
 
     @Unique
-    private long farlands$anchorZ;
+    private Int1024 farlands$anchorZ;
 
     @Override
-    public long farlands$anchorX() {
+    public Int1024 farlands$anchorX() {
         return this.farlands$anchorX;
     }
 
     @Override
-    public long farlands$anchorY() {
+    public Int1024 farlands$anchorY() {
         return this.farlands$anchorY;
     }
 
     @Override
-    public long farlands$anchorZ() {
+    public Int1024 farlands$anchorZ() {
         return this.farlands$anchorZ;
     }
 
@@ -93,9 +106,9 @@ public abstract class FrustumMixin implements AnchoredFrustum {
         this.farlands$anchorX = farlands$anchor(x);
         this.farlands$anchorY = farlands$anchor(y);
         this.farlands$anchorZ = farlands$anchor(z);
-        this.camX = x - (double) this.farlands$anchorX;
-        this.camY = y - (double) this.farlands$anchorY;
-        this.camZ = z - (double) this.farlands$anchorZ;
+        this.camX = x - this.farlands$anchorX.toDouble();
+        this.camY = y - this.farlands$anchorY.toDouble();
+        this.camZ = z - this.farlands$anchorZ.toDouble();
         ci.cancel();
     }
 
@@ -178,24 +191,24 @@ public abstract class FrustumMixin implements AnchoredFrustum {
     @Inject(method = "pointInFrustum(DDD)Z", at = @At("HEAD"), cancellable = true)
     private void farlands$pointInFrustum(double x, double y, double z, CallbackInfoReturnable<Boolean> cir) {
         cir.setReturnValue(this.intersection.testPoint(
-                (float) ((x - (double) this.farlands$anchorX) - this.camX),
-                (float) ((y - (double) this.farlands$anchorY) - this.camY),
-                (float) ((z - (double) this.farlands$anchorZ) - this.camZ)));
+                (float) ((x - this.farlands$anchorX.toDouble()) - this.camX),
+                (float) ((y - this.farlands$anchorY.toDouble()) - this.camY),
+                (float) ((z - this.farlands$anchorZ.toDouble()) - this.camZ)));
     }
 
     @Inject(method = "getCamX", at = @At("HEAD"), cancellable = true)
     private void farlands$getCamX(CallbackInfoReturnable<Double> cir) {
-        cir.setReturnValue((double) this.farlands$anchorX + this.camX);
+        cir.setReturnValue(this.farlands$anchorX.toDouble() + this.camX);
     }
 
     @Inject(method = "getCamY", at = @At("HEAD"), cancellable = true)
     private void farlands$getCamY(CallbackInfoReturnable<Double> cir) {
-        cir.setReturnValue((double) this.farlands$anchorY + this.camY);
+        cir.setReturnValue(this.farlands$anchorY.toDouble() + this.camY);
     }
 
     @Inject(method = "getCamZ", at = @At("HEAD"), cancellable = true)
     private void farlands$getCamZ(CallbackInfoReturnable<Double> cir) {
-        cir.setReturnValue((double) this.farlands$anchorZ + this.camZ);
+        cir.setReturnValue(this.farlands$anchorZ.toDouble() + this.camZ);
     }
 
     /** 盒端点的加一改在 double 里做，理由见下。 */
@@ -224,17 +237,17 @@ public abstract class FrustumMixin implements AnchoredFrustum {
     @Unique
     private int farlands$cube(double minX, double minY, double minZ, double maxX, double maxY, double maxZ) {
         return this.intersection.intersectAab(
-                (float) ((minX - (double) this.farlands$anchorX) - this.camX),
-                (float) ((minY - (double) this.farlands$anchorY) - this.camY),
-                (float) ((minZ - (double) this.farlands$anchorZ) - this.camZ),
-                (float) ((maxX - (double) this.farlands$anchorX) - this.camX),
-                (float) ((maxY - (double) this.farlands$anchorY) - this.camY),
-                (float) ((maxZ - (double) this.farlands$anchorZ) - this.camZ));
+                (float) ((minX - this.farlands$anchorX.toDouble()) - this.camX),
+                (float) ((minY - this.farlands$anchorY.toDouble()) - this.camY),
+                (float) ((minZ - this.farlands$anchorZ.toDouble()) - this.camZ),
+                (float) ((maxX - this.farlands$anchorX.toDouble()) - this.camX),
+                (float) ((maxY - this.farlands$anchorY.toDouble()) - this.camY),
+                (float) ((maxZ - this.farlands$anchorZ.toDouble()) - this.camZ));
     }
 
     /** 锚点取 8 的倍数，偏移因此落在 [0, 8)。 */
     @Unique
-    private static long farlands$anchor(double value) {
-        return (long) (Math.floor(value / 8.0) * 8.0);
+    private static Int1024 farlands$anchor(double value) {
+        return Int1024.of(Math.floor(value / 8.0) * 8.0);
     }
 }

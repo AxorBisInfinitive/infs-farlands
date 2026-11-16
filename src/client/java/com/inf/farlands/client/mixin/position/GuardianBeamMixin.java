@@ -1,19 +1,32 @@
 package com.inf.farlands.client.mixin.position;
 
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.util.pos.ExactPosition;
 
+import com.inf.long2.ints.Int1024;
 import net.minecraft.client.Minecraft;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.client.renderer.entity.GuardianRenderer;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.client.renderer.entity.state.GuardianRenderState;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.entity.Entity;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.entity.LivingEntity;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.entity.monster.Guardian;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.phys.Vec3;
 
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.Mixin;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.At;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.Inject;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
@@ -52,9 +65,9 @@ public class GuardianBeamMixin {
         if (hasLook && !(lookAtEntity instanceof ExactPosition)) {
             return;
         }
-        long guardianX = guardian.farlands$anchor(ExactPosition.POS_X);
-        long guardianY = guardian.farlands$anchor(ExactPosition.POS_Y);
-        long guardianZ = guardian.farlands$anchor(ExactPosition.POS_Z);
+        Int1024 guardianX = guardian.farlands$anchor(ExactPosition.POS_X);
+        Int1024 guardianY = guardian.farlands$anchor(ExactPosition.POS_Y);
+        Int1024 guardianZ = guardian.farlands$anchor(ExactPosition.POS_Z);
         state.eyePosition = new Vec3(
                 guardian.farlands$lerpLocal(ExactPosition.POS_X, partialTicks),
                 guardian.farlands$lerpLocal(ExactPosition.POS_Y, partialTicks) + (double) entity.getEyeHeight(),

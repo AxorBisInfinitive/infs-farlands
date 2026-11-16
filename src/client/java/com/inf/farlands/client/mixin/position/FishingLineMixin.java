@@ -1,20 +1,34 @@
 package com.inf.farlands.client.mixin.position;
 
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.util.pos.ExactPosition;
 
+import com.inf.long2.ints.Int1024;
 import net.minecraft.client.Minecraft;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.client.renderer.entity.FishingHookRenderer;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.client.renderer.entity.state.FishingHookRenderState;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.util.Mth;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.entity.HumanoidArm;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.entity.player.Player;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.entity.projectile.FishingHook;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.phys.Vec3;
 
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.Mixin;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.At;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.Inject;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
@@ -44,12 +58,12 @@ public class FishingLineMixin {
                 || !(owner instanceof ExactPosition hand)) {
             return;
         }
-        long handX = hand.farlands$anchor(ExactPosition.POS_X);
-        long handY = hand.farlands$anchor(ExactPosition.POS_Y);
-        long handZ = hand.farlands$anchor(ExactPosition.POS_Z);
-        long hookX = hook.farlands$anchor(ExactPosition.POS_X);
-        long hookY = hook.farlands$anchor(ExactPosition.POS_Y);
-        long hookZ = hook.farlands$anchor(ExactPosition.POS_Z);
+        Int1024 handX = hand.farlands$anchor(ExactPosition.POS_X);
+        Int1024 handY = hand.farlands$anchor(ExactPosition.POS_Y);
+        Int1024 handZ = hand.farlands$anchor(ExactPosition.POS_Z);
+        Int1024 hookX = hook.farlands$anchor(ExactPosition.POS_X);
+        Int1024 hookY = hook.farlands$anchor(ExactPosition.POS_Y);
+        Int1024 hookZ = hook.farlands$anchor(ExactPosition.POS_Z);
         Vec3 offset = this.farlands$handOffset(owner, partialTicks);        double handLocalX = hand.farlands$lerpLocal(ExactPosition.POS_X, partialTicks) + offset.x;
         double handLocalY = hand.farlands$lerpLocal(ExactPosition.POS_Y, partialTicks)
                 + (double) owner.getEyeHeight() + offset.y;

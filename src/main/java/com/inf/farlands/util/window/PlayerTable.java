@@ -1,18 +1,30 @@
 package com.inf.farlands.util.window;
 
+import com.inf.long2.ints.Int1024;
 import java.util.ArrayList;
+import com.inf.long2.ints.Int1024;
 import java.util.HashSet;
+import com.inf.long2.ints.Int1024;
 import java.util.List;
+import com.inf.long2.ints.Int1024;
 import java.util.Set;
+import com.inf.long2.ints.Int1024;
 import java.util.UUID;
 
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.util.pos.ExactPosition;
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.util.world.WorldBounds;
 
+import com.inf.long2.ints.Int1024;
 import net.minecraft.resources.ResourceKey;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.server.MinecraftServer;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.server.level.ServerPlayer;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.server.level.ChunkTrackingView;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.level.Level;
 
 /**
@@ -47,7 +59,7 @@ public final class PlayerTable {
      * 为真时有意义，界内意味着三轴都落在 int 内，位移四位不会越界。
      */
     public record Entry(ServerPlayer player, ResourceKey<Level> dimension,
-            long cellX, long cellY, long cellZ, boolean inBounds,
+            Int1024 cellX, Int1024 cellY, Int1024 cellZ, boolean inBounds,
             int chunkX, int chunkZ, int sectionCenterY, int viewDistance) {
     }
 
@@ -79,10 +91,13 @@ public final class PlayerTable {
         ResourceKey<Level> dimension = player.level().dimension();
         dimensions.add(dimension);
         ExactPosition exact = (ExactPosition) player;
-        long cellX = exact.farlands$cellCoord(ExactPosition.POS_X);
-        long cellY = exact.farlands$cellCoord(ExactPosition.POS_Y);
-        long cellZ = exact.farlands$cellCoord(ExactPosition.POS_Z);
-        boolean inBounds = WorldBounds.inBlock(cellX, cellY, cellZ);
+        Int1024 cellX = exact.farlands$cellCoord1024(ExactPosition.POS_X);
+        Int1024 cellY = exact.farlands$cellCoord1024(ExactPosition.POS_Y);
+        Int1024 cellZ = exact.farlands$cellCoord1024(ExactPosition.POS_Z);
+        // 可玩界本身就是 int 量级，任一轴超出 long 就一定界外，先按位宽挡下再交给 int 界的判据。
+        boolean fitsLong = cellX.bitLength() <= 63 && cellY.bitLength() <= 63 && cellZ.bitLength() <= 63;
+        boolean inBounds = fitsLong
+                && WorldBounds.inBlock(cellX.toLong(), cellY.toLong(), cellZ.toLong());
         int view = player.getChunkTrackingView() instanceof ChunkTrackingView.Positioned positioned
                 ? positioned.viewDistance()
                 : 8;
@@ -90,7 +105,7 @@ public final class PlayerTable {
             return new Entry(player, dimension, cellX, cellY, cellZ, false, 0, 0, 0, view);
         }
         return new Entry(player, dimension, cellX, cellY, cellZ, true,
-                (int) (cellX >> 4), (int) (cellZ >> 4), (int) (cellY >> 4), view);
+                (int) (cellX.toLong() >> 4), (int) (cellZ.toLong() >> 4), (int) (cellY.toLong() >> 4), view);
     }
 
     /** 本 tick 的全部条目，含界外。不可变。 */

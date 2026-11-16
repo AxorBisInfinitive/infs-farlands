@@ -1,26 +1,86 @@
 package com.inf.farlands.client.simulation;
 
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import java.util.HashMap;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import java.util.HashSet;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import java.util.List;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import java.util.Map;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import java.util.Set;
 
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.client.render.AnchoredFrustum;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.client.render.simulation.SimulationGeometry;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.simulation.model.SimulationSectionKey;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.util.pos.ExactPosition;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import com.mojang.blaze3d.vertex.VertexSorting;
 
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.client.multiplayer.ClientLevel;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.core.Holder;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.core.registries.Registries;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.world.level.CardinalLighting;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.world.level.biome.Biome;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.world.level.biome.Biomes;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.world.level.chunk.DataLayer;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.world.level.chunk.LevelChunkSection;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.world.level.chunk.PalettedContainerFactory;
 
 /**
@@ -566,12 +626,12 @@ public final class Simulation {
         }
         ExactPosition exact = (ExactPosition) player;
         return VertexSorting.byDistance(
-                (float) ((double) (exact.farlands$anchor(ExactPosition.POS_X) - originX)
-                        + exact.farlands$local(ExactPosition.POS_X)),
-                (float) ((double) (exact.farlands$anchor(ExactPosition.POS_Y) - originY)
-                        + exact.farlands$local(ExactPosition.POS_Y)),
-                (float) ((double) (exact.farlands$anchor(ExactPosition.POS_Z) - originZ)
-                        + exact.farlands$local(ExactPosition.POS_Z)));
+                (float) FrameMath.offset(exact.farlands$anchor(ExactPosition.POS_X),
+                        exact.farlands$local(ExactPosition.POS_X), Int1024.of(originX), 0.0),
+                (float) FrameMath.offset(exact.farlands$anchor(ExactPosition.POS_Y),
+                        exact.farlands$local(ExactPosition.POS_Y), Int1024.of(originY), 0.0),
+                (float) FrameMath.offset(exact.farlands$anchor(ExactPosition.POS_Z),
+                        exact.farlands$local(ExactPosition.POS_Z), Int1024.of(originZ), 0.0));
     }
 
     /**

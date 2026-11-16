@@ -1,18 +1,30 @@
 package com.inf.farlands.client.mixin.position;
 
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.util.pos.ExactPosition;
 
+import com.inf.long2.ints.Int1024;
 import net.minecraft.client.player.LocalPlayer;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.util.Mth;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.entity.MoverType;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.phys.Vec3;
 
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.Mixin;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.Shadow;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.Unique;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.At;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.Inject;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.Redirect;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
@@ -34,10 +46,10 @@ public abstract class LocalPlayerPositionMixin {
     protected abstract void updateAutoJump(float deltaX, float deltaZ);
 
     @Unique
-    private long farlands$beforeAnchorX;
+    private Int1024 farlands$beforeAnchorX;
 
     @Unique
-    private long farlands$beforeAnchorZ;
+    private Int1024 farlands$beforeAnchorZ;
 
     @Unique
     private double farlands$beforeLocalX;
@@ -72,8 +84,11 @@ public abstract class LocalPlayerPositionMixin {
     @Unique
     private double farlands$delta(int axis) {
         ExactPosition holder = (ExactPosition) (Object) this;
-        long anchorBefore = axis == ExactPosition.POS_X ? this.farlands$beforeAnchorX : this.farlands$beforeAnchorZ;
+        Int1024 anchorBefore = axis == ExactPosition.POS_X ? this.farlands$beforeAnchorX
+                : this.farlands$beforeAnchorZ;
         double localBefore = axis == ExactPosition.POS_X ? this.farlands$beforeLocalX : this.farlands$beforeLocalZ;
-        return (double) (holder.farlands$anchor(axis) - anchorBefore) + (holder.farlands$local(axis) - localBefore);
+        Int1024 anchorNow = holder.farlands$anchor(axis);
+        double gap = anchorNow.equals(anchorBefore) ? 0.0 : anchorNow.subtract(anchorBefore).toDouble();
+        return gap + (holder.farlands$local(axis) - localBefore);
     }
 }

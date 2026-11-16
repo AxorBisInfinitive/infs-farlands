@@ -1,36 +1,64 @@
 package com.inf.farlands.client.mixin.simulation;
 
+import com.inf.long2.ints.Int1024;
 import java.util.ArrayList;
+import com.inf.long2.ints.Int1024;
 import java.util.List;
 
+import com.inf.long2.ints.Int1024;
 import com.google.common.collect.Iterables;
 
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.simulation.SectionGetter;
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.simulation.SimulatedCollisionContext;
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.simulation.Simulation;
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.simulation.SimulationBlock;
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.simulation.SimulationHolder;
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.simulation.SimulationSection;
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.util.pos.ExactCollisionSource;
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.util.pos.ExactPosition;
 
+import com.inf.long2.ints.Int1024;
 import net.minecraft.client.Minecraft;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.core.BlockPos;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.util.Mth;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.entity.Entity;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.level.CollisionGetter;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.level.Level;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.level.block.Blocks;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.level.block.state.BlockState;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.phys.AABB;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.phys.shapes.BooleanOp;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.phys.shapes.CollisionContext;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.phys.shapes.Shapes;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.Mixin;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.At;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.Inject;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
@@ -98,9 +126,10 @@ public interface CollisionGetterMixin extends ExactCollisionSource {
         boolean framed = false;
         double localBottomY = 0.0;
         if (source instanceof ExactPosition exact) {
-            ax = exact.farlands$anchor(ExactPosition.POS_X);
-            ay = exact.farlands$anchor(ExactPosition.POS_Y);
-            az = exact.farlands$anchor(ExactPosition.POS_Z);
+            // 碰撞枚举的是段表（long）的坐标系，锚点在这里收窄；|x| < 2^63 时无损。
+            ax = exact.farlands$anchor(ExactPosition.POS_X).toLong();
+            ay = exact.farlands$anchor(ExactPosition.POS_Y).toLong();
+            az = exact.farlands$anchor(ExactPosition.POS_Z).toLong();
             framed = ax != 0L || ay != 0L || az != 0L;
             localBottomY = exact.farlands$local(ExactPosition.POS_Y);
         }

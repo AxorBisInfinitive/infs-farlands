@@ -1,5 +1,7 @@
 package com.inf.farlands.client.render;
 
+import com.inf.long2.ints.Int1024;
+
 /**
  * 实体帧在渲染状态上的副本，由 {@code render.EntityRenderStateMixin} 注入到 {@code EntityRenderState}。
  *
@@ -16,13 +18,13 @@ public interface ExactRenderOrigin {
     boolean farlands$originValid();
 
     /** 实体位置在 {@code axis} 轴上的锚点。 */
-    long farlands$originAnchor(int axis);
+    Int1024 farlands$originAnchor(int axis);
 
     /** 实体位置在 {@code axis} 轴上相对锚点的局部量，含部分刻插值。 */
     double farlands$originLocal(int axis);
 
     /** 写入这一帧的帧。锚点与局部量同源，三轴各一组。 */
-    void farlands$setOrigin(long anchorX, long anchorY, long anchorZ,
+    void farlands$setOrigin(Int1024 anchorX, Int1024 anchorY, Int1024 anchorZ,
             double localX, double localY, double localZ);
 
     /** 作废这一帧的帧。 */

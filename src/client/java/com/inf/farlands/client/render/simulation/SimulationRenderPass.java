@@ -1,36 +1,120 @@
 package com.inf.farlands.client.render.simulation;
 
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import java.nio.ByteBuffer;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import java.util.ArrayList;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import java.util.EnumMap;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import java.util.LinkedHashMap;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import java.util.List;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import java.util.Map;
 
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import com.mojang.blaze3d.buffers.GpuBuffer;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import com.mojang.blaze3d.buffers.Std140Builder;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import com.mojang.blaze3d.buffers.Std140SizeCalculator;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import com.mojang.blaze3d.systems.RenderPass;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import com.mojang.blaze3d.systems.RenderSystem;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import com.mojang.blaze3d.textures.GpuTextureView;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import com.mojang.blaze3d.vertex.VertexFormat;
 
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.client.render.AnchoredFrustum;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.client.render.ExactCameraOrigin;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.client.simulation.Simulation;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.client.simulation.SimulationHolder;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import com.inf.farlands.client.simulation.SimulationSection;
 
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.client.Minecraft;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.client.renderer.DynamicUniformStorage;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.util.Mth;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import net.minecraft.world.phys.Vec3;
 
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import org.joml.Matrix4f;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import org.joml.Matrix4fc;
+import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
+import com.inf.farlands.client.render.FrameMath;
 import org.lwjgl.system.MemoryUtil;
 
 /**
@@ -169,9 +253,9 @@ public final class SimulationRenderPass {
         }
         // 先把此前 stage 的几何落地：段上的几何引用在回调里更新，之后遍历读到的都是本帧的偏移。
         SimulationGeometry.instance().flush();
-        long camAnchorX;
-        long camAnchorY;
-        long camAnchorZ;
+        Int1024 camAnchorX;
+        Int1024 camAnchorY;
+        Int1024 camAnchorZ;
         double camLocalX;
         double camLocalY;
         double camLocalZ;
@@ -185,12 +269,12 @@ public final class SimulationRenderPass {
         } else {
             // 退路：把相机的 double 位置拆成锚点加局部量，两项依次相减，与直接减相机逐位相同。
             Vec3 cameraPos = camera.pos;
-            camAnchorX = Mth.lfloor(cameraPos.x);
-            camAnchorY = Mth.lfloor(cameraPos.y);
-            camAnchorZ = Mth.lfloor(cameraPos.z);
-            camLocalX = cameraPos.x - (double) camAnchorX;
-            camLocalY = cameraPos.y - (double) camAnchorY;
-            camLocalZ = cameraPos.z - (double) camAnchorZ;
+            camAnchorX = Int1024.of(Mth.lfloor(cameraPos.x));
+            camAnchorY = Int1024.of(Mth.lfloor(cameraPos.y));
+            camAnchorZ = Int1024.of(Mth.lfloor(cameraPos.z));
+            camLocalX = cameraPos.x - camAnchorX.toDouble();
+            camLocalY = cameraPos.y - camAnchorY.toDouble();
+            camLocalZ = cameraPos.z - camAnchorZ.toDouble();
         }
         int atlasWidth = atlas.getWidth(0);
         int atlasHeight = atlas.getHeight(0);
@@ -199,11 +283,11 @@ public final class SimulationRenderPass {
                 ? candidate
                 : null;
         // 可见集由遮挡传播与视锥裁剪给出，裁剪只在图更新或相机转动跨 2 度时重跑，所以这里不再逐段试视锥。
-        List<Simulation.SnapSection> sections = simulation.visibleSections(camAnchorX, camAnchorY, camAnchorZ,
+        List<Simulation.SnapSection> sections = simulation.visibleSections(camAnchorX.toLong(), camAnchorY.toLong(), camAnchorZ.toLong(),
                 camLocalX, camLocalY, camLocalZ, camera.xRot, camera.yRot, frustum);
         int visibleVersion = simulation.visibleVersion();
         int geometryVersion = SimulationGeometry.instance().version();
-        if (this.farlands$cacheHit(visibleVersion, geometryVersion, camAnchorX, camAnchorY, camAnchorZ, camLocalX,
+        if (this.farlands$cacheHit(visibleVersion, geometryVersion, camAnchorX.toLong(), camAnchorY.toLong(), camAnchorZ.toLong(), camLocalX,
                 camLocalY, camLocalZ, view, atlasWidth, atlasHeight)) {
             if (this.cachedGroups == null) {
                 return;
@@ -212,7 +296,7 @@ public final class SimulationRenderPass {
             this.batch = new Batch(this.cachedGroups, hitSlices, this.cachedIndices);
             return;
         }
-        this.farlands$storeCache(visibleVersion, geometryVersion, camAnchorX, camAnchorY, camAnchorZ, camLocalX,
+        this.farlands$storeCache(visibleVersion, geometryVersion, camAnchorX.toLong(), camAnchorY.toLong(), camAnchorZ.toLong(), camLocalX,
                 camLocalY, camLocalZ, view, atlasWidth, atlasHeight);
         this.cachedGroups = null;
         this.cachedInfos = null;
@@ -236,9 +320,9 @@ public final class SimulationRenderPass {
         for (int i = 0; i < count; i++) {
             Simulation.SnapSection section = drawn.get(i);
             infos[i] = new SectionInfo(view, 1.0F, atlasWidth, atlasHeight,
-                    (float) ((double) (section.originX() - camAnchorX) - camLocalX),
-                    (float) ((double) (section.originY() - camAnchorY) - camLocalY),
-                    (float) ((double) (section.originZ() - camAnchorZ) - camLocalZ));
+                    (float) FrameMath.offset(camAnchorX, camLocalX, Int1024.of(section.originX()), 0.0),
+                    (float) FrameMath.offset(camAnchorY, camLocalY, Int1024.of(section.originY()), 0.0),
+                    (float) FrameMath.offset(camAnchorZ, camLocalZ, Int1024.of(section.originZ()), 0.0));
         }
         GpuBufferSlice[] slices = this.farlands$storage().writeUniforms(infos);
         int indices = 0;

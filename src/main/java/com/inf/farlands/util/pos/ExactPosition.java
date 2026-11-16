@@ -42,12 +42,15 @@ public interface ExactPosition {
     Binary1280[] farlands$exactSlots();
 
     /**
-     * 帧锚点，三轴 long。位置等于锚点加槽位里的局部偏移，局部偏移恒在 {@code [0, 1)}。
+     * 帧锚点，三轴 1024 位整数。位置等于锚点加槽位里的局部偏移，局部偏移落在 {@code [0, 1)}。
      *
      * <p>
      * 物理在帧里做：锚点承担量级，局部偏移承担精度。读者是碰撞查询，它按锚点定位段，再把世界坐标化成局部坐标。
+     *
+     * <p>
+     * 绝对值小于 1e12 时返回共享的 {@code Int1024.ZERO}，那一段里「局部等于世界」，与帧启用前逐位相同，也不分配。
      */
-    long farlands$anchor(int axis);
+    Int1024 farlands$anchor(int axis);
 
     /**
      * 帧内偏移。锚点非零时落在 {@code [0, 1)}；锚点为零时它就是位置本身，量级不超过 1e12。

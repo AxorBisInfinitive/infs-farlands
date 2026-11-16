@@ -6,6 +6,7 @@ import java.util.List;
 import com.inf.farlands.client.render.ExactCameraOrigin;
 import com.inf.farlands.client.render.ExactCameraState;
 import com.inf.farlands.util.pos.ExactPosition;
+import com.inf.long2.ints.Int1024;
 
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
@@ -40,7 +41,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * <p>
  * 相机原点这一段：{@code alignWithEntity} 把位置写成世界量级的 double，{@code 5e18} 处一个 ulp 是 1024，
  * 眼高 1.62 与第三人称后退几格都会被吞掉。这里在同一方法的头尾各挂一条注入，另在 {@code move} 的头部截获
- * 位移，产出「锚点 long 加局部 double」，供模拟层的剔除、段 UBO、选择框使用。
+ * 位移，产出「锚点 1024 位整数加局部 double」，供模拟层的剔除、段 UBO、选择框使用。
  *
  * <p>
  * 眼高用相机自己的 {@code eyeHeightOld} 与 {@code eyeHeight} 插值，与 vanilla 同源；位移必须复刻
@@ -91,13 +92,13 @@ public abstract class CameraMixin implements ExactCameraOrigin {
     public abstract Quaternionf rotation();
 
     @Unique
-    private long farlands$cameraAnchorX;
+    private Int1024 farlands$cameraAnchorX;
 
     @Unique
-    private long farlands$cameraAnchorY;
+    private Int1024 farlands$cameraAnchorY;
 
     @Unique
-    private long farlands$cameraAnchorZ;
+    private Int1024 farlands$cameraAnchorZ;
 
     @Unique
     private double farlands$cameraLocalX;
@@ -129,7 +130,7 @@ public abstract class CameraMixin implements ExactCameraOrigin {
     }
 
     @Override
-    public long farlands$cameraAnchor(int axis) {
+    public Int1024 farlands$cameraAnchor(int axis) {
         if (axis == ExactPosition.POS_X) {
             return this.farlands$cameraAnchorX;
         }
@@ -175,18 +176,18 @@ public abstract class CameraMixin implements ExactCameraOrigin {
             return;
         }
         double eye = (double) Mth.lerp(partialTicks, this.eyeHeightOld, this.eyeHeight);
-        long anchorX = holder.farlands$anchor(ExactPosition.POS_X);
-        long anchorY = holder.farlands$anchor(ExactPosition.POS_Y);
-        long anchorZ = holder.farlands$anchor(ExactPosition.POS_Z);
+        Int1024 anchorX = holder.farlands$anchor(ExactPosition.POS_X);
+        Int1024 anchorY = holder.farlands$anchor(ExactPosition.POS_Y);
+        Int1024 anchorZ = holder.farlands$anchor(ExactPosition.POS_Z);
         double localX = holder.farlands$lerpLocal(ExactPosition.POS_X, partialTicks) + this.farlands$moveX;
         double localY = holder.farlands$lerpLocal(ExactPosition.POS_Y, partialTicks) + eye + this.farlands$moveY;
         double localZ = holder.farlands$lerpLocal(ExactPosition.POS_Z, partialTicks) + this.farlands$moveZ;
         long stepX = (long) Math.floor(localX);
         long stepY = (long) Math.floor(localY);
         long stepZ = (long) Math.floor(localZ);
-        this.farlands$cameraAnchorX = anchorX + stepX;
-        this.farlands$cameraAnchorY = anchorY + stepY;
-        this.farlands$cameraAnchorZ = anchorZ + stepZ;
+        this.farlands$cameraAnchorX = anchorX.add(Int1024.of(stepX));
+        this.farlands$cameraAnchorY = anchorY.add(Int1024.of(stepY));
+        this.farlands$cameraAnchorZ = anchorZ.add(Int1024.of(stepZ));
         this.farlands$cameraLocalX = localX - (double) stepX;
         this.farlands$cameraLocalY = localY - (double) stepY;
         this.farlands$cameraLocalZ = localZ - (double) stepZ;

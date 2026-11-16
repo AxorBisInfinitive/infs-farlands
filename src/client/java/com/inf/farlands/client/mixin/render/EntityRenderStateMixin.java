@@ -2,6 +2,7 @@ package com.inf.farlands.client.mixin.render;
 
 import com.inf.farlands.client.render.ExactRenderOrigin;
 import com.inf.farlands.util.pos.ExactPosition;
+import com.inf.long2.ints.Int1024;
 
 import net.minecraft.client.renderer.entity.state.EntityRenderState;
 
@@ -22,13 +23,13 @@ public abstract class EntityRenderStateMixin implements ExactRenderOrigin {
     private boolean farlands$originValid;
 
     @Unique
-    private long farlands$originAnchorX;
+    private Int1024 farlands$originAnchorX;
 
     @Unique
-    private long farlands$originAnchorY;
+    private Int1024 farlands$originAnchorY;
 
     @Unique
-    private long farlands$originAnchorZ;
+    private Int1024 farlands$originAnchorZ;
 
     @Unique
     private double farlands$originLocalX;
@@ -45,7 +46,7 @@ public abstract class EntityRenderStateMixin implements ExactRenderOrigin {
     }
 
     @Override
-    public long farlands$originAnchor(int axis) {
+    public Int1024 farlands$originAnchor(int axis) {
         if (axis == ExactPosition.POS_X) {
             return this.farlands$originAnchorX;
         }
@@ -61,7 +62,7 @@ public abstract class EntityRenderStateMixin implements ExactRenderOrigin {
     }
 
     @Override
-    public void farlands$setOrigin(long anchorX, long anchorY, long anchorZ,
+    public void farlands$setOrigin(Int1024 anchorX, Int1024 anchorY, Int1024 anchorZ,
             double localX, double localY, double localZ) {
         this.farlands$originAnchorX = anchorX;
         this.farlands$originAnchorY = anchorY;

@@ -1,19 +1,21 @@
 package com.inf.farlands.client.render;
 
+import com.inf.long2.ints.Int1024;
+
 /**
- * 帧差：两个位置各拆成「锚点 long 与局部 double」，差值只在同源的两段上做一次。
+ * 帧差：两个位置各拆成「锚点 1024 位整数与局部 double」，差值只在同源的两段上做一次。
  *
  * <p>
  * 存在的理由是 double 的表示能力：{@code 2^53} 以上一个 ulp 就超过一格，两个世界量级的位置相减得到的是
  * ulp 网格上的数，不是它们的真实差。锚点承担量级，局部量承担精度，两项分别算再相加即可。
  *
  * <p>
- * 锚点为 0 时，也就是帧未启用时，局部量就是那个 double 本身，于是本方法退化成两个局部量相减，即原版那一次减法。
- * 所以调用方不需要判量级：精度是渐变的，不存在两套公式。
+ * 锚点相等时，局部量就是可比的量，本方法退化成两个局部量相减，即原版那一次减法。所以调用方不需要判量级：
+ * 精度是渐变的，不存在两套公式。
  *
  * <p>
- * 锚点差在 long 上算。两个锚点异号时差可到两倍量级，越过 long，那时真实距离已远超任何可见范围，退回 double
- * 相减即可，结果只影响屏幕外的物体。
+ * 锚点差在 {@link Int1024} 上算，不再有 long 溢出这一支：两个锚点异号时差可到两倍量级，{@code subtract} 之后
+ * 再转 double，超出 double 表示范围时得到无穷，那时真实距离已远超任何可见范围，只影响屏幕外的物体。
  */
 public final class FrameMath {
 
@@ -34,14 +36,11 @@ public final class FrameMath {
         return (double) LIMIT;
     }
 
-    /** 帧差：锚点差加局部差。锚点为 0 时等于两个局部量相减。 */
-    public static double offset(long aAnchor, double aLocal, long bAnchor, double bLocal) {
-        long diff;
-        try {
-            diff = Math.subtractExact(aAnchor, bAnchor);
-        } catch (ArithmeticException overflowed) {
-            return (double) aAnchor - (double) bAnchor + (aLocal - bLocal);
+    /** 帧差：锚点差加局部差。锚点相等时只剩局部差，不分配。 */
+    public static double offset(Int1024 aAnchor, double aLocal, Int1024 bAnchor, double bLocal) {
+        if (aAnchor.equals(bAnchor)) {
+            return aLocal - bLocal;
         }
-        return (double) diff + (aLocal - bLocal);
+        return aAnchor.subtract(bAnchor).toDouble() + (aLocal - bLocal);
     }
 }

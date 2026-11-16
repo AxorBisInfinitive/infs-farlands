@@ -1,20 +1,33 @@
 package com.inf.farlands.client.mixin.render;
 
+import com.inf.long2.ints.Int1024;
 import com.mojang.blaze3d.vertex.PoseStack;
 
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.render.ExactCameraState;
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.render.ExactRenderOrigin;
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.util.pos.ExactPosition;
 
+import com.inf.long2.ints.Int1024;
 import net.minecraft.client.renderer.LevelRenderer;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.client.renderer.SubmitNodeCollector;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.client.renderer.entity.state.EntityRenderState;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.Mixin;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.At;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.Redirect;
 
 /**
@@ -42,12 +55,12 @@ public class SubmitOffsetMixin {
         ExactRenderOrigin origin = (ExactRenderOrigin) state;
         ExactCameraState cameraState = (ExactCameraState) camera;
         if (origin.farlands$originValid() && cameraState.farlands$stateValid()) {
-            long originX = origin.farlands$originAnchor(ExactPosition.POS_X);
-            long originY = origin.farlands$originAnchor(ExactPosition.POS_Y);
-            long originZ = origin.farlands$originAnchor(ExactPosition.POS_Z);
-            long cameraX = cameraState.farlands$stateAnchor(ExactPosition.POS_X);
-            long cameraY = cameraState.farlands$stateAnchor(ExactPosition.POS_Y);
-            long cameraZ = cameraState.farlands$stateAnchor(ExactPosition.POS_Z);
+            Int1024 originX = origin.farlands$originAnchor(ExactPosition.POS_X);
+            Int1024 originY = origin.farlands$originAnchor(ExactPosition.POS_Y);
+            Int1024 originZ = origin.farlands$originAnchor(ExactPosition.POS_Z);
+            Int1024 cameraX = cameraState.farlands$stateAnchor(ExactPosition.POS_X);
+            Int1024 cameraY = cameraState.farlands$stateAnchor(ExactPosition.POS_Y);
+            Int1024 cameraZ = cameraState.farlands$stateAnchor(ExactPosition.POS_Z);
             x = FrameMath.offset(originX, origin.farlands$originLocal(ExactPosition.POS_X), cameraX,
                     cameraState.farlands$stateLocal(ExactPosition.POS_X));
             y = FrameMath.offset(originY, origin.farlands$originLocal(ExactPosition.POS_Y), cameraY,

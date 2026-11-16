@@ -1,19 +1,31 @@
 package com.inf.farlands.client.mixin.position;
 
+import com.inf.long2.ints.Int1024;
 import java.util.List;
 
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.util.pos.ExactPosition;
 
+import com.inf.long2.ints.Int1024;
 import net.minecraft.client.renderer.entity.EntityRenderer;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.client.renderer.entity.state.EntityRenderState;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.entity.Entity;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.entity.Leashable;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.phys.Vec3;
 
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.Mixin;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.At;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.Inject;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
@@ -48,12 +60,12 @@ public class LeashOffsetMixin {
         if (!(roper instanceof ExactPosition roperHolder)) {
             return;
         }
-        long entityX = holder.farlands$anchor(ExactPosition.POS_X);
-        long entityY = holder.farlands$anchor(ExactPosition.POS_Y);
-        long entityZ = holder.farlands$anchor(ExactPosition.POS_Z);
-        long roperX = roperHolder.farlands$anchor(ExactPosition.POS_X);
-        long roperY = roperHolder.farlands$anchor(ExactPosition.POS_Y);
-        long roperZ = roperHolder.farlands$anchor(ExactPosition.POS_Z);
+        Int1024 entityX = holder.farlands$anchor(ExactPosition.POS_X);
+        Int1024 entityY = holder.farlands$anchor(ExactPosition.POS_Y);
+        Int1024 entityZ = holder.farlands$anchor(ExactPosition.POS_Z);
+        Int1024 roperX = roperHolder.farlands$anchor(ExactPosition.POS_X);
+        Int1024 roperY = roperHolder.farlands$anchor(ExactPosition.POS_Y);
+        Int1024 roperZ = roperHolder.farlands$anchor(ExactPosition.POS_Z);
         boolean quad = roper.supportQuadLeashAsHolder() && leashable.supportQuadLeash();
         Vec3[] roperOffsets = quad ? roper.getQuadLeashHolderOffsets() : null;
         float roperYRot = quad

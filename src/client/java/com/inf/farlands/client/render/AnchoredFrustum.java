@@ -1,5 +1,7 @@
 package com.inf.farlands.client.render;
 
+import com.inf.long2.ints.Int1024;
+
 /**
  * 暴露 {@code Frustum} 的相机锚点，供拷贝时同步。
  *
@@ -10,11 +12,11 @@ package com.inf.farlands.client.render;
  */
 public interface AnchoredFrustum {
 
-    long farlands$anchorX();
+    Int1024 farlands$anchorX();
 
-    long farlands$anchorY();
+    Int1024 farlands$anchorY();
 
-    long farlands$anchorZ();
+    Int1024 farlands$anchorZ();
 
     /**
      * 相机相对坐标下的 AABB 可见性判定。入参是「世界减相机」，与视锥平面所在的坐标系一致。

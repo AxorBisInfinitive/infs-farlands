@@ -2,6 +2,7 @@ package com.inf.farlands.client.mixin.render;
 
 import com.inf.farlands.client.render.ExactCameraState;
 import com.inf.farlands.util.pos.ExactPosition;
+import com.inf.long2.ints.Int1024;
 
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 
@@ -22,13 +23,13 @@ public abstract class CameraRenderStateMixin implements ExactCameraState {
     private boolean farlands$stateValid;
 
     @Unique
-    private long farlands$stateAnchorX;
+    private Int1024 farlands$stateAnchorX;
 
     @Unique
-    private long farlands$stateAnchorY;
+    private Int1024 farlands$stateAnchorY;
 
     @Unique
-    private long farlands$stateAnchorZ;
+    private Int1024 farlands$stateAnchorZ;
 
     @Unique
     private double farlands$stateLocalX;
@@ -45,7 +46,7 @@ public abstract class CameraRenderStateMixin implements ExactCameraState {
     }
 
     @Override
-    public long farlands$stateAnchor(int axis) {
+    public Int1024 farlands$stateAnchor(int axis) {
         if (axis == ExactPosition.POS_X) {
             return this.farlands$stateAnchorX;
         }
@@ -61,7 +62,7 @@ public abstract class CameraRenderStateMixin implements ExactCameraState {
     }
 
     @Override
-    public void farlands$setState(long anchorX, long anchorY, long anchorZ,
+    public void farlands$setState(Int1024 anchorX, Int1024 anchorY, Int1024 anchorZ,
             double localX, double localY, double localZ) {
         this.farlands$stateAnchorX = anchorX;
         this.farlands$stateAnchorY = anchorY;

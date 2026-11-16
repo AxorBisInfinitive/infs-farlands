@@ -1,5 +1,7 @@
 package com.inf.farlands.client.render;
 
+import com.inf.long2.ints.Int1024;
+
 /**
  * 相机帧在渲染状态上的副本，由 {@code render.CameraRenderStateMixin} 注入到 {@code CameraRenderState}。
  *
@@ -17,13 +19,13 @@ public interface ExactCameraState {
     boolean farlands$stateValid();
 
     /** 相机位置在 {@code axis} 轴上的锚点。 */
-    long farlands$stateAnchor(int axis);
+    Int1024 farlands$stateAnchor(int axis);
 
     /** 相机位置在 {@code axis} 轴上相对锚点的局部量。 */
     double farlands$stateLocal(int axis);
 
     /** 写入这一帧的帧。锚点与局部量同源，三轴各一组。 */
-    void farlands$setState(long anchorX, long anchorY, long anchorZ,
+    void farlands$setState(Int1024 anchorX, Int1024 anchorY, Int1024 anchorZ,
             double localX, double localY, double localZ);
 
     /** 作废这一帧的帧。 */

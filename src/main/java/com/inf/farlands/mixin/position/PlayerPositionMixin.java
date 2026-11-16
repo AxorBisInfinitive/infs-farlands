@@ -31,9 +31,9 @@ public abstract class PlayerPositionMixin {
         Player self = (Player) (Object) this;
         ExactPosition holder = (ExactPosition) (Object) this;
         Level level = self.level();
-        boolean framed = holder.farlands$anchor(ExactPosition.POS_X) != 0L
-                || holder.farlands$anchor(ExactPosition.POS_Y) != 0L
-                || holder.farlands$anchor(ExactPosition.POS_Z) != 0L;
+        boolean framed = !holder.farlands$anchor(ExactPosition.POS_X).isZero()
+                || !holder.farlands$anchor(ExactPosition.POS_Y).isZero()
+                || !holder.farlands$anchor(ExactPosition.POS_Z).isZero();
         if (!framed) {
             AABB boundingBox = self.getBoundingBox();
             return level.noCollision(self, new AABB(

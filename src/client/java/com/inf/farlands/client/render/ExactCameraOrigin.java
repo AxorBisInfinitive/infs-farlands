@@ -1,7 +1,9 @@
 package com.inf.farlands.client.render;
 
+import com.inf.long2.ints.Int1024;
+
 /**
- * 相机原点的帧表示：锚点 long 加局部 double。
+ * 相机原点的帧表示：锚点 1024 位整数加局部 double。
  *
  * <p>
  * 由 {@code client.mixin.fix.y.CameraMixin} 注入到 {@code Camera} 实现。相机位置在世界量级上是 double，
@@ -18,7 +20,7 @@ public interface ExactCameraOrigin {
     boolean farlands$cameraValid();
 
     /** 相机位置在 {@code axis} 轴上的锚点。 */
-    long farlands$cameraAnchor(int axis);
+    Int1024 farlands$cameraAnchor(int axis);
 
     /** 相机位置在 {@code axis} 轴上相对锚点的局部量，落在 {@code [0, 1)}。 */
     double farlands$cameraLocal(int axis);

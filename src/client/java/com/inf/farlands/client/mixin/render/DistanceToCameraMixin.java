@@ -1,16 +1,26 @@
 package com.inf.farlands.client.mixin.render;
 
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.render.ExactCameraOrigin;
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.client.render.FrameMath;
+import com.inf.long2.ints.Int1024;
 import com.inf.farlands.util.pos.ExactPosition;
+import com.inf.long2.ints.Int1024;
 import com.llamalad7.mixinextras.injector.ModifyReturnValue;
 
+import com.inf.long2.ints.Int1024;
 import net.minecraft.client.Camera;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
+import com.inf.long2.ints.Int1024;
 import net.minecraft.world.entity.Entity;
 
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.Mixin;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.Shadow;
+import com.inf.long2.ints.Int1024;
 import org.spongepowered.asm.mixin.injection.At;
 
 /**
@@ -38,12 +48,12 @@ public class DistanceToCameraMixin {
         if (!(this.camera instanceof ExactCameraOrigin cameraOrigin) || !cameraOrigin.farlands$cameraValid()) {
             return original;
         }
-        long originX = holder.farlands$anchor(ExactPosition.POS_X);
-        long originY = holder.farlands$anchor(ExactPosition.POS_Y);
-        long originZ = holder.farlands$anchor(ExactPosition.POS_Z);
-        long cameraX = cameraOrigin.farlands$cameraAnchor(ExactPosition.POS_X);
-        long cameraY = cameraOrigin.farlands$cameraAnchor(ExactPosition.POS_Y);
-        long cameraZ = cameraOrigin.farlands$cameraAnchor(ExactPosition.POS_Z);
+        Int1024 originX = holder.farlands$anchor(ExactPosition.POS_X);
+        Int1024 originY = holder.farlands$anchor(ExactPosition.POS_Y);
+        Int1024 originZ = holder.farlands$anchor(ExactPosition.POS_Z);
+        Int1024 cameraX = cameraOrigin.farlands$cameraAnchor(ExactPosition.POS_X);
+        Int1024 cameraY = cameraOrigin.farlands$cameraAnchor(ExactPosition.POS_Y);
+        Int1024 cameraZ = cameraOrigin.farlands$cameraAnchor(ExactPosition.POS_Z);
         double dx = FrameMath.offset(originX, holder.farlands$local(ExactPosition.POS_X), cameraX,
                 cameraOrigin.farlands$cameraLocal(ExactPosition.POS_X));
         double dy = FrameMath.offset(originY, holder.farlands$local(ExactPosition.POS_Y), cameraY,
