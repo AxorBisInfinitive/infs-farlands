@@ -2,6 +2,7 @@ package com.inf.farlands.util.world;
 
 import com.inf.farlands.FarlandsConfig;
 import com.inf.farlands.FarlandsConstant;
+import com.inf.long2.ints.Int1024;
 
 /**
  * 边界统一语义。
@@ -24,6 +25,11 @@ public final class WorldBounds {
     public static final int MAX_PLAYABLE_SECTION = FarlandsConstant.MAX_PLAYABLE_SECTION;
 
     public static final int MIN_PLAYABLE_SECTION = ~FarlandsConstant.MAX_PLAYABLE_SECTION;
+
+    /** 可玩段界的 {@link Int1024} 形态，界值与上面四个 int 常量同源。 */
+    private static final Int1024 PLAYABLE_SECTION_MIN = Int1024.of((long) MIN_PLAYABLE_SECTION);
+
+    private static final Int1024 PLAYABLE_SECTION_MAX = Int1024.of((long) MAX_PLAYABLE_SECTION);
 
     public static boolean inBlock(int v) {
         return v >= MIN_PLAYABLE_BLOCK && v <= MAX_PLAYABLE_BLOCK;
@@ -80,6 +86,22 @@ public final class WorldBounds {
      * 三轴段号是否都在可玩段界内，任一轴界外即为假。与 {@link #inBlock(long, long, long)} 同族，量纲是段号。
      */
     public static boolean inSection(long x, long y, long z) {
+        return inSection(x) && inSection(y) && inSection(z);
+    }
+
+    /**
+     * 段号是否在可玩段界内，段号是 {@link Int1024}。
+     *
+     * <p>
+     * 判据与 {@link #inSection(long)} 同值，宽度不同：那一支到 long 为止。模拟层枚举 1024 位段号时用本方法，否则
+     * 段号超出 long 之后，窄化会把界外段判成界内。
+     */
+    public static boolean inSection(Int1024 sy) {
+        return sy.compareTo(PLAYABLE_SECTION_MIN) >= 0 && sy.compareTo(PLAYABLE_SECTION_MAX) <= 0;
+    }
+
+    /** 三轴段号是否都在可玩段界内，段号是 {@link Int1024}。与 {@link #inSection(long, long, long)} 同族。 */
+    public static boolean inSection(Int1024 x, Int1024 y, Int1024 z) {
         return inSection(x) && inSection(y) && inSection(z);
     }
 

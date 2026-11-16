@@ -1,6 +1,7 @@
 package com.inf.farlands.util.pos;
 
 import com.inf.long2.binaries.binary256.Binary256;
+import com.inf.long2.ints.Int1024;
 
 import net.minecraft.world.phys.AABB;
 
@@ -94,6 +95,15 @@ public interface ExactPosition {
      * 两个典型的绝对值场景是调试屏显示的坐标与模拟层圆盘的中心：那两处要的是真值本身，不是与另一个位置作差。
      */
     long farlands$cellCoord(int axis);
+
+    /**
+     * 该轴的 1024 位下取整，方块格号。
+     *
+     * <p>
+     * 与 {@link #farlands$cellCoord(int)} 的差别只有宽度：那一支落回 long，超出 long 的坐标饱和。要跨 1024 域取格号，
+     * 也就是模拟层枚举段时，用本方法。
+     */
+    Int1024 farlands$cellCoord1024(int axis);
 
     /**
      * 该轴的 256 位值。

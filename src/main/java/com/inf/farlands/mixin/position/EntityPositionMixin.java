@@ -6,6 +6,7 @@ import com.inf.farlands.util.pos.ExactDoubles;
 import com.inf.farlands.util.pos.ExactPosition;
 import com.inf.farlands.util.pos.ExactTeleport;
 import com.inf.long2.binaries.binary256.Binary256;
+import com.inf.long2.ints.Int1024;
 
 import java.util.List;
 import java.util.Set;
@@ -544,6 +545,18 @@ public abstract class EntityPositionMixin implements ExactPosition {
         }
         double fallback = axis == POS_X ? this.position.x : axis == POS_Y ? this.position.y : this.position.z;
         return Mth.lfloor(fallback);
+    }
+
+    /**
+     * 该轴的 1024 位下取整。
+     *
+     * <p>
+     * 与 {@code farlands$cellCoord} 的差别只有宽度：那一支经 {@code farlands$exactFloor} 落回 long，超出 long 的
+     * 坐标饱和；本方法把 256 位值直接交给 {@code Int1024.ofFloor}，全 1024 域都不丢。
+     */
+    @Override
+    public Int1024 farlands$cellCoord1024(int axis) {
+        return Int1024.ofFloor(this.farlands$exactValue(axis));
     }
 
     /** 该轴的 256 位值。槽位未写过时按位置字段建一个，此后槽位一直有值。 */
