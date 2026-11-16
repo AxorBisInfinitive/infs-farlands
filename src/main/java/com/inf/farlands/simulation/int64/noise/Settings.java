@@ -1,25 +1,32 @@
 package com.inf.farlands.simulation.int64.noise;
 
+import com.inf.long2.ints.Int1024;
+
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * 一次填充的设置。
  *
- * <p>vanilla 的 {@code NoiseGeneratorSettings} 是维度一份，minY 与 height 描述整个维度。仿真按段填，
- * 所以这两个字段是段范围，由 {@link #withRange} 从原型换出；与段无关的那几项由原型持有。
+ * <p>
+ * vanilla 的 {@code NoiseGeneratorSettings} 是维度一份，minY 与 height 描述整个维度。仿真按段填，所以这两个字段是
+ * 段范围，由 {@link #withRange} 从原型换出；与段无关的那几项由原型持有。
  *
- * <p>surfaceRule、spawnTarget、disableMobGeneration、useLegacyRandomSource 不搬：这一层不出地表，
- * 也不生成生物。
+ * <p>
+ * 只有坐标是 1024 位。{@code height} 是长度而不是坐标，恒为一段边长 16，留在 int；{@code noiseSize} 与两个 cell
+ * 尺寸同理。
+ *
+ * <p>
+ * surfaceRule、spawnTarget、disableMobGeneration、useLegacyRandomSource 不搬：这一层不出地表，也不生成生物。
  */
 public record Settings(
-        long minY,
-        long height,
+        Int1024 minY,
+        int height,
         int noiseSizeXZ,
         int noiseSizeY,
         BlockState defaultBlock,
         BlockState defaultFluid,
         Router router,
-        long seaLevel,
+        Int1024 seaLevel,
         boolean aquifersEnabled,
         boolean oreVeinsEnabled) {
 
@@ -34,7 +41,7 @@ public record Settings(
     }
 
     /** 换出段范围，其余原样。 */
-    public Settings withRange(long minY, long height) {
+    public Settings withRange(Int1024 minY, int height) {
         return new Settings(minY, height, this.noiseSizeXZ, this.noiseSizeY, this.defaultBlock,
                 this.defaultFluid, this.router, this.seaLevel, this.aquifersEnabled, this.oreVeinsEnabled);
     }

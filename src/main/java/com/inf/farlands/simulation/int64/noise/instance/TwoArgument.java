@@ -1,6 +1,7 @@
 package com.inf.farlands.simulation.int64.noise.instance;
 
 import com.inf.farlands.simulation.int64.noise.Density;
+import com.inf.long2.ints.Int1024;
 
 /**
  * 二元组合，四种运算。vanilla 的 {@code DensityFunctions.Ap2}。
@@ -67,7 +68,7 @@ public record TwoArgument(Type type, Density argument1, Density argument2, doubl
     }
 
     @Override
-    public double compute(long x, long y, long z) {
+    public double compute(Int1024 x, Int1024 y, Int1024 z) {
         double v1 = this.argument1.compute(x, y, z);
         return switch (this.type) {
             case ADD -> v1 + this.argument2.compute(x, y, z);

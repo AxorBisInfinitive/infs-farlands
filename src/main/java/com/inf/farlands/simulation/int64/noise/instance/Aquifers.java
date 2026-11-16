@@ -2,6 +2,7 @@ package com.inf.farlands.simulation.int64.noise.instance;
 
 import com.inf.farlands.simulation.int64.noise.Aquifer;
 import com.inf.farlands.simulation.int64.noise.FluidPicker;
+import com.inf.long2.ints.Int1024;
 
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -22,7 +23,7 @@ public final class Aquifers {
         return new Aquifer() {
 
             @Override
-            public BlockState computeSubstance(long x, long y, long z, double density) {
+            public BlockState computeSubstance(Int1024 x, Int1024 y, Int1024 z, double density) {
                 return density > 0.0 ? null : picker.computeFluid(x, y, z).at(y);
             }
 

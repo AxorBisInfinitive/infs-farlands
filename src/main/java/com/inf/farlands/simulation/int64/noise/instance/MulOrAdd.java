@@ -1,6 +1,7 @@
 package com.inf.farlands.simulation.int64.noise.instance;
 
 import com.inf.farlands.simulation.int64.noise.Density;
+import com.inf.long2.ints.Int1024;
 
 /**
  * 常量折叠后的加减乘。vanilla 的 {@code DensityFunctions.MulOrAdd}。
@@ -20,7 +21,7 @@ public record MulOrAdd(Type specificType, Density input, double minValue, double
     }
 
     @Override
-    public double compute(long x, long y, long z) {
+    public double compute(Int1024 x, Int1024 y, Int1024 z) {
         double v = this.input.compute(x, y, z);
         return this.specificType == Type.MUL ? v * this.argument : v + this.argument;
     }

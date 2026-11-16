@@ -2,6 +2,7 @@ package com.inf.farlands.simulation.int64.noise.instance;
 
 import com.inf.farlands.simulation.int64.noise.FluidPicker;
 import com.inf.farlands.simulation.int64.noise.FluidStatus;
+import com.inf.long2.ints.Int1024;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.world.level.block.Blocks;
@@ -14,19 +15,23 @@ import net.minecraft.world.level.block.state.BlockState;
  * 打开时一律空，那是共享的调试开关，不是本层的判据。
  *
  * <p>vanilla 的空气态液位取 {@code DimensionType.MIN_Y * 2}，本 port 的竖直无界，没有那个维度值可乘，
- * 取 {@code Long.MIN_VALUE}。两者在可达坐标上的行为相同。
+ * 取 {@code Int1024.MIN_VALUE}。两者在可达坐标上的行为相同。
  */
 public final class FluidPickers {
+
+    /** 岩浆面的液位，与 vanilla 同值。 */
+    private static final Int1024 LAVA_LEVEL = Int1024.of(-54L);
 
     private FluidPickers() {
     }
 
-    public static FluidPicker standard(long seaLevel, BlockState defaultFluid) {
-        FluidStatus lava = new FluidStatus(-54L, Blocks.LAVA.defaultBlockState());
+    public static FluidPicker standard(Int1024 seaLevel, BlockState defaultFluid) {
+        FluidStatus lava = new FluidStatus(LAVA_LEVEL, Blocks.LAVA.defaultBlockState());
         FluidStatus sea = new FluidStatus(seaLevel, defaultFluid);
-        FluidStatus empty = new FluidStatus(Long.MIN_VALUE, Blocks.AIR.defaultBlockState());
+        FluidStatus empty = new FluidStatus(Int1024.MIN_VALUE, Blocks.AIR.defaultBlockState());
+        Int1024 lowest = seaLevel.compareTo(LAVA_LEVEL) <= 0 ? seaLevel : LAVA_LEVEL;
         return (x, y, z) -> SharedConstants.DEBUG_DISABLE_FLUID_GENERATION
                 ? empty
-                : (y < Math.min(-54L, seaLevel) ? lava : sea);
+                : (y.compareTo(lowest) < 0 ? lava : sea);
     }
 }

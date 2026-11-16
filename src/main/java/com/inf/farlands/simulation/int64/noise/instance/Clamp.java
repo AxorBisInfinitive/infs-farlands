@@ -1,6 +1,7 @@
 package com.inf.farlands.simulation.int64.noise.instance;
 
 import com.inf.farlands.simulation.int64.noise.Density;
+import com.inf.long2.ints.Int1024;
 
 import net.minecraft.util.Mth;
 
@@ -15,7 +16,7 @@ import net.minecraft.util.Mth;
 public record Clamp(Density input, double minValue, double maxValue) implements Density {
 
     @Override
-    public double compute(long x, long y, long z) {
+    public double compute(Int1024 x, Int1024 y, Int1024 z) {
         return Mth.clamp(this.input.compute(x, y, z), this.minValue, this.maxValue);
     }
 

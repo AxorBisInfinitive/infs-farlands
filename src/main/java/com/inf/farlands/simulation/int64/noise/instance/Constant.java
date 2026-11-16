@@ -1,6 +1,7 @@
 package com.inf.farlands.simulation.int64.noise.instance;
 
 import com.inf.farlands.simulation.int64.noise.Density;
+import com.inf.long2.ints.Int1024;
 
 /**
  * 常值密度。vanilla 的 {@code DensityFunctions.Constant}。
@@ -10,7 +11,7 @@ import com.inf.farlands.simulation.int64.noise.Density;
 public record Constant(double value) implements Density {
 
     @Override
-    public double compute(long x, long y, long z) {
+    public double compute(Int1024 x, Int1024 y, Int1024 z) {
         return this.value;
     }
 

@@ -13,10 +13,11 @@ import com.inf.farlands.simulation.int64.noise.Settings;
 import com.inf.farlands.simulation.int64.noise.instance.Aquifers;
 import com.inf.farlands.simulation.int64.noise.instance.Constant;
 import com.inf.farlands.simulation.int64.noise.instance.FluidPickers;
-import com.inf.farlands.simulation.int64.util.LongBox;
+import com.inf.farlands.simulation.int64.util.SectionBox;
 import com.inf.farlands.simulation.int64.util.Sink;
 import com.inf.farlands.simulation.model.SimulationSectionData;
 import com.inf.farlands.simulation.model.SimulationSectionKey;
+import com.inf.long2.ints.Int1024;
 
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Blocks;
@@ -43,6 +44,9 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
  */
 public abstract class AbstractSimulationFiller implements SimulationFiller {
 
+    /** 段内下标掩码，取低四位。 */
+    private static final Int1024 LOCAL_MASK = Int1024.of(15L);
+
     /**
      * 占位路由：十五个常量，只有 {@code finalDensity} 会被系统换掉。
      *
@@ -60,7 +64,7 @@ public abstract class AbstractSimulationFiller implements SimulationFiller {
     @Override
     public void fill(ServerLevel level, SimulationSectionKey key, SimulationSectionData data) {
         SimulationNoiseSystem system = ((SimulationLevels) level).simulationSystem();
-        Settings settings = prototypeFor(system).withRange(key.y().toLong() * 16L, 16L);
+        Settings settings = prototypeFor(system).withRange(key.y().shift(4), SectionBox.SIZE);
         Router router = system.createRouter(BASE_ROUTER);
         Density density = router.finalDensity();
         FluidPicker picker = system.createFluidPicker(settings);
@@ -68,18 +72,17 @@ public abstract class AbstractSimulationFiller implements SimulationFiller {
             picker = FluidPickers.standard(settings.seaLevel(), settings.defaultFluid());
         }
         // Random 传 null：现有两个系统都不读它。接真实含水层时补一个实现。
-        Aquifer aquifer = system.createAquifer(settings, key.x().toLong(), key.y().toLong(), key.z().toLong(), router,
-                null, picker);
+        Aquifer aquifer = system.createAquifer(settings, key.x(), key.y(), key.z(), router, null, picker);
         if (aquifer == null) {
             aquifer = Aquifers.disabled(picker);
         }
         BlockState fallback = system.defaultBlock(settings);
-        LongBox box = LongBox.ofSection(key.x().toLong(), key.y().toLong(), key.z().toLong());
+        SectionBox box = SectionBox.ofSection(key.x(), key.y(), key.z());
         SectionSink sink = new SectionSink(data.section, aquifer, fallback);
         int cellWidth = settings.cellWidth();
         int cellHeight = settings.cellHeight();
         if (density instanceof InterpolatedDensity && CellSampler.supports(cellWidth, cellHeight)) {
-            CellSampler.forEach(density, box.minX(), box.minY(), box.minZ(), cellWidth, cellHeight, sink);
+            CellSampler.forEach(density, box, cellWidth, cellHeight, sink);
         } else {
             Sampler.forEach(density, box, sink);
         }
@@ -87,8 +90,9 @@ public abstract class AbstractSimulationFiller implements SimulationFiller {
 
     /** 世界级原型，段范围每段换出。方块与液位是这一层自己的口径，与维度设置无关，因此每次现建不缓存。 */
     private static Settings prototypeFor(SimulationNoiseSystem system) {
-        return new Settings(0L, 16L, resolveSize(system.noiseSizeXZ()), resolveSize(system.noiseSizeY()),
-                Blocks.STONE.defaultBlockState(), Blocks.WATER.defaultBlockState(), BASE_ROUTER, 63L, true, false);
+        return new Settings(Int1024.ZERO, SectionBox.SIZE, resolveSize(system.noiseSizeXZ()),
+                resolveSize(system.noiseSizeY()), Blocks.STONE.defaultBlockState(),
+                Blocks.WATER.defaultBlockState(), BASE_ROUTER, Int1024.of(63L), true, false);
     }
 
     /** 0 表示用原型那一份。非 0 时它是 cell 网格的分量，cell 边长等于它乘 4。 */
@@ -112,7 +116,7 @@ public abstract class AbstractSimulationFiller implements SimulationFiller {
         }
 
         @Override
-        public void accept(long x, long y, long z, double value) {
+        public void accept(Int1024 x, Int1024 y, Int1024 z, double value) {
             BlockState state = this.aquifer.computeSubstance(x, y, z, value);
             if (state == null) {
                 state = this.fallback;
@@ -120,7 +124,8 @@ public abstract class AbstractSimulationFiller implements SimulationFiller {
             if (state.isAir()) {
                 return;
             }
-            this.section.setBlockState((int) (x & 15), (int) (y & 15), (int) (z & 15), state, false);
+            this.section.setBlockState(x.and(LOCAL_MASK).toInt(), y.and(LOCAL_MASK).toInt(),
+                    z.and(LOCAL_MASK).toInt(), state, false);
         }
     }
 }

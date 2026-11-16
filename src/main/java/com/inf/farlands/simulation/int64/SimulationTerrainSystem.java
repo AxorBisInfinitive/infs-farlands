@@ -5,7 +5,8 @@ import com.inf.farlands.simulation.int64.noise.FluidPicker;
 import com.inf.farlands.simulation.int64.noise.Random;
 import com.inf.farlands.simulation.int64.noise.Router;
 import com.inf.farlands.simulation.int64.noise.Settings;
-import com.inf.farlands.simulation.int64.util.LongBox;
+import com.inf.farlands.simulation.int64.util.SectionBox;
+import com.inf.long2.ints.Int1024;
 
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -24,7 +25,7 @@ public interface SimulationTerrainSystem {
     }
 
     /** 管线 fill 的含水层。null 表示用默认含水层。 */
-    default Aquifer createAquifer(Settings settings, long sectionX, long sectionY, long sectionZ,
+    default Aquifer createAquifer(Settings settings, Int1024 sectionX, Int1024 sectionY, Int1024 sectionZ,
             Router router, Random random, FluidPicker picker) {
         return null;
     }
@@ -35,6 +36,6 @@ public interface SimulationTerrainSystem {
     }
 
     /** 一次填充开始时的回调。当前无调用方。 */
-    default void onChunkFillStart(LongBox box) {
+    default void onChunkFillStart(SectionBox box) {
     }
 }

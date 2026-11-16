@@ -12,6 +12,7 @@ import com.inf.farlands.simulation.int64.noise.instance.Constant;
 import com.inf.farlands.terrain.registry.SystemArgs;
 import com.inf.farlands.terrain.registry.SystemDefaultParams;
 import com.inf.farlands.terrain.registry.SystemParams;
+import com.inf.long2.ints.Int1024;
 
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -41,17 +42,17 @@ public final class VoidSimulationNoiseSystem implements SimulationNoiseSystem {
 
     @Override
     public FluidPicker createFluidPicker(Settings settings) {
-        // 液位取 Long.MIN_VALUE，FluidStatus.at 的判据是严格小于，因此任何 y 都取不到它，恒出空气。
-        return (x, y, z) -> new FluidStatus(Long.MIN_VALUE, Blocks.AIR.defaultBlockState());
+        // 液位取 Int1024.MIN_VALUE，FluidStatus.at 的判据是严格小于，因此任何 y 都取不到它，恒出空气。
+        return (x, y, z) -> new FluidStatus(Int1024.MIN_VALUE, Blocks.AIR.defaultBlockState());
     }
 
     @Override
-    public Aquifer createAquifer(Settings settings, long sectionX, long sectionY, long sectionZ, Router router,
-            Random random, FluidPicker picker) {
+    public Aquifer createAquifer(Settings settings, Int1024 sectionX, Int1024 sectionY, Int1024 sectionZ,
+            Router router, Random random, FluidPicker picker) {
         return new Aquifer() {
 
             @Override
-            public BlockState computeSubstance(long x, long y, long z, double density) {
+            public BlockState computeSubstance(Int1024 x, Int1024 y, Int1024 z, double density) {
                 return Blocks.AIR.defaultBlockState();
             }
 

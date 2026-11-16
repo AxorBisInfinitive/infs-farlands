@@ -1,5 +1,7 @@
 package com.inf.farlands.simulation.int64.noise;
 
+import com.inf.long2.ints.Int1024;
+
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
@@ -10,7 +12,7 @@ import net.minecraft.world.level.block.state.BlockState;
  */
 public interface Aquifer {
 
-    BlockState computeSubstance(long x, long y, long z, double density);
+    BlockState computeSubstance(Int1024 x, Int1024 y, Int1024 z, double density);
 
     boolean shouldScheduleFluidUpdate();
 }
