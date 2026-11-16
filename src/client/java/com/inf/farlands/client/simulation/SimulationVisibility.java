@@ -11,11 +11,16 @@ import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 
 import com.inf.farlands.client.render.AnchoredFrustum;
-import com.inf.farlands.client.render.FrameMath;
+import com.inf.farlands.util.world.WorldBounds;
 import com.inf.long2.ints.Int1024;
 
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.renderer.culling.Frustum;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.util.Util;
+import net.minecraft.world.entity.player.Player;
 
 /**
  * 模拟层的遮挡剔除，按原版 {@code SectionOcclusionGraph} 的形态组织：传播在后台线程、由图输入驱动，可见集是视锥
@@ -55,7 +60,7 @@ final class SimulationVisibility {
      *
      * <p>
      * 判据取自原版 {@code SectionOcclusionGraph.runUpdates} 的 {@code distantFromCamera}，与父段是否全开无关。原版
-     * 这一支受 {@code smartCull} 开关控制，本 port 恒开，没有关掉的路径。
+     * 这一支受 {@code smartCull} 开关控制，本类同源：开关为假时整支跳过，见 {@link #farlands$smartCull}。
      */
     private static final long RAY_GATE_SECTIONS = 4L;
 
@@ -101,10 +106,13 @@ final class SimulationVisibility {
     /** 裁剪粒度：相机转动按 2 度取整比较，取自原版 {@code LevelRenderer} 的同一判据。 */
     private static final float ROTATION_STEP = 2.0F;
 
+    /** 相机后退出 8 格立方的粒度。与 vanilla 的 {@code LevelRenderer.offsetFrustum} 同值。 */
+    private static final int CAMERA_CUBE = 8;
+
     /** 一次调用要用的相机与视锥，全部由主线程给出。 */
     record View(Int1024 sectionX, Int1024 sectionY, Int1024 sectionZ, double inSectionX, double inSectionY,
-            double inSectionZ, Int1024 anchorX, Int1024 anchorY, Int1024 anchorZ, double localX, double localY,
-            double localZ, float xRot, float yRot, AnchoredFrustum frustum) {
+            double inSectionZ, Int1024 cameraBlockX, Int1024 cameraBlockY, Int1024 cameraBlockZ, float xRot,
+            float yRot, AnchoredFrustum frustum) {
     }
 
     /**
@@ -120,7 +128,8 @@ final class SimulationVisibility {
 
     /** 一次传播的输入。主线程填，后台只读。 */
     private record Job(Int1024 baseX, Int1024 baseY, Int1024 baseZ, double cameraX, double cameraY, double cameraZ,
-            int generation, int request, long[] packed, long[] masks, Simulation.SnapSection[] snaps) {
+            int generation, int request, boolean smartCull, long[] packed, long[] masks,
+            Simulation.SnapSection[] snaps, long[] seedKeys, int[] seedDirections) {
     }
 
     /** 已发布的图。后台写，主线程读。 */
@@ -154,6 +163,9 @@ final class SimulationVisibility {
     /** 上次请求时看到的图输入版本与相机段，用来决定要不要推高请求计数。 */
     private int lastGraphVersion = -1;
 
+    /** 上次请求时用的剔除开关。它变了要整图重算，与 vanilla 的 {@code invalidate} 同义。 */
+    private boolean lastSmartCull = true;
+
     private Int1024 lastSectionX;
 
     private Int1024 lastSectionY;
@@ -162,11 +174,13 @@ final class SimulationVisibility {
 
     /** 每帧调一次：按需提交后台传播、按需重裁，返回裁剪集。 */
     List<Simulation.SnapSection> update(Simulation simulation, View view) {
+        boolean smartCull = farlands$smartCull(simulation, view);
         boolean moved = this.lastSectionX == null || !view.sectionX().equals(this.lastSectionX)
                 || !view.sectionY().equals(this.lastSectionY) || !view.sectionZ().equals(this.lastSectionZ);
         int version = simulation.graphVersion();
-        if (version != this.lastGraphVersion || moved) {
+        if (version != this.lastGraphVersion || moved || smartCull != this.lastSmartCull) {
             this.lastGraphVersion = version;
+            this.lastSmartCull = smartCull;
             this.lastSectionX = view.sectionX();
             this.lastSectionY = view.sectionY();
             this.lastSectionZ = view.sectionZ();
@@ -177,6 +191,31 @@ final class SimulationVisibility {
         }
         this.farlands$cull(view);
         return this.culled;
+    }
+
+    /**
+     * 该不该做聪明剔除，判据照抄 vanilla 的 {@code LevelRenderer.cullTerrain}：取 {@code Minecraft.smartCull}
+     * 这个开关，旁观者且相机所在方块是实心渲染时强制关掉。
+     *
+     * <p>
+     * 关掉之后面掩码与远景直线校验都不做，整窗可达。相机穿在实心方块里时相机段的面掩码是全闭的，照开着的判据
+     * 推不出任何邻段，整片就是黑的；vanilla 那个 {@code isSolidRender} 分支正是为此写的。
+     */
+    private static boolean farlands$smartCull(Simulation simulation, View view) {
+        Minecraft minecraft = Minecraft.getInstance();
+        boolean smartCull = minecraft.smartCull;
+        Player player = minecraft.player;
+        ClientLevel level = simulation.level();
+        if (!smartCull || player == null || level == null || !player.isSpectator()) {
+            return smartCull;
+        }
+        Int1024 x = view.cameraBlockX();
+        Int1024 y = view.cameraBlockY();
+        Int1024 z = view.cameraBlockZ();
+        if (!WorldBounds.inBlockAbsolute(x, y, z)) {
+            return smartCull;
+        }
+        return !level.getBlockState(new BlockPos(x.toInt(), y.toInt(), z.toInt())).isSolidRender();
     }
 
     /** 裁剪集内容的版本，供渲染批次缓存判重。 */
@@ -221,10 +260,16 @@ final class SimulationVisibility {
     private void farlands$submit(Simulation simulation, View view) {
         int captured = this.requested;
         int capturedGeneration = this.generation;
+        boolean absent = simulation.sectionOrNull(view.sectionX(), view.sectionY(), view.sectionZ()) == null;
+        int faceX = absent ? farlands$face(view.sectionX()) : 0;
+        int faceY = absent ? farlands$face(view.sectionY()) : 0;
+        int faceZ = absent ? farlands$face(view.sectionZ()) : 0;
+        boolean seeding = faceX != 0 || faceY != 0 || faceZ != 0;
         int count = simulation.sectionMap().size();
         long[] packed = new long[count];
         long[] masks = new long[count];
         Simulation.SnapSection[] snaps = new Simulation.SnapSection[count];
+        int[] seedDirections = new int[count];
         int at = 0;
         for (SimulationSection section : simulation.sectionMap().values()) {
             // 相对任务的基段：窗口内差不超过几十，收窄无损。
@@ -233,12 +278,89 @@ final class SimulationVisibility {
                     section.sectionZ().subtract(view.sectionZ()).toLong());
             masks[at] = section.visibility();
             snaps[at] = section.snap();
+            if (seeding && packed[at] != PACK_OUT_OF_RANGE && section.eligible()) {
+                seedDirections[at] = farlands$seedDirections(faceX, faceY, faceZ, section, view);
+            }
             at++;
         }
+        int seeded = 0;
+        for (int ordinal = 0; ordinal < count; ordinal++) {
+            if (seedDirections[ordinal] != 0) {
+                seeded++;
+            }
+        }
+        long[] seedKeys = new long[seeded];
+        int[] seeds = new int[seeded];
+        int write = 0;
+        for (int ordinal = 0; ordinal < count; ordinal++) {
+            if (seedDirections[ordinal] != 0) {
+                seedKeys[write] = packed[ordinal];
+                seeds[write] = seedDirections[ordinal];
+                write++;
+            }
+        }
         Job job = new Job(view.sectionX(), view.sectionY(), view.sectionZ(), view.inSectionX(), view.inSectionY(),
-                view.inSectionZ(), capturedGeneration, captured, packed, masks, snaps);
+                view.inSectionZ(), capturedGeneration, captured, this.lastSmartCull, packed, masks, snaps, seedKeys,
+                seeds);
         this.inFlight = true;
         CompletableFuture.runAsync(() -> this.farlands$propagate(job), Util.backgroundExecutor());
+    }
+
+    /** 相机段贴哪一个面：返回 +1 表示贴着正界，-1 贴着负界，0 不贴。 */
+    private static int farlands$face(Int1024 section) {
+        if (section.compareTo(Int1024.of((long) WorldBounds.MAX_PLAYABLE_SECTION)) == 0) {
+            return 1;
+        }
+        if (section.compareTo(Int1024.of((long) WorldBounds.MIN_PLAYABLE_SECTION)) == 0) {
+            return -1;
+        }
+        return 0;
+    }
+
+    /**
+     * 该段作为种子时要带的源方向位；0 表示不是种子。
+     *
+     * <p>
+     * 判据照 vanilla {@code initializeQueueForFullUpdate} 的平面播种，推广到三轴：贴面那一轴取「离开相机」的方向，
+     * 另两轴按种子相对相机的符号补横向方向。vanilla 的世界只有 Y 有界，所以它只播 UP 或 DOWN 那一层；本 port 的
+     * 可玩界是三轴盒子，贴面的轴可以是一到三根。
+     */
+    private static int farlands$seedDirections(int faceX, int faceY, int faceZ, SimulationSection section, View view) {
+        int[] signs = { faceX, faceY, faceZ };
+        Int1024[] camera = { view.sectionX(), view.sectionY(), view.sectionZ() };
+        Int1024[] own = { section.sectionX(), section.sectionY(), section.sectionZ() };
+        boolean[] onFaceAxis = new boolean[3];
+        int directions = 0;
+        for (int axis = 0; axis < 3; axis++) {
+            if (signs[axis] == 0) {
+                continue;
+            }
+            if (own[axis].compareTo(camera[axis].add(Int1024.of((long) signs[axis]))) != 0) {
+                continue;
+            }
+            onFaceAxis[axis] = true;
+            directions |= 1 << farlands$directionBit(axis, signs[axis]);
+        }
+        if (directions == 0) {
+            return 0;
+        }
+        for (int axis = 0; axis < 3; axis++) {
+            if (onFaceAxis[axis]) {
+                continue;
+            }
+            int compared = own[axis].compareTo(camera[axis]);
+            if (compared != 0) {
+                directions |= 1 << farlands$directionBit(axis, compared > 0 ? 1 : -1);
+            }
+        }
+        return directions;
+    }
+
+    /** 第 axis 轴朝 sign 那一侧的方向在 {@code Direction} 里的序数。轴序是 X、Y、Z。 */
+    private static int farlands$directionBit(int axis, int sign) {
+        Direction.Axis directionAxis = Direction.Axis.values()[axis];
+        return Direction.fromAxisAndDirection(directionAxis,
+                sign > 0 ? Direction.AxisDirection.POSITIVE : Direction.AxisDirection.NEGATIVE).ordinal();
     }
 
     /** 后台：从快照算出一张图并发布。只碰 {@code job} 与局部容器。 */
@@ -257,15 +379,25 @@ final class SimulationVisibility {
             sources.put(BASE_KEY, 1);
             order.add(BASE_KEY);
             queue.enqueue(BASE_KEY | ((long) (NO_SOURCE + 1) << QUEUE_SOURCE_SHIFT));
-        } else {
-            for (Direction direction : DIRECTIONS) {
-                long seed = farlands$pack(direction.getStepX(), direction.getStepY(), direction.getStepZ());
-                if (indexOf.getOrDefault(seed, -1) < 0) {
+        } else if (job.seedKeys().length > 0) {
+            // 相机段缺席：按 vanilla 的平面播种。每个种子带一组源方向，逐位各入队一次。
+            for (int index = 0; index < job.seedKeys().length; index++) {
+                long seed = job.seedKeys()[index];
+                int directions = job.seedDirections()[index];
+                if (directions == 0 || indexOf.getOrDefault(seed, -1) < 0) {
                     continue;
                 }
-                sources.put(seed, (1 << direction.ordinal()) + 1);
-                order.add(seed);
-                queue.enqueue(seed | ((long) (direction.ordinal() + 1) << QUEUE_SOURCE_SHIFT));
+                int have = sources.getOrDefault(seed, SOURCES_ABSENT);
+                int bits = (have == SOURCES_ABSENT ? 0 : have - 1) | directions;
+                sources.put(seed, bits + 1);
+                if (have == SOURCES_ABSENT) {
+                    order.add(seed);
+                }
+                for (int ordinal = 0; ordinal < FACINGS; ordinal++) {
+                    if ((directions & (1 << ordinal)) != 0) {
+                        queue.enqueue(seed | ((long) (ordinal + 1) << QUEUE_SOURCE_SHIFT));
+                    }
+                }
             }
         }
 
@@ -283,7 +415,8 @@ final class SimulationVisibility {
                     || Math.abs(farlands$unpackY(key)) > RAY_GATE_SECTIONS
                     || Math.abs(farlands$unpackZ(key)) > RAY_GATE_SECTIONS;
             for (Direction exit : DIRECTIONS) {
-                if (source != NO_SOURCE && !farlands$passes(mask, source, exit.ordinal())) {
+                // 开关为假时面掩码不参与，与 vanilla 的 {@code !smartCull ||} 同义。
+                if (job.smartCull() && source != NO_SOURCE && !farlands$passes(mask, source, exit.ordinal())) {
                     continue;
                 }
                 long next = farlands$step(key, exit);
@@ -293,8 +426,9 @@ final class SimulationVisibility {
                 int bit = 1 << exit.ordinal();
                 int have = sources.getOrDefault(next, SOURCES_ABSENT);
                 if (have == SOURCES_ABSENT) {
-                    if (distant && !farlands$rayClear(next, indexOf, sources, job.cameraX(), job.cameraY(),
-                            job.cameraZ())) {
+                    if (job.smartCull() && distant
+                            && !farlands$rayClear(next, indexOf, sources, job.cameraX(), job.cameraY(),
+                                    job.cameraZ())) {
                         continue;
                     }
                     sources.put(next, bit + 1);
@@ -338,7 +472,11 @@ final class SimulationVisibility {
      *
      * <p>
      * 重裁条件是「图发布过但还没裁」或「相机转动跨过 2 度」。平移不触发：图本身随相机段变化重算，段内平移对裁剪的
-     * 影响小于一次裁剪的成本。
+     * 影响小于一次裁剪的成本。这两条与 vanilla 的 {@code applyFrustum} 判据同源。
+     *
+     * <p>
+     * 判定用后退视锥：先拷一份，再让相机沿视线后退到 8 格立方完全落进锥内，与 vanilla 的
+     * {@code offsetFrustum} 同法。近平面因此退到相机后面若干格，相机附近与相机所在段不会被近平面剔掉。
      */
     private void farlands$cull(View view) {
         Graph graph = this.current;
@@ -353,25 +491,13 @@ final class SimulationVisibility {
         this.lastXRot = view.xRot();
         this.lastYRot = view.yRot();
         this.needsCull = false;
-        AnchoredFrustum frustum = view.frustum();
-        Int1024 anchorX = view.anchorX();
-        Int1024 anchorY = view.anchorY();
-        Int1024 anchorZ = view.anchorZ();
-        double localX = view.localX();
-        double localY = view.localY();
-        double localZ = view.localZ();
+        AnchoredFrustum frustum = view.frustum() == null ? null
+                : (AnchoredFrustum) new Frustum((Frustum) view.frustum()).offsetToFullyIncludeCameraCube(CAMERA_CUBE);
         Simulation.SnapSection[] snaps = graph.snaps();
         List<Simulation.SnapSection> next = new ArrayList<>(snaps.length);
         for (Simulation.SnapSection snap : snaps) {
-            if (frustum == null) {
-                next.add(snap);
-                continue;
-            }
-            double originX = FrameMath.offset(snap.originX(), 0.0, anchorX, 0.0) - localX;
-            double originY = FrameMath.offset(snap.originY(), 0.0, anchorY, 0.0) - localY;
-            double originZ = FrameMath.offset(snap.originZ(), 0.0, anchorZ, 0.0) - localZ;
-            if (frustum.farlands$isVisibleRelative(originX, originY, originZ, originX + SimulationSection.SIZE,
-                    originY + SimulationSection.SIZE, originZ + SimulationSection.SIZE)) {
+            if (frustum == null || frustum.farlands$isVisibleSection(snap.originX(), snap.originY(), snap.originZ(),
+                    SimulationSection.SIZE)) {
                 next.add(snap);
             }
         }

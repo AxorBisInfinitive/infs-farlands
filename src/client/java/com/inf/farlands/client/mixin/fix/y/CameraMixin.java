@@ -3,6 +3,7 @@ package com.inf.farlands.client.mixin.fix.y;
 import java.util.Arrays;
 import java.util.List;
 
+import com.inf.farlands.client.render.AnchoredFrustum;
 import com.inf.farlands.client.render.ExactCameraOrigin;
 import com.inf.farlands.client.render.ExactCameraState;
 import com.inf.farlands.util.pos.ExactPosition;
@@ -10,6 +11,7 @@ import com.inf.long2.ints.Int1024;
 
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.culling.Frustum;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.core.BlockPos;
 import net.minecraft.tags.FluidTags;
@@ -24,6 +26,8 @@ import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.level.material.FogType;
 import net.minecraft.world.phys.Vec3;
 
+import org.joml.Matrix4f;
+import org.joml.Matrix4fc;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 import org.spongepowered.asm.mixin.Final;
@@ -91,6 +95,9 @@ public abstract class CameraMixin implements ExactCameraOrigin {
     @Shadow
     public abstract Quaternionf rotation();
 
+    @Shadow
+    public abstract Frustum getCullFrustum();
+
     @Unique
     private Int1024 farlands$cameraAnchorX;
 
@@ -143,6 +150,28 @@ public abstract class CameraMixin implements ExactCameraOrigin {
             return this.farlands$cameraLocalX;
         }
         return axis == ExactPosition.POS_Y ? this.farlands$cameraLocalY : this.farlands$cameraLocalZ;
+    }
+
+    /**
+     * 视锥的帧改成精确帧。
+     *
+     * <p>
+     * vanilla 在 {@code prepareCullFrustum} 里把相机位置的 double 投影交给 {@code Frustum.prepare}，锚点因此继承投影
+     * 的量化误差：`1e18` 处约 128 格，`8.9e307` 处约 `2e292` 格。绘制偏移与 pick 用的是精确帧，两份帧差这些量时剔除
+     * 与画面就会错开，表现为某些方向成片不画，且错开的方向随舍入方向漂移。
+     *
+     * <p>
+     * 矿车分支没有可用帧，保持那次 double 写入。捕获视锥与实时视锥是同一个对象，一并覆盖。
+     */
+    @Inject(method = "prepareCullFrustum(Lorg/joml/Matrix4fc;Lorg/joml/Matrix4f;Lnet/minecraft/world/phys/Vec3;)V", at = @At("RETURN"))
+    private void farlands$exactCullFrustum(Matrix4fc modelViewMatrix, Matrix4f projectionMatrix, Vec3 cameraPos,
+            CallbackInfo ci) {
+        if (!this.farlands$cameraValid) {
+            return;
+        }
+        ((AnchoredFrustum) this.getCullFrustum()).farlands$prepareExact(this.farlands$cameraAnchorX,
+                this.farlands$cameraAnchorY, this.farlands$cameraAnchorZ, this.farlands$cameraLocalX,
+                this.farlands$cameraLocalY, this.farlands$cameraLocalZ);
     }
 
     /** 复位累加量与标记，并记下走的是不是帧化不了的矿车分支。 */

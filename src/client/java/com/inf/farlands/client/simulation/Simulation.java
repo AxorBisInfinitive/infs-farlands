@@ -664,11 +664,12 @@ public final class Simulation {
      * 本帧要渲染的段：交给遮挡剔除层，由它按需提交后台传播、按需重裁，返回裁剪集。
      *
      * <p>
-     * 入参是相机帧的锚点与局部量：段号与段内偏移都由这里现算，调用方在渲染包里，算完还得原样传回来，不如只给帧表示。
+     * 入参是相机帧的锚点与局部量：段号、段内偏移与相机方块坐标都由这里现算，调用方在渲染包里，算完还得原样传回来，
+     * 不如只给帧表示。
      *
      * <p>
-     * 传播跑在后台线程，由「图输入版本变化」或「相机段变化」驱动，所以这里不再有节流：异步本身就是节流，一次只有一个
-     * 任务在途。裁剪在主线程做，只在图发布或相机转动跨 2 度时重跑。
+     * 传播跑在后台线程，由「图输入版本变化」「相机段变化」或「剔除开关变化」驱动，所以这里不再有节流：异步本身就是
+     * 节流，一次只有一个任务在途。裁剪在主线程做，只在图发布或相机转动跨 2 度时重跑。
      */
     public List<SnapSection> visibleSections(Int1024 cameraAnchorX, Int1024 cameraAnchorY, Int1024 cameraAnchorZ,
             double cameraLocalX, double cameraLocalY, double cameraLocalZ, float xRot, float yRot,
@@ -683,8 +684,7 @@ public final class Simulation {
         double inSectionY = cameraLocalY - Math.floor(cameraLocalY) + blockY.subtract(sectionY.shift(4)).toDouble();
         double inSectionZ = cameraLocalZ - Math.floor(cameraLocalZ) + blockZ.subtract(sectionZ.shift(4)).toDouble();
         return this.visibility.update(this, new SimulationVisibility.View(sectionX, sectionY, sectionZ, inSectionX,
-                inSectionY, inSectionZ, cameraAnchorX, cameraAnchorY, cameraAnchorZ,
-                cameraLocalX, cameraLocalY, cameraLocalZ, xRot, yRot, frustum));
+                inSectionY, inSectionZ, blockX, blockY, blockZ, xRot, yRot, frustum));
     }
 
     /** 图输入的版本，见 {@link #graphVersion}。 */

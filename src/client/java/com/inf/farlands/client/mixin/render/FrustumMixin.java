@@ -88,6 +88,18 @@ public abstract class FrustumMixin implements AnchoredFrustum {
         return this.farlands$anchorZ;
     }
 
+    /** 写入精确帧，覆盖 {@code prepare(DDD)} 那次由 double 投影得来的锚点。 */
+    @Override
+    public void farlands$prepareExact(Int1024 anchorX, Int1024 anchorY, Int1024 anchorZ,
+            double localX, double localY, double localZ) {
+        this.farlands$anchorX = anchorX;
+        this.farlands$anchorY = anchorY;
+        this.farlands$anchorZ = anchorZ;
+        this.camX = localX;
+        this.camY = localY;
+        this.camZ = localZ;
+    }
+
     /** 相机就位：拆成锚点与偏移。 */
     @Inject(method = "prepare", at = @At("HEAD"), cancellable = true)
     private void farlands$prepare(double x, double y, double z, CallbackInfo ci) {
@@ -206,11 +218,20 @@ public abstract class FrustumMixin implements AnchoredFrustum {
                 (double) bb.maxX() + 1.0, (double) bb.maxY() + 1.0, (double) bb.maxZ() + 1.0));
     }
 
+    /**
+     * 段盒可见性：先做 1024 位整数差，再减本视锥自己的 {@code cam}。
+     *
+     * <p>
+     * 差在整数域做完再转 double，量级只有几十，`1e307` 处也不会丢段尺寸。减的是 {@code this.camX} 而不是外部相机
+     * 点：裁剪用的是 {@code offsetToFullyIncludeCameraCube} 之后的副本，两份相机点相差若干格。
+     */
     @Override
-    public boolean farlands$isVisibleRelative(double minX, double minY, double minZ,
-            double maxX, double maxY, double maxZ) {
+    public boolean farlands$isVisibleSection(Int1024 originX, Int1024 originY, Int1024 originZ, int size) {
+        double minX = originX.subtract(this.farlands$anchorX).toDouble() - this.camX;
+        double minY = originY.subtract(this.farlands$anchorY).toDouble() - this.camY;
+        double minZ = originZ.subtract(this.farlands$anchorZ).toDouble() - this.camZ;
         int result = this.intersection.intersectAab((float) minX, (float) minY, (float) minZ,
-                (float) maxX, (float) maxY, (float) maxZ);
+                (float) (minX + size), (float) (minY + size), (float) (minZ + size));
         return result == FrustumIntersection.INSIDE || result == FrustumIntersection.INTERSECT;
     }
 
