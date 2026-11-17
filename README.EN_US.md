@@ -21,19 +21,19 @@
 - Changes `Vanilla`'s X/Y/Z axis limits to [-2147483648, 2147483647].
 - Implements an independent **lighting engine** and **terrain pipeline** for the entire Y axis.
 - Fixes some abnormal `Vanilla` behavior at high coordinates.
-- Uses the `Simulation` architecture to explore the world within the `int64` range.
+- Uses the `Simulation` architecture to explore the world within the `int1024` range.
 
 <details>
 <summary>Simulation</summary>
 <br>
 
-The simulation architecture supports regions outside `int32` but within `int64`.
+The simulation architecture supports regions outside `int32` but within `int1024`.
 
 **Implemented**: simulation rendering pipeline, simulation terrain pipeline, simulation `AABB` collision.
 
 **Technical details**:
 
-- Entity coordinates are stored as `Binary256`, and **non-finite coordinates** are allowed.
+- Entity coordinates are stored as `Binary1280`, and **non-finite coordinates** are allowed.
 - Fixes some abnormal game behavior at extremely high coordinates.
 
 **Not planned**, including but not limited to: interaction, `tick`.
