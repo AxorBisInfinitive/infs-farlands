@@ -139,8 +139,11 @@ public final class SimulationSectionIO {
      *
      * <p>
      * 一个 ssa 文件覆盖 32 个段，所以区域号是段号右移五位。读、落盘、关服三条路各写一遍就是三次犯错机会。
+     *
+     * <p>
+     * 客户端调试面板也要按同一换算把段号对到 ssa 文件名，所以本方法公开。它只做整数移位，不碰任何服务端状态。
      */
-    static SimulationFileIndex.Region regionOf(Int1024 sectionX, Int1024 sectionY, Int1024 sectionZ) {
+    public static SimulationFileIndex.Region regionOf(Int1024 sectionX, Int1024 sectionY, Int1024 sectionZ) {
         return new SimulationFileIndex.Region(sectionX.shift(-5), sectionY.shift(-5), sectionZ.shift(-5));
     }
 
