@@ -4,6 +4,8 @@ import com.inf.farlands.FarlandsConfig;
 import com.inf.farlands.FarlandsConstant;
 import com.inf.long2.ints.Int1024;
 
+import net.minecraft.world.phys.Vec3;
+
 /**
  * 边界统一语义。
  */
@@ -83,6 +85,26 @@ public final class WorldBounds {
     /** 三轴方块坐标是否都在可表示范围内，任一轴界外即为假。 */
     public static boolean inBlockAbsolute(Int1024 x, Int1024 y, Int1024 z) {
         return inBlockAbsolute(x) && inBlockAbsolute(y) && inBlockAbsolute(z);
+    }
+
+    /**
+     * 三轴方块坐标是否都在可表示范围内，坐标是 {@link Vec3}。
+     *
+     * <p>
+     * 判据与 {@link #inBlockAbsolute(long)} 同界，入参是射线或实体的端点。非有限值一律算界外：
+     * {@code (long) Math.floor(NaN)} 是 0，只按界值比较会把非有限坐标判成界内。
+     *
+     * <p>
+     * 这一族判据有两个消费点，射线检测与实体穿行的入口守卫，同一语义不各写一遍。
+     */
+    public static boolean inBlockAbsolute(Vec3 position) {
+        return axisInBlockAbsolute(position.x) && axisInBlockAbsolute(position.y)
+                && axisInBlockAbsolute(position.z);
+    }
+
+    /** 单轴是 {@link #inBlockAbsolute(Vec3)} 的分量。 */
+    private static boolean axisInBlockAbsolute(double value) {
+        return Double.isFinite(value) && inBlockAbsolute((long) Math.floor(value));
     }
 
     /**
