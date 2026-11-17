@@ -1,5 +1,10 @@
 package com.inf.farlands.util.hash;
 
+/**
+ * HashMath
+ *
+ * @see <a href="https://github.com/AxorBisInfinitive/hash-proof">证明</a>
+ */
 public final class HashMath {
     private HashMath() {
     }
