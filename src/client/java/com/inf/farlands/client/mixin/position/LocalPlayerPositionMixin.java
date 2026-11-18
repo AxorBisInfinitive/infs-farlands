@@ -1,6 +1,6 @@
 package com.inf.farlands.client.mixin.position;
 
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 import com.inf.farlands.util.pos.ExactPosition;
 
 import net.minecraft.client.player.LocalPlayer;

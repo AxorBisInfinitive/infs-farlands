@@ -1,6 +1,6 @@
 package com.inf.farlands.simulation.int1024.noise;
 
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 
 /**
  * 液面查询，与 vanilla 的 {@code Aquifer.FluidPicker} 同形，坐标是 1024 位方块坐标。

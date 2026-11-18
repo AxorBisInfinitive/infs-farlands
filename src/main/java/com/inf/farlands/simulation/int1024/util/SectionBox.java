@@ -1,6 +1,6 @@
 package com.inf.farlands.simulation.int1024.util;
 
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 
 /**
  * 一段的方块范围：三轴原点加边长 16，逐轴的十六个绝对坐标在构造时算好。

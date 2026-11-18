@@ -1,6 +1,6 @@
 package com.inf.farlands.client.render;
 
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 
 /**
  * 相机原点的帧表示：锚点 1024 位整数加局部 double。

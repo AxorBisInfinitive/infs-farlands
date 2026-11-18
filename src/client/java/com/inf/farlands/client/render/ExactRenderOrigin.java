@@ -1,6 +1,6 @@
 package com.inf.farlands.client.render;
 
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 
 /**
  * 实体帧在渲染状态上的副本，由 {@code render.EntityRenderStateMixin} 注入到 {@code EntityRenderState}。

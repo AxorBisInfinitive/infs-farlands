@@ -1,6 +1,6 @@
 package com.inf.farlands.client.mixin.position;
 
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 import java.util.List;
 
 import com.inf.farlands.client.render.FrameMath;

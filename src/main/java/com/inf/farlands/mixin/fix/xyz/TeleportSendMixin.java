@@ -4,7 +4,7 @@ import java.util.Set;
 
 import com.inf.farlands.network.position.ExactPositionPacket;
 import com.inf.farlands.util.pos.ExactPosition;
-import com.inf.long2.binaries.binary1280.Binary1280;
+import love.crysh.long2.binaries.binary1280.Binary1280;
 
 import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
 import net.minecraft.server.level.ServerPlayer;

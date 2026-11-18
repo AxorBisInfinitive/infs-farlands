@@ -3,7 +3,7 @@ package com.inf.farlands.mixin.fix.xyz;
 import java.util.Locale;
 
 import com.inf.farlands.util.pos.ExactTeleport;
-import com.inf.long2.binaries.binary1280.Binary1280;
+import love.crysh.long2.binaries.binary1280.Binary1280;
 
 import net.minecraft.server.commands.TeleportCommand;
 

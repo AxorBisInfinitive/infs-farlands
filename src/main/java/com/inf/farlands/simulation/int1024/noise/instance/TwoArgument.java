@@ -1,7 +1,7 @@
 package com.inf.farlands.simulation.int1024.noise.instance;
 
 import com.inf.farlands.simulation.int1024.noise.Density;
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 
 /**
  * 二元组合，四种运算。vanilla 的 {@code DensityFunctions.Ap2}。

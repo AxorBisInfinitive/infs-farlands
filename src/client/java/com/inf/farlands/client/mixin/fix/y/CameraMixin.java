@@ -7,7 +7,7 @@ import com.inf.farlands.client.render.AnchoredFrustum;
 import com.inf.farlands.client.render.ExactCameraOrigin;
 import com.inf.farlands.client.render.ExactCameraState;
 import com.inf.farlands.util.pos.ExactPosition;
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;

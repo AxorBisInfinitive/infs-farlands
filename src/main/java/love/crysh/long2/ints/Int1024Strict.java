@@ -1,4 +1,4 @@
-package com.inf.long2.ints;
+package love.crysh.long2.ints;
 
 /**
  * 十进制文本到 {@link Int1024} 的严格解析：越界即抛，不回绕。
@@ -8,7 +8,8 @@ package com.inf.long2.ints;
  * 本类补上范围判据。判据落在库自己的解析器上，语法与数值规则因此与 {@code parseInt} 同源，不另造一套。
  *
  * <p>
- * 放在 {@code com.inf.long2.ints} 包里，因为 {@link IntText} 这个类本身与其成员都是包私有。
+ * 放在 {@code love.crysh.long2.ints} 包里，因为 {@link IntText} 这个类本身与其成员都是包私有，库也没有提供
+ * 等价的严格解析入口。
  *
  * <p>
  * 四步。第一步 {@link IntText#scanDecimal(String)} 判语法，非法即抛。第二步数有效位数，去掉符号与前导零后

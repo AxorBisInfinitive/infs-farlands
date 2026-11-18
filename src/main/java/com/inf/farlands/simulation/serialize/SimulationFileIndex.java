@@ -24,8 +24,8 @@ import com.google.gson.JsonParser;
 import net.minecraft.server.level.ServerLevel;
 
 import com.inf.farlands.InfsFarlands;
-import com.inf.long2.ints.Int1024;
-import com.inf.long2.ints.Int1024Strict;
+import love.crysh.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024Strict;
 
 /**
  * ssa 文件名的映射表：三个区域坐标到 16 位小写十六进制编号。

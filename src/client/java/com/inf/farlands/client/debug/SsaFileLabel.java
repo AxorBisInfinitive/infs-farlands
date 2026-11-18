@@ -2,7 +2,7 @@ package com.inf.farlands.client.debug;
 
 import com.inf.farlands.simulation.serialize.SimulationFileIndex;
 import com.inf.farlands.simulation.serialize.SimulationSectionIO;
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.server.IntegratedServer;

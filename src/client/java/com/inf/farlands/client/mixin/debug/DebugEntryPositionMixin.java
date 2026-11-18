@@ -5,8 +5,8 @@ import com.inf.farlands.client.debug.SsaFileLabel;
 import com.inf.farlands.serialize.SectionIO;
 import com.inf.farlands.util.pos.ExactPosition;
 import com.inf.farlands.util.world.WorldBounds;
-import com.inf.long2.binaries.binary1280.Binary1280;
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.binaries.binary1280.Binary1280;
+import love.crysh.long2.ints.Int1024;
 
 import java.util.ArrayList;
 import java.util.List;

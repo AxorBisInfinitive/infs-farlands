@@ -1,6 +1,6 @@
 package com.inf.farlands.mixin.fix.xyz;
 
-import com.inf.long2.binaries.binary1280.Binary1280;
+import love.crysh.long2.binaries.binary1280.Binary1280;
 import com.mojang.brigadier.StringReader;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 

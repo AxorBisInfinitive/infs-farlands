@@ -22,7 +22,7 @@ import net.minecraft.world.level.storage.LevelStorageSource;
 
 import com.inf.farlands.InfsFarlands;
 import com.inf.farlands.simulation.model.SimulationConfig;
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 
 /**
  * ssa 异步 IO 层。与 fsa 的 {@code SectionIO} 同形，只服务仿真段。

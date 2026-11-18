@@ -2,7 +2,7 @@ package com.inf.farlands.util.world;
 
 import com.inf.farlands.FarlandsConfig;
 import com.inf.farlands.FarlandsConstant;
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 
 import net.minecraft.world.phys.Vec3;
 

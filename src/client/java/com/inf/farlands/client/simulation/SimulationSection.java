@@ -8,7 +8,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import com.inf.farlands.simulation.model.SimulationSectionData;
 import com.inf.farlands.util.world.WorldBounds;
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.vertex.VertexFormat;
 

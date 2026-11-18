@@ -1,7 +1,7 @@
 package com.inf.farlands.client.mixin.simulation;
 
 import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 import com.mojang.blaze3d.vertex.PoseStack;
 
 import com.inf.farlands.client.render.ExactCameraOrigin;

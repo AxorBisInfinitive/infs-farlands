@@ -1,6 +1,6 @@
 package com.inf.farlands.util.window;
 
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;

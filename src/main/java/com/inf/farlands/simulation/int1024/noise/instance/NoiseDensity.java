@@ -2,7 +2,7 @@ package com.inf.farlands.simulation.int1024.noise.instance;
 
 import com.inf.farlands.simulation.int1024.noise.Density;
 import com.inf.farlands.simulation.int1024.noise.NoiseHolder;
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 
 /**
  * 噪声节点。vanilla 的 {@code DensityFunctions.Noise}。

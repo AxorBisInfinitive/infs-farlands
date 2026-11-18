@@ -5,10 +5,10 @@ import java.util.List;
 
 import com.inf.farlands.InfsFarlands;
 import com.inf.farlands.util.pos.ExactPosition;
-import com.inf.long2.binaries.binary1280.Binary1280;
-import com.inf.long2.binaries.binary256.Binary256;
-import com.inf.long2.ints.Int1024;
-import com.inf.long2.ints.Int256;
+import love.crysh.long2.binaries.binary1280.Binary1280;
+import love.crysh.long2.binaries.binary256.Binary256;
+import love.crysh.long2.ints.Int1024;
+import love.crysh.long2.ints.Int256;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.debug.DebugScreenDisplayer;
@@ -139,7 +139,7 @@ public class PositionUnitsDebugEntry implements DebugScreenEntry {
     }
 
     /** {@code Int<?>} 一族共用一条：边界值经 {@code of(Int<?>)} 精确转换，比较留在 Binary1280 域内。 */
-    private static String farlands$state(Binary1280 value, com.inf.long2.Int<?> min, com.inf.long2.Int<?> max) {
+    private static String farlands$state(Binary1280 value, love.crysh.long2.Int<?> min, love.crysh.long2.Int<?> max) {
         if (value.compareTo(Binary1280.of(max)) > 0 || value.compareTo(Binary1280.of(min)) < 0) {
             return DebugEntryColors.colored(DebugEntryColors.Shade.RISK, OVERFLOWED);
         }

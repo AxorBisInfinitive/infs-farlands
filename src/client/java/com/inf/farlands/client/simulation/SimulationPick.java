@@ -1,6 +1,6 @@
 package com.inf.farlands.client.simulation;
 
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 import com.inf.farlands.util.pos.ExactPosition;
 
 import net.minecraft.core.BlockPos;

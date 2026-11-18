@@ -19,7 +19,7 @@ import com.inf.farlands.simulation.model.SimulationSectionStage;
 import com.inf.farlands.simulation.model.SimulationStore;
 import com.inf.farlands.util.pos.ExactPosition;
 import com.inf.farlands.util.world.WorldBounds;
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 
 import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
 import net.minecraft.resources.ResourceKey;

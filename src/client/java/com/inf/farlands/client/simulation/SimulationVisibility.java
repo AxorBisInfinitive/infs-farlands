@@ -12,7 +12,7 @@ import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 
 import com.inf.farlands.client.render.AnchoredFrustum;
 import com.inf.farlands.util.world.WorldBounds;
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;

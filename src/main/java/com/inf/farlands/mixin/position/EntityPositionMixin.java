@@ -5,8 +5,8 @@ import com.inf.farlands.util.pos.ExactCollisionSource;
 import com.inf.farlands.util.pos.ExactDoubles;
 import com.inf.farlands.util.pos.ExactPosition;
 import com.inf.farlands.util.pos.ExactTeleport;
-import com.inf.long2.binaries.binary1280.Binary1280;
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.binaries.binary1280.Binary1280;
+import love.crysh.long2.ints.Int1024;
 
 import java.util.List;
 import java.util.Set;

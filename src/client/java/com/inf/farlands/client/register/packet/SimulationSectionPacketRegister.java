@@ -6,7 +6,7 @@ import com.inf.farlands.client.simulation.SimulationHolder;
 import com.inf.farlands.network.expand.y.ChunkDataPacket;
 import com.inf.farlands.network.simulation.SimulationSectionPacket;
 import com.inf.farlands.simulation.model.SimulationSectionKey;
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 
 import io.netty.buffer.Unpooled;
 import net.minecraft.client.Minecraft;

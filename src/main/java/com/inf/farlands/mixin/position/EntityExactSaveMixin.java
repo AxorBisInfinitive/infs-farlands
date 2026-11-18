@@ -4,7 +4,7 @@ import java.util.Optional;
 
 import com.inf.farlands.util.pos.ExactPosition;
 
-import com.inf.long2.binaries.binary1280.Binary1280;
+import love.crysh.long2.binaries.binary1280.Binary1280;
 
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.storage.ValueInput;

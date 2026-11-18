@@ -1,7 +1,7 @@
 package com.inf.farlands.util.pos;
 
-import com.inf.long2.binaries.binary1280.Binary1280;
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.binaries.binary1280.Binary1280;
+import love.crysh.long2.ints.Int1024;
 
 import net.minecraft.world.phys.AABB;
 

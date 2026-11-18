@@ -2,7 +2,7 @@ package com.inf.farlands.simulation.model;
 
 import java.util.Objects;
 
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 
 /**
  * 模拟段的键：三轴段坐标。

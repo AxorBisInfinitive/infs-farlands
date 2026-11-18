@@ -2,7 +2,7 @@ package com.inf.farlands.network.position;
 
 import com.inf.farlands.InfsFarlands;
 
-import com.inf.long2.binaries.binary1280.Binary1280;
+import love.crysh.long2.binaries.binary1280.Binary1280;
 
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;

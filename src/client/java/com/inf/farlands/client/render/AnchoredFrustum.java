@@ -1,6 +1,6 @@
 package com.inf.farlands.client.render;
 
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 
 /**
  * 暴露 {@code Frustum} 的相机锚点，供拷贝时同步。

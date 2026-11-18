@@ -1,7 +1,7 @@
 package com.inf.farlands.client.simulation;
 
 import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;

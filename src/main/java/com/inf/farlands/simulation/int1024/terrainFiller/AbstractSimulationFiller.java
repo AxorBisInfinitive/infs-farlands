@@ -17,7 +17,7 @@ import com.inf.farlands.simulation.int1024.util.SectionBox;
 import com.inf.farlands.simulation.int1024.util.Sink;
 import com.inf.farlands.simulation.model.SimulationSectionData;
 import com.inf.farlands.simulation.model.SimulationSectionKey;
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Blocks;

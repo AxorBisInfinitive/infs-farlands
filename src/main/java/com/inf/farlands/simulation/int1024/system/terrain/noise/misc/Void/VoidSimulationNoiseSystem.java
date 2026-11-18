@@ -12,7 +12,7 @@ import com.inf.farlands.simulation.int1024.noise.instance.Constant;
 import com.inf.farlands.terrain.registry.SystemArgs;
 import com.inf.farlands.terrain.registry.SystemDefaultParams;
 import com.inf.farlands.terrain.registry.SystemParams;
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;

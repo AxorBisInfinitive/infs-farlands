@@ -2,7 +2,7 @@ package com.inf.farlands.simulation.int1024.noise;
 
 import com.inf.farlands.simulation.int1024.util.SectionBox;
 import com.inf.farlands.simulation.int1024.util.Sink;
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 
 import net.minecraft.util.Mth;
 

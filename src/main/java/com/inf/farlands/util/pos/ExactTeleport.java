@@ -1,6 +1,6 @@
 package com.inf.farlands.util.pos;
 
-import com.inf.long2.binaries.binary1280.Binary1280;
+import love.crysh.long2.binaries.binary1280.Binary1280;
 
 /**
  * 命令层到传送层的精确目标侧通道。

@@ -1,6 +1,6 @@
 package com.inf.farlands.simulation.int1024.util;
 
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 
 /**
  * 一格的输出，坐标是绝对方块坐标。

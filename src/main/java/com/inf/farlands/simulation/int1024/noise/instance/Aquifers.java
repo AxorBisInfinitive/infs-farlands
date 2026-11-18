@@ -2,7 +2,7 @@ package com.inf.farlands.simulation.int1024.noise.instance;
 
 import com.inf.farlands.simulation.int1024.noise.Aquifer;
 import com.inf.farlands.simulation.int1024.noise.FluidPicker;
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 
 import net.minecraft.world.level.block.state.BlockState;
 

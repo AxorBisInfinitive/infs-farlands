@@ -1,6 +1,6 @@
 package com.inf.farlands.client.simulation;
 
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 import java.util.List;
 
 import net.minecraft.client.Minecraft;

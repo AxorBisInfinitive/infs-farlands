@@ -1,6 +1,6 @@
 package com.inf.farlands.util.pos;
 
-import com.inf.long2.binaries.binary1280.Binary1280;
+import love.crysh.long2.binaries.binary1280.Binary1280;
 
 /**
  * 旧位置六轴的 1280 位读写，供各实体类的 FIELD 注入共用同一形状。

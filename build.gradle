@@ -19,13 +19,7 @@ repositories {
 			includeGroup "maven.modrinth"
 		}
 	}
-	maven {
-		name = "Long2"
-		url = "https://axorbisinfinitive.github.io/Long2/maven/"
-		content {
-			includeGroup "com.inf.long2"
-		}
-	}
+	mavenCentral()
 	maven {
 		name = "Config"
 		url = "https://axorbisinfinitive.github.io/Config/maven/"
@@ -62,10 +56,10 @@ dependencies {
 	compileOnly "io.github.llamalad7:mixinextras-fabric:0.5.4"
 	annotationProcessor "io.github.llamalad7:mixinextras-fabric:0.5.4"
 
-	// Long2: 0.1.1
-	compileOnly "com.inf.long2:Long2:${project.long2_version}"
-	localRuntime "com.inf.long2:Long2:${project.long2_version}"
-	include "com.inf.long2:Long2:${project.long2_version}"
+	// Long2: 0.2.2，Maven Central
+	compileOnly "love.crysh.long2:Long2:${project.long2_version}"
+	localRuntime "love.crysh.long2:Long2:${project.long2_version}"
+	include "love.crysh.long2:Long2:${project.long2_version}"
 
 	// Config: 0.1.0
 	compileOnly "com.inf.config:Config:${project.config_version}"

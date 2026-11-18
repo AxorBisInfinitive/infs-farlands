@@ -18,7 +18,7 @@ import com.mojang.blaze3d.vertex.VertexFormat;
 
 import com.inf.farlands.client.render.AnchoredFrustum;
 import com.inf.farlands.client.render.FrameMath;
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 import com.inf.farlands.client.render.ExactCameraOrigin;
 import com.inf.farlands.client.simulation.Simulation;
 import com.inf.farlands.client.simulation.SimulationHolder;

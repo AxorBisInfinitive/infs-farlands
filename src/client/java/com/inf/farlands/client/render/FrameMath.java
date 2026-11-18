@@ -1,6 +1,6 @@
 package com.inf.farlands.client.render;
 
-import com.inf.long2.ints.Int1024;
+import love.crysh.long2.ints.Int1024;
 
 /**
  * 帧差：两个位置各拆成「锚点 1024 位整数与局部 double」，差值只在同源的两段上做一次。
