@@ -9,6 +9,7 @@
     "debug.DebugScreenEntriesMixin",
     "debug.DebugScreenOverlayMixin",
     "debug.renderer.ChunkBorderRendererMixin",
+    "debug.renderer.DrawableGizmoPrimitivesMixin",
     "debug.tool.clamp.EntityPickMixin",
     "debug.tool.clamp.KeyboardHandlerMixin",
     "debug.tool.clamp.LevelRendererMixin",
