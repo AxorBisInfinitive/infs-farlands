@@ -24,6 +24,24 @@ public class SimulationConfig {
             Map.of("en_us", "Inf's Farlands simulation configuration",
                     "zh_cn", "Inf's Farlands 模拟配置"));
 
+    /**
+     * 模拟层的总开关，默认关闭。
+     *
+     * <p>
+     * 关时服务端不建段、不落盘、不发段包，客户端不装段、不烘焙、不绘制、不并碰撞、不拾取；坐标改写与调试屏幕不受它
+     * 管。服务端与客户端各读自己进程的这份文件，两端不一致时两端都不出现模拟内容。段包的解码发生在网络线程的分发
+     * 之前，关闭只拦落表，不减少下行流量。
+     *
+     * <p>
+     * 与其他条目同一口径：只在 {@link Config#init()} 读一次，改值需重启。
+     */
+    public static final ConfigEntry<Boolean> ENABLE_SIMULATION = CONFIG.setBoolean("enableSimulation")
+            .comment("en_us", "Enable the Simulationlands layer on both server and client")
+            .comment("zh_cn", "是否启用模拟之地，服务端与客户端同时受控")
+            .define(false)
+            .build();
+    public static final boolean enableSimulation;
+
     /** 位置含 NaN 时的噪点覆盖层开关。 */
     public static final ConfigEntry<Boolean> NAN_STATIC_OVERLAY = CONFIG.setBoolean("nanStaticOverlay")
             .comment("en_us", "Draw the static noise overlay while any position axis is NaN")
@@ -69,6 +87,7 @@ public class SimulationConfig {
 
     static {
         CONFIG.init();
+        enableSimulation = ENABLE_SIMULATION.get();
         nanStaticOverlay = NAN_STATIC_OVERLAY.get();
         ssaCacheLimit = SSA_CACHE_LIMIT.get();
         ssaPersistInterval = SSA_PERSIST_INTERVAL.get();

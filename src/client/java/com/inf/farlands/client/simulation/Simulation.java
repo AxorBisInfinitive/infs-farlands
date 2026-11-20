@@ -10,6 +10,7 @@ import java.util.Set;
 
 import com.inf.farlands.client.render.AnchoredFrustum;
 import com.inf.farlands.client.render.simulation.SimulationGeometry;
+import com.inf.farlands.simulation.model.SimulationConfig;
 import com.inf.farlands.simulation.model.SimulationSectionKey;
 import com.inf.farlands.util.pos.ExactPosition;
 import com.mojang.blaze3d.vertex.VertexSorting;
@@ -299,8 +300,14 @@ public final class Simulation {
      * <p>
      * 绑定与解绑不在这里：段集合完全由服务端的包驱动。烘制在工作线程上进行，这里只剩快照、提交与上传三件事，
      * 上传占的是显存侧那点时间，不再是整段遮蔽计算。
+     *
+     * <p>
+     * 总开关关时整个 tick 不做事：段表由包处理那一侧挡住，因此不存在待烘与待发布的内容。
      */
     public void tickSimulation() {
+        if (!SimulationConfig.enableSimulation) {
+            return;
+        }
         this.farlands$drainCompleted();
         net.minecraft.world.entity.player.Player player = net.minecraft.client.Minecraft.getInstance().player;
         if (player == null) {

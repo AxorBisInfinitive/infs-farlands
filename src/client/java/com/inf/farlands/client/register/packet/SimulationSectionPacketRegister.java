@@ -5,6 +5,7 @@ import com.inf.farlands.client.simulation.Simulation;
 import com.inf.farlands.client.simulation.SimulationHolder;
 import com.inf.farlands.network.expand.y.ChunkDataPacket;
 import com.inf.farlands.network.simulation.SimulationSectionPacket;
+import com.inf.farlands.simulation.model.SimulationConfig;
 import com.inf.farlands.simulation.model.SimulationSectionKey;
 import love.crysh.long2.ints.Int1024;
 
@@ -32,6 +33,10 @@ public final class SimulationSectionPacketRegister {
 
     public static void registerHandler() {
         ClientPacketHandlers.register(SimulationSectionPacket.TYPE, (payload, context) -> {
+            // 总开关关时直接丢包：客户端段表不建，下游的渲染、碰撞与拾取因此都是空操作。
+            if (!SimulationConfig.enableSimulation) {
+                return;
+            }
             Minecraft minecraft = Minecraft.getInstance();
             ClientLevel level = minecraft.level;
             if (level == null) {

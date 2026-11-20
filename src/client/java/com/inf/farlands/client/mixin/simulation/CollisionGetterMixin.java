@@ -12,6 +12,7 @@ import com.inf.farlands.client.simulation.Simulation;
 import com.inf.farlands.client.simulation.SimulationBlock;
 import com.inf.farlands.client.simulation.SimulationHolder;
 import com.inf.farlands.client.simulation.SimulationSection;
+import com.inf.farlands.simulation.model.SimulationConfig;
 import com.inf.farlands.util.pos.ExactCollisionSource;
 import com.inf.farlands.util.pos.ExactPosition;
 
@@ -79,10 +80,19 @@ public interface CollisionGetterMixin extends ExactCollisionSource {
         cir.setReturnValue(Iterables.concat(cir.getReturnValue(), frameHits));
     }
 
-    /** 模拟块的碰撞形状，坐标与入参盒同帧。 */
+    /**
+     * 模拟块的碰撞形状，坐标与入参盒同帧。
+     *
+     * <p>
+     * 总开关关时直接给空表：本方法是两条入口的共同下游，一处挡住即覆盖
+     * {@code getBlockCollisions} 的注入与 {@code Entity.collectColliders} 的直接调用。
+     */
     @Override
     default List<VoxelShape> farlands$frameCollisions(Entity source, AABB box) {
         if (!((Object) this instanceof Level level && level.isClientSide())) {
+            return List.of();
+        }
+        if (!SimulationConfig.enableSimulation) {
             return List.of();
         }
         Simulation simulation = ((SimulationHolder) Minecraft.getInstance()).simulation();

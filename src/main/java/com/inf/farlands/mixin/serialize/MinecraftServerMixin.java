@@ -18,6 +18,7 @@ import com.inf.farlands.terrain.pipeline.NeighborhoodTickets;
 import com.inf.farlands.simulation.SimulationLifecycle;
 import com.inf.farlands.simulation.SimulationLevels;
 import com.inf.farlands.simulation.SimulationServer;
+import com.inf.farlands.simulation.model.SimulationConfig;
 import com.inf.farlands.simulation.model.SimulationStore;
 import com.inf.farlands.simulation.serialize.SimulationIO;
 import com.inf.farlands.simulation.terrain.SimulationPool;
@@ -58,8 +59,11 @@ public abstract class MinecraftServerMixin {
             SectionIO.drainMainThreadTasks(server);
             GenQueue.awaitIdle(server, 5000);
             // 仿真段与 fsa 没有数据依赖，排在 fsa 的同步刷盘之前，只为让「等在途」与「刷自己的盘」相邻。
-            SimulationPool.awaitIdle(server, 5000);
-            SimulationLifecycle.shutdownSyncFlush(server);
+            // 总开关关时这两行整段跳过：ssa 的 IO 类因此也不会被初始化。
+            if (SimulationConfig.enableSimulation) {
+                SimulationPool.awaitIdle(server, 5000);
+                SimulationLifecycle.shutdownSyncFlush(server);
+            }
             SectionLifecycle.shutdownSyncFlush(server);
         } catch (Exception e) {
             InfsFarlands.LOGGER.error("farlands: fsa shutdown flush failed", e);

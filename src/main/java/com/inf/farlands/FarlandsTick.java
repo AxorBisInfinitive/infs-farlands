@@ -214,13 +214,15 @@ public class FarlandsTick {
             SectionIO.flushAllOffsetTables();
         }
         // 模拟段的周期落盘。与窗口清理同理，是崩溃与强退的兜底；自成一个间隔，不复用 fsa 那条。
-        if (tickCount % SimulationConfig.ssaPersistInterval == 0) {
+        if (SimulationConfig.enableSimulation && tickCount % SimulationConfig.ssaPersistInterval == 0) {
             SimulationLifecycle.flushAllDirty(server);
         }
         // 窗口差量、窗口外清理与派发，与阻塞等待期共用同一段，顺序与理由见 driveWindowAndTerrain。
         driveWindowAndTerrain(server);
-        // 模拟段的下发：读本 tick 已刷新的窗口与玩家表，所以在窗口驱动之后。
-        SimulationServer.tick(server);
+        // 模拟段的下发：读本 tick 已刷新的窗口与玩家表，所以在窗口驱动之后。总开关关时整条生产链与下发都不启动。
+        if (SimulationConfig.enableSimulation) {
+            SimulationServer.tick(server);
+        }
         // 兼容层的每 tick 钩子，排在所有核心驱动之后：它只驱动本 port 之外的请求方，例如 Chunky 预生成。
         for (Consumer<MinecraftServer> sink : TICK_SINKS) {
             sink.accept(server);

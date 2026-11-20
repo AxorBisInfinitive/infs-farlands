@@ -23,6 +23,7 @@ import com.inf.farlands.client.render.ExactCameraOrigin;
 import com.inf.farlands.client.simulation.Simulation;
 import com.inf.farlands.client.simulation.SimulationHolder;
 import com.inf.farlands.client.simulation.SimulationSection;
+import com.inf.farlands.simulation.model.SimulationConfig;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.DynamicUniformStorage;
@@ -159,9 +160,16 @@ public final class SimulationRenderPass {
      *
      * <p>
      * 必须在没有打开 pass 的时候调。{@code writeUniforms} 内部要 {@code mapBuffer}，pass 打开期间会直接抛。
+     *
+     * <p>
+     * 总开关关时只清批次就返回，且清在判据之前：{@code ChunkSectionsToRenderMixin} 读的正是这个字段，留着上一帧的
+     * 引用会让它继续画已落地的缓冲。
      */
     public void prepare(GpuTextureView atlas, CameraRenderState camera, ExactCameraOrigin origin) {
         this.batch = null;
+        if (!SimulationConfig.enableSimulation) {
+            return;
+        }
         if (atlas == null) {
             return;
         }

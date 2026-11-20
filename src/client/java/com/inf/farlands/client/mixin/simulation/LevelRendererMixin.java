@@ -10,6 +10,7 @@ import com.inf.farlands.client.simulation.Simulation;
 import com.inf.farlands.client.simulation.SimulationHolder;
 import com.inf.farlands.client.simulation.SimulationMesher;
 import com.inf.farlands.client.simulation.SimulationPick;
+import com.inf.farlands.simulation.model.SimulationConfig;
 import com.inf.farlands.util.pos.ExactPosition;
 
 import net.minecraft.client.Camera;
@@ -172,9 +173,15 @@ public class LevelRendererMixin {
      * <p>
      * 锚点取 {@code RETURN} 不取 {@code TAIL}：该方法有三处 return，准星 miss 走的是前面那两处，{@code TAIL}
      * 只对应指令表里最后一个 return，也就是命中方块那一支之后。取 {@code TAIL} 会在唯一需要它的时候不执行。
+     *
+     * <p>
+     * 总开关关时不重算：段表为空时逐格 DDA 仍会走满 reach，每换段还要建一个键。
      */
     @Inject(method = "extractBlockOutline(Lnet/minecraft/client/Camera;Lnet/minecraft/client/renderer/state/level/LevelRenderState;)V", at = @At("RETURN"))
     private void farlands$extractOutline(Camera camera, LevelRenderState state, CallbackInfo ci) {
+        if (!SimulationConfig.enableSimulation) {
+            return;
+        }
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.hitResult instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK) {
             return;
