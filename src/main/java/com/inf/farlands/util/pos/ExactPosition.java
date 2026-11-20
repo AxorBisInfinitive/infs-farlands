@@ -38,6 +38,17 @@ public interface ExactPosition {
 
     int OLD_Z = 8;
 
+    /**
+     * 该轴 1024 位下取整所在段的底面方块坐标，即段号左移四位。
+     *
+     * <p>
+     * 两个消费点都要它：钳制模式的虚拟板要把它减掉锚点得到帧内 Y，虚拟面的选择框要它定格号与面下一格。段号左移不会
+     * 溢出，段号上界 {@code 2^1019-1}，左移四位是 {@code 2^1023-16}。
+     */
+    static Int1024 sectionBottom(ExactPosition position, int axis) {
+        return Int1024.ofFloor(position.farlands$exactValue(axis)).shift(-4).shift(4);
+    }
+
     /** 九槽 1280 位存储，首次调用时建数组。槽位常量见上。 */
     Binary1280[] farlands$exactSlots();
 

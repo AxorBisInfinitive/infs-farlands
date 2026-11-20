@@ -33,6 +33,11 @@ public final class WorldBounds {
 
     private static final Int1024 PLAYABLE_SECTION_MAX = Int1024.of((long) MAX_PLAYABLE_SECTION);
 
+    /** 可玩方块界的 {@link Int1024} 形态，界值与两个 int 常量同源。 */
+    private static final Int1024 PLAYABLE_BLOCK_MIN = Int1024.of((long) MIN_PLAYABLE_BLOCK);
+
+    private static final Int1024 PLAYABLE_BLOCK_MAX = Int1024.of((long) MAX_PLAYABLE_BLOCK);
+
     /** 可表示方块界的 {@link Int1024} 形态，界值与 `inBlockAbsolute(long)` 同源。 */
     private static final Int1024 ABSOLUTE_MIN = Int1024.of((long) ~FarlandsConstant.MAX_BLOCK);
 
@@ -61,6 +66,22 @@ public final class WorldBounds {
      * 判界的调用点一律用它，不要各自写三行 "或"。同一个语义在三处各写一遍，改一处就漏两处。
      */
     public static boolean inBlock(long x, long y, long z) {
+        return inBlock(x) && inBlock(y) && inBlock(z);
+    }
+
+    /**
+     * 方块坐标是否在可玩界内，坐标是 {@link Int1024}。
+     *
+     * <p>
+     * 与 {@link #inBlock(long)} 同界，宽度不同：那一支到 long 为止。1024 域的坐标必须走本方法，不能先转 long 再比：
+     * {@code toLong} 取的是最低一组字的低 64 位，没有范围检查，界外的坐标会被截成某个界内值。
+     */
+    public static boolean inBlock(Int1024 v) {
+        return v.compareTo(PLAYABLE_BLOCK_MIN) >= 0 && v.compareTo(PLAYABLE_BLOCK_MAX) <= 0;
+    }
+
+    /** 三轴方块坐标是否都在可玩界内，任一轴界外即为假。 */
+    public static boolean inBlock(Int1024 x, Int1024 y, Int1024 z) {
         return inBlock(x) && inBlock(y) && inBlock(z);
     }
 

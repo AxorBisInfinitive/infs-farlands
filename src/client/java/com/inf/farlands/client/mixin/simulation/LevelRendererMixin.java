@@ -4,6 +4,7 @@ import com.inf.farlands.client.render.FrameMath;
 import love.crysh.long2.ints.Int1024;
 import com.mojang.blaze3d.vertex.PoseStack;
 
+import com.inf.farlands.client.debug.tool.clamp.VirtualHit;
 import com.inf.farlands.client.render.ExactCameraOrigin;
 import com.inf.farlands.client.render.simulation.SimulationRenderPass;
 import com.inf.farlands.client.simulation.Simulation;
@@ -184,6 +185,10 @@ public class LevelRendererMixin {
         }
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.hitResult instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK) {
+            return;
+        }
+        if (VirtualHit.exactActive()) {
+            // 钳制模式的虚拟面在射程内且落在可玩界外：它独占选择框，模拟块框让位。
             return;
         }
         Entity entity = camera.entity();
