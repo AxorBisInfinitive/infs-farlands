@@ -1,6 +1,9 @@
 package com.inf.farlands.simulation.int1024.terrainFiller;
 
+import java.util.Objects;
+
 import com.inf.farlands.simulation.SimulationLevels;
+import com.inf.farlands.simulation.int1024.SimulationBlockSystem;
 import com.inf.farlands.simulation.int1024.SimulationNoiseSystem;
 import com.inf.farlands.simulation.int1024.SimulationRouting;
 import com.inf.farlands.simulation.int1024.SimulationSectionContext;
@@ -62,8 +65,12 @@ public abstract class AbstractSimulationFiller implements SimulationFiller {
     @Override
     public void fill(ServerLevel level, SimulationSectionKey key, SimulationSectionData data,
             PalettedContainerRO<Holder<Biome>>[] biomes) {
-        // 范式分派照 AbstractTerrainFiller：逐段那一族先认领，认不到再走密度链。
+        // 范式分派照 AbstractTerrainFiller：逐块最先认领，其次逐段，最后密度链。
         SimulationTerrainSystem base = ((SimulationLevels) level).simulationTerrainSystem();
+        if (base instanceof SimulationBlockSystem blocks) {
+            fillByBlocks(key, data, blocks);
+            return;
+        }
         if (base instanceof SimulationSectionSystem sections) {
             sections.fillSection(new SimulationSectionContext(level, key, data.section, key.x().shift(4),
                     key.y().shift(4), key.z().shift(4), biomes));
@@ -92,6 +99,37 @@ public abstract class AbstractSimulationFiller implements SimulationFiller {
             CellSampler.forEach(density, box, cellWidth, cellHeight, sink);
         } else {
             Sampler.forEach(density, box, sink);
+        }
+    }
+
+    /**
+     * 逐块范式的直写路径。
+     *
+     * <p>
+     * 与密度链那条路差四样：不建 {@code NoiseChunk}，不取 {@code Settings} 与 {@code RandomState}，不碰含水层与
+     * {@code Beardifier}，也没有高度图要喂，模拟段所在的 chunk 不存在。坐标取 {@link SectionBox} 预计算的三组，
+     * 逐格不再做加法分配。
+     *
+     * <p>
+     * 空气不写。返回 null 在这里直接抛，不退化成像空气。
+     */
+    private static void fillByBlocks(SimulationSectionKey key, SimulationSectionData data,
+            SimulationBlockSystem system) {
+        SectionBox box = SectionBox.ofSection(key.x(), key.y(), key.z());
+        LevelChunkSection section = data.section;
+        for (int localY = 0; localY < SectionBox.SIZE; localY++) {
+            Int1024 y = box.y(localY);
+            for (int localZ = 0; localZ < SectionBox.SIZE; localZ++) {
+                Int1024 z = box.z(localZ);
+                for (int localX = 0; localX < SectionBox.SIZE; localX++) {
+                    BlockState state = Objects.requireNonNull(system.fillBlock(box.x(localX), y, z),
+                            "farlands: SimulationBlockSystem.fillBlock returned null");
+                    if (state.isAir()) {
+                        continue;
+                    }
+                    section.setBlockState(localX, localY, localZ, state, false);
+                }
+            }
         }
     }
 

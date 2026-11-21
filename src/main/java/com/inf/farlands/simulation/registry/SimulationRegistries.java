@@ -40,6 +40,9 @@ public final class SimulationRegistries {
     /** 逐段范式，一个方块都不写。 */
     public static final SystemId SECTION_VOID = id("simulation_void_section_system");
 
+    /** 逐块范式，每格都是空气。 */
+    public static final SystemId BLOCK_VOID = id("simulation_void_block_system");
+
     /** 恒 the_void，与建段的群系默认同值。 */
     public static final SystemId BIOME_VOID = id("simulation_void_biome_system");
 
