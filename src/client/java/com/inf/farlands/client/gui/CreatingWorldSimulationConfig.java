@@ -107,7 +107,7 @@ public final class CreatingWorldSimulationConfig {
     private static void apply(SimulationData data) {
         for (Map.Entry<Identifier, SimulationData.LevelSelection> entry : data.levels().entrySet()) {
             Identifier page = entry.getKey();
-            apply(page, FamilyKind.TERRAIN, entry.getValue().noise());
+            apply(page, FamilyKind.TERRAIN, entry.getValue().terrain());
             apply(page, FamilyKind.BIOME, entry.getValue().biome());
         }
     }

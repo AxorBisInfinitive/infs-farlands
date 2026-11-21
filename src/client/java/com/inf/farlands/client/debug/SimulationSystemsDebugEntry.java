@@ -70,7 +70,7 @@ public class SimulationSystemsDebugEntry implements DebugScreenEntry {
 
     private static List<String> layout(SimulationData.LevelSelection selection, int limit) {
         List<String> lines = new ArrayList<>();
-        addFamily(lines, limit, "noise", selection.noise());
+        addFamily(lines, limit, "terrain", selection.terrain());
         addFamily(lines, limit, "biome", selection.biome());
         return lines;
     }

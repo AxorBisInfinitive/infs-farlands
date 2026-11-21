@@ -13,7 +13,7 @@ import net.minecraft.world.level.block.state.BlockState;
  * VOID 逐块系统：每格都是空气。
  *
  * <p>
- * 用途是把逐块路径跑起来：地形族选它之后管线走 BIOME 到 NOISE 到 LIGHTED，段里没有方块，所以能单独验「分派认到了
+ * 用途是把逐块路径跑起来：地形族选它之后管线走 BIOME 到 TERRAIN 到 LIGHTED，段里没有方块，所以能单独验「分派认到了
  * 逐块这一支」。它不读坐标也不写方块，是这条路径的最小实现。
  */
 public final class VoidSimulationBlockSystem implements SimulationBlockSystem {

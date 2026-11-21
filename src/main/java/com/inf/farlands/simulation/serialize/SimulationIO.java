@@ -29,8 +29,9 @@ import net.minecraft.world.level.dimension.LevelStem;
  * 本类只提供这一层的编码、两族的默认选择与「还原成界面文本」那一层校验，与 {@code SystemsIO} 逐条对应。
  *
  * <p>
- * 两族在界面上按 {@link FamilyKind} 索引：噪声那一族沿用 terrain 的 {@code TERRAIN} 标签，群系那一族用
+ * 两族在界面上按 {@link FamilyKind} 索引：地形那一族沿用 terrain 的 {@code TERRAIN} 标签，群系那一族用
  * {@code BIOME}。这不是语义借用，那个枚举承担的正是「维度页下第几行」这一个含义，模拟层的两族各占一行。
+ * {@code classOf(FamilyKind.TERRAIN, id)} 查的是整张地形表，三种范式都在里面，族键不等于范式。
  *
  * <p>
  * 缺档案的语义与 farlands 相同。模拟层是新增档案，所以带 ssa、没有本档案的旧世界加载即抛；那是「选择是必需
@@ -63,7 +64,7 @@ public final class SimulationIO {
     public static boolean compatible(Path worldRoot) {
         return FILE.compatible(worldRoot, data -> {
             for (SimulationData.LevelSelection selection : data.levels().values()) {
-                texts(FamilyKind.TERRAIN, selection.noise());
+                texts(FamilyKind.TERRAIN, selection.terrain());
                 texts(FamilyKind.BIOME, selection.biome());
             }
         });

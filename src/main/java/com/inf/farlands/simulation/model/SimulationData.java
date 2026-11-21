@@ -66,11 +66,17 @@ public final class SimulationData extends SavedData {
         return this.levels.get(dimension);
     }
 
-    /** 一个维度的两族选择。两个字段都是必填，缺一即解析失败。 */
-    public record LevelSelection(SystemsData.SystemSelection noise, SystemsData.SystemSelection biome) {
+    /**
+     * 一个维度的两族选择，族键是 {@code terrain} 与 {@code biome}。两个字段都是必填，缺一即解析失败。
+     *
+     * <p>
+     * {@code terrain} 那一格装的是地形族的选择，而地形族有三种范式：密度链、逐段、逐块，具体哪一种由那个系统自己
+     * 实现什么接口决定，不写进档案。所以这个键名指的是族，不是范式。
+     */
+    public record LevelSelection(SystemsData.SystemSelection terrain, SystemsData.SystemSelection biome) {
 
         public static final Codec<LevelSelection> CODEC = RecordCodecBuilder.create(i -> i.group(
-                SystemsData.SystemSelection.CODEC.fieldOf("noise").forGetter(LevelSelection::noise),
+                SystemsData.SystemSelection.CODEC.fieldOf("terrain").forGetter(LevelSelection::terrain),
                 SystemsData.SystemSelection.CODEC.fieldOf("biome").forGetter(LevelSelection::biome))
                 .apply(i, LevelSelection::new));
     }

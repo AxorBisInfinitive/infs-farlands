@@ -49,7 +49,7 @@ import net.minecraft.world.level.chunk.PalettedContainerRO;
  *
  * <p>系统按入参 {@code level} 取，本类不认识当前是哪一个。取数点只有一处，是
  * {@code SimulationLevels.simulationTerrainSystem()}：那边返回基接口，实例由该维度的落盘选择反射新建，与 farlands
- * 的 {@code SystemsHolder} 同一职责；收窄到噪声族在 {@code SimulationRouting.noiseSystem}。
+ * 的 {@code SystemsHolder} 同一职责；密度链那一支收窄到噪声系统在 {@code SimulationRouting.noiseSystem}。
  *
  * <p>跑在 {@code farlands-sim} 上，所以段写入只用五参 {@code setBlockState} 的 {@code false} 一档，不碰阶段、
  * 不碰段表、不标脏，那三件由 {@code SimulationLifecycle} 在主线程做。

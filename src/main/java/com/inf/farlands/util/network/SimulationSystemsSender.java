@@ -48,7 +48,7 @@ public final class SimulationSystemsSender {
                 }
                 SimulationData.LevelSelection selection = SimulationIO.selection(data, dimension.identifier());
                 player.connection.send(new ClientboundCustomPayloadPacket(
-                        new SimulationSystemsPacket(dimension, selection.noise(), selection.biome())));
+                        new SimulationSystemsPacket(dimension, selection.terrain(), selection.biome())));
                 SENT_DIMENSIONS.put(player.getUUID(), dimension);
             }
         }

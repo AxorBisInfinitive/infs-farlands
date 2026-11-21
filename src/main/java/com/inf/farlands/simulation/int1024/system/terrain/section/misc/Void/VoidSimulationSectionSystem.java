@@ -10,7 +10,7 @@ import com.inf.farlands.terrain.registry.SystemParams;
  * VOID 逐段系统：一个方块都不写，整段留空气。
  *
  * <p>
- * 用途是把逐段路径跑起来：地形族选它之后，管线走 BIOME 到 NOISE 到 LIGHTED，段里没有方块、群系仍是 {@code BIOME}
+ * 用途是把逐段路径跑起来：地形族选它之后，管线走 BIOME 到 TERRAIN 到 LIGHTED，段里没有方块、群系仍是 {@code BIOME}
  * 那一档写下的值，因此能单独验「范式分派认到了逐段这一支」「邻域快照被拍下来且槽位可读」两件事，不受密度链干扰。
  *
  * <p>

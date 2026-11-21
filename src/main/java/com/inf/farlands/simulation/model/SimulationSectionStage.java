@@ -4,11 +4,11 @@ package com.inf.farlands.simulation.model;
  * 模拟段的阶段，四档单值，比较用 {@code >=}。
  *
  * <p>
- * 0 UNPROCESSED 段已建，什么都没有；1 BIOME 4x4x4 群系网格已写，方块未定；2 NOISE 方块生产在途或已写完，
+ * 0 UNPROCESSED 段已建，什么都没有；1 BIOME 4x4x4 群系网格已写，方块未定；2 TERRAIN 方块生产在途或已写完，
  * 光照未定；3 LIGHTED 内容已定、统一光照已写，此后不再变。
  *
  * <p>
- * 群系与方块分成两档，档序是 BIOME 在前。理由是依赖方向：NOISE 可以依赖 BIOME，逐段范式要读群系的格值，反过来
+ * 群系与方块分成两档，档序是 BIOME 在前。理由是依赖方向：TERRAIN 可以依赖 BIOME，逐段范式要读群系的格值，反过来
  * 没有这条。成本上的差别是次要的，群系单段便宜，而方块链失败时群系的成果不该一起丢。
  *
  * <p>
@@ -21,7 +21,7 @@ package com.inf.farlands.simulation.model;
  *
  * <p>
  * 档位单调不减，推进走 {@code SimulationSectionData.advanceTo}。失败不升档：群系失败停在 {@code UNPROCESSED}，
- * 方块失败停在 {@code NOISE}，两种都在段离开视距时被丢弃。
+ * 方块失败停在 {@code TERRAIN}，两种都在段离开视距时被丢弃。
  *
  * <p>
  * 档位是持久化值，随每段一起写进 ssa 条目。改这张表等于让旧档失效，而这条失效是安全的、也不需要版本字段：落盘
@@ -36,8 +36,8 @@ public final class SimulationSectionStage {
     /** 群系网格已写，方块未定。 */
     public static final int BIOME = 1;
 
-    /** 方块生产在途或已写完，光照未定。 */
-    public static final int NOISE = 2;
+    /** 方块生产在途或已写完，光照未定。三种范式共用这一档。 */
+    public static final int TERRAIN = 2;
 
     /** 内容已定、统一光照已写，此后不再变。 */
     public static final int LIGHTED = 3;

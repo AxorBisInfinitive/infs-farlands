@@ -11,6 +11,6 @@ public class SimulationSystemsPacketRegister {
         ClientPacketHandlers.register(
                 SimulationSystemsPacket.TYPE,
                 (payload, context) -> ClientSimulationSystems.put(payload.dimension().identifier(),
-                        new SimulationData.LevelSelection(payload.noise(), payload.biome())));
+                        new SimulationData.LevelSelection(payload.terrain(), payload.biome())));
     }
 }

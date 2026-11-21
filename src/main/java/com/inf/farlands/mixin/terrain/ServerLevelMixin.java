@@ -106,8 +106,8 @@ public abstract class ServerLevelMixin implements LevelSystems, SystemsHolder, S
         SimulationData.LevelSelection simulationSelection = SimulationIO.selection(
                 SimulationIO.systemsFor(server), level.dimension().identifier());
         this.farlandsSimulationTerrainSystem = SimulationRegistries.newInstance(
-                new SystemId(simulationSelection.noise().id()),
-                SimulationIO.args(FamilyKind.TERRAIN, simulationSelection.noise()));
+                new SystemId(simulationSelection.terrain().id()),
+                SimulationIO.args(FamilyKind.TERRAIN, simulationSelection.terrain()));
         this.farlandsSimulationBiomeSystem = SimulationRegistries.biome(
                 new SystemId(simulationSelection.biome().id()),
                 SimulationIO.args(FamilyKind.BIOME, simulationSelection.biome()));

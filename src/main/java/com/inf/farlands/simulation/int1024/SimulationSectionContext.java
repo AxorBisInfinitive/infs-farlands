@@ -108,7 +108,7 @@ public record SimulationSectionContext(ServerLevel level, SimulationSectionKey k
      *
      * <p>
      * 段内直接走本段容器；跨一段时走邻槽；超出 27 格或那一格没备，返回 null。本段的群系一定可读，因为档序保证
-     * {@code BIOME} 先于 {@code NOISE}。
+     * {@code BIOME} 先于 {@code TERRAIN}。
      */
     public Holder<Biome> biomeAt(Int1024 quartX, Int1024 quartY, Int1024 quartZ) {
         int dx = farlands$offset(quartX, this.key.x());

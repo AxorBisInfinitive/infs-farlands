@@ -11,7 +11,7 @@ import net.minecraft.world.level.biome.Biome;
  * 模拟层的群系系统，与 terrain 的 {@code BiomeSystem} 同职责。
  *
  * <p>
- * 群系在管线里是上游，不是叶子。先 BIOME 后 NOISE 的档序出自这个方向：NOISE 可以依赖 BIOME，逐段范式通过
+ * 群系在管线里是上游，不是叶子。先 BIOME 后 TERRAIN 的档序出自这个方向：TERRAIN 可以依赖 BIOME，逐段范式通过
  * {@code SimulationSectionContext.biomeAt} 读群系的格值，反过来没有这条依赖。密度链现在读不到，因为本族的接口
  * 面只给 {@code Router} 与 {@code Settings}，拿不到段容器。
  *

@@ -377,36 +377,37 @@ public final class SimulationLifecycle {
             return;
         }
         data.advanceTo(SimulationSectionStage.BIOME);
-        produceNoise(level, key, data);
+        produceTerrain(level, key, data);
     }
 
     /**
-     * 把方块生产交给池，入池那一刻把档位推到 {@code NOISE}。
+     * 把方块生产交给池，入池那一刻把档位推到 {@code TERRAIN}。
      *
      * <p>
-     * 置档在入池处，与拆分之前同义：在途的段就是 {@code NOISE}。提交被拒时摘掉这一格，与群系那一步同规。
+     * 置档在入池处，与拆分之前同义：在途的段就是 {@code TERRAIN}。三种范式共用这一档，走哪一支由填充器分派。
+     * 提交被拒时摘掉这一格，与群系那一步同规。
      */
-    private static void produceNoise(ServerLevel level, SimulationSectionKey key, SimulationSectionData data) {
-        data.advanceTo(SimulationSectionStage.NOISE);
+    private static void produceTerrain(ServerLevel level, SimulationSectionKey key, SimulationSectionData data) {
+        data.advanceTo(SimulationSectionStage.TERRAIN);
         // 邻域快照必须在主线程拍：段表是普通 map。不是逐段范式时它是 null，密度链那一支不看。
         var biomes = SimulationSectionContext.snapshot(level, key);
         boolean submitted = SimulationPool.submitProduction(level,
                 new SimulationTerrainTask(level, key, data, biomes, FILLER),
-                success -> finishNoise(level, key, data, success));
+                success -> finishTerrain(level, key, data, success));
         if (!submitted) {
             SimulationStore.removeIfSame(level.dimension(), key, data);
         }
     }
 
     /**
-     * 方块生产收尾，主线程。失败不升档，段停在 {@code NOISE}，等它离开视距时由 {@link #release} 丢弃。
+     * 方块生产收尾，主线程。失败不升档，段停在 {@code TERRAIN}，等它离开视距时由 {@link #release} 丢弃。
      *
      * <p>
      * 顺序是契约：判线程、判身份、写光、升档、置落盘位与待下发登记。判线程在前，理由与 {@link #finishBiomes}
      * 同一条；判身份在写光之前，否则会往已经被替换掉的旧对象上白写一份；写光在升档之前，因为唯一读光的两处都以
      * 终态为前置，反过来就会漏出「已终态而光是空的」的窗口。
      */
-    private static void finishNoise(ServerLevel level, SimulationSectionKey key, SimulationSectionData data,
+    private static void finishTerrain(ServerLevel level, SimulationSectionKey key, SimulationSectionData data,
             boolean success) {
         if (!success) {
             return;
