@@ -96,12 +96,18 @@ public final class SimulationSectionIO {
 
     // ---- 路径 ----
 
+    /** 维度目录下存放 ssa 的目录名。 */
+    public static final String SSA_DIR = "ssa";
+
+    /** ssa 文件扩展名。 */
+    public static final String SSA_EXTENSION = ".ssa";
+
     @SuppressWarnings("resource")
     static Path dimensionDir(ServerLevel level) {
         try {
             LevelStorageSource.LevelStorageAccess access = (LevelStorageSource.LevelStorageAccess) F_STORAGE_SOURCE
                     .get(level.getServer());
-            return access.getDimensionPath(level.dimension()).resolve("ssa");
+            return access.getDimensionPath(level.dimension()).resolve(SSA_DIR);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -149,7 +155,7 @@ public final class SimulationSectionIO {
 
     /** ssa 文件名：编号来自映射表，恒 26 个字符。 */
     public static String fileName(String id) {
-        return "s." + id + ".ssa";
+        return "s." + id + SSA_EXTENSION;
     }
 
     /**

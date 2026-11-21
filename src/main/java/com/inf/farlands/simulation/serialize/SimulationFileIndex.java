@@ -18,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Stream;
 
 import net.jpountz.lz4.LZ4BlockInputStream;
 import net.jpountz.lz4.LZ4BlockOutputStream;
@@ -236,6 +237,78 @@ public final class SimulationFileIndex {
     /** 停服清掉缓存，下一个世界重新读表。 */
     public static void clearWorldState() {
         INSTANCES.clear();
+    }
+
+    /**
+     * 该世界全部维度的 ssa 映射是否都能用，供世界列表的兼容性判据用。
+     *
+     * <p>
+     * 维度目录按 vanilla 的 {@code DimensionType.getStorageFolder} 枚举，即 {@code <world>/dimensions/<ns>/<path>}，
+     * 本版本连主世界也落在这个形状里，世界根下没有 {@code ssa} 目录。
+     *
+     * <p>
+     * 只读不写：不注册进 {@code INSTANCES}，那是服务端主线程的状态。列举失败按不可用处理，与「读不动就当有数据」
+     * 同一个保守方向。
+     */
+    public static boolean worldCompatible(Path worldRoot) {
+        Path dimensions = worldRoot.resolve("dimensions");
+        if (!Files.isDirectory(dimensions)) {
+            return true;
+        }
+        try (Stream<Path> namespaces = Files.list(dimensions)) {
+            for (Path namespace : namespaces.toList()) {
+                if (!Files.isDirectory(namespace)) {
+                    continue;
+                }
+                try (Stream<Path> paths = Files.list(namespace)) {
+                    for (Path dimension : paths.toList()) {
+                        if (Files.isDirectory(dimension) && !dimensionCompatible(dimension)) {
+                            return false;
+                        }
+                    }
+                }
+            }
+        } catch (IOException e) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * 该维度目录下的 ssa 映射是否可用。
+     *
+     * <p>
+     * 分支顺序与 {@link #load} 同源：先看 {@code mapping.dat} 在不在，在就严格读，读不过才是不兼容；不在时旧格式的
+     * {@code mapping.json} 与孤儿段文件各判一档。顺序不能反：两个文件同时存在时运行期读的是 {@code mapping.dat}，
+     * 反过来会把一个能打开的世界标成不兼容。
+     */
+    public static boolean dimensionCompatible(Path dimensionDir) {
+        Path ssa = dimensionDir.resolve(SimulationSectionIO.SSA_DIR);
+        if (!Files.isDirectory(ssa)) {
+            return true;
+        }
+        if (!Files.exists(ssa.resolve(FILE_NAME))) {
+            if (Files.exists(ssa.resolve(LEGACY_FILE_NAME))) {
+                return false;
+            }
+            return !hasSectionFiles(ssa);
+        }
+        try {
+            load(ssa);
+            return true;
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    /** 该目录里有没有段文件。列不动时按有数据处理，交给不兼容那一支。 */
+    private static boolean hasSectionFiles(Path ssa) {
+        try (Stream<Path> listing = Files.list(ssa)) {
+            return listing.anyMatch(path -> path.getFileName().toString()
+                    .endsWith(SimulationSectionIO.SSA_EXTENSION));
+        } catch (IOException e) {
+            return true;
+        }
     }
 
     /**

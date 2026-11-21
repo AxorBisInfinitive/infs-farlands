@@ -3,6 +3,7 @@ package com.inf.farlands.client.mixin.worldselection;
 import java.nio.file.Path;
 
 import com.inf.farlands.client.gui.SelectionCompat;
+import com.inf.farlands.simulation.serialize.SimulationFileIndex;
 import com.inf.farlands.simulation.serialize.SimulationIO;
 import com.inf.farlands.terrain.registry.SystemsIO;
 
@@ -57,10 +58,18 @@ public abstract class LevelSummaryMixin implements SelectionCompat {
     @Unique
     private boolean farlands$simulationIncompatible;
 
+    /** 该世界的模拟 Section 映射不可用：旧格式、读不出来，或段文件在而表不在。 */
+    @Unique
+    private boolean farlands$mappingIncompatible;
+
     /** 模拟层那段红字的键。 */
     @Unique
     private static final String SIMULATION_INCOMPATIBLE_KEY =
             "selectWorld.infs-farlands.incompatible.simulation";
+
+    /** 模拟 Section 映射那段红字的键。 */
+    @Unique
+    private static final String MAPPING_INCOMPATIBLE_KEY = "selectWorld.infs-farlands.incompatible.mapping";
 
     /**
      * 构造末尾探测一次。此处 {@code icon} 已赋值，而 {@code isDisabled} 与 {@code getInfo} 都在构造之后
@@ -76,21 +85,26 @@ public abstract class LevelSummaryMixin implements SelectionCompat {
         // 这与 resolve 在加载时抛是同一件事的两个表现。
         this.farlands$simulationIncompatible = worldRoot != null
                 && !SimulationIO.compatible(worldRoot);
+        // 映射表按维度落盘，所以这里走整世界的维度枚举。判据与总开关无关：开关关着时读表那一步不会发生，但
+        // 表本身不可用是盘上的事实，照标。
+        this.farlands$mappingIncompatible = worldRoot != null
+                && !SimulationFileIndex.worldCompatible(worldRoot);
     }
 
     @Inject(method = "isDisabled", at = @At("RETURN"), cancellable = true)
     private void farlands$disableIncompatible(CallbackInfoReturnable<Boolean> cir) {
-        if (this.farlands$systemsIncompatible || this.farlands$simulationIncompatible) {
+        if (this.farlands$systemsIncompatible || this.farlands$simulationIncompatible
+                || this.farlands$mappingIncompatible) {
             cir.setReturnValue(true);
         }
     }
 
     /**
-     * 两层各追加一段红字，顺序固定为 farlands 在前。
+     * 三层各追加一段红字，顺序固定为 farlands、模拟配置、模拟 Section 映射。
      *
      * <p>
-     * 两段必须在同一个注入器里顺序追加：两个 {@code @Inject} 在同一 RETURN 处的执行顺序不保证，而第二段
-     * 要基于第一段的结果。
+     * 三段必须在同一个注入器里顺序追加：两个 {@code @Inject} 在同一 RETURN 处的执行顺序不保证，而后一段
+     * 要基于前一段的结果。
      */
     @Inject(method = "getInfo", at = @At("RETURN"), cancellable = true)
     private void farlands$markInfo(CallbackInfoReturnable<Component> cir) {
@@ -103,6 +117,10 @@ public abstract class LevelSummaryMixin implements SelectionCompat {
             info = info.copy().append(CommonComponents.SPACE)
                     .append(Component.translatable(SIMULATION_INCOMPATIBLE_KEY).withStyle(ChatFormatting.RED));
         }
+        if (this.farlands$mappingIncompatible) {
+            info = info.copy().append(CommonComponents.SPACE)
+                    .append(Component.translatable(MAPPING_INCOMPATIBLE_KEY).withStyle(ChatFormatting.RED));
+        }
         cir.setReturnValue(info);
     }
 
@@ -114,5 +132,10 @@ public abstract class LevelSummaryMixin implements SelectionCompat {
     @Override
     public boolean simulationIncompatible() {
         return this.farlands$simulationIncompatible;
+    }
+
+    @Override
+    public boolean mappingIncompatible() {
+        return this.farlands$mappingIncompatible;
     }
 }

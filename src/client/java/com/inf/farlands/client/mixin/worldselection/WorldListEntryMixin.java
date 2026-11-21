@@ -28,6 +28,7 @@ public class WorldListEntryMixin {
     @Redirect(method = "extractContent(Lnet/minecraft/client/gui/GuiGraphicsExtractor;IIZF)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/storage/LevelSummary;isCompatible()Z"))
     private boolean farlands$iconIncompatible(LevelSummary summary) {
         SelectionCompat compat = (SelectionCompat) summary;
-        return summary.isCompatible() && !compat.systemsIncompatible() && !compat.simulationIncompatible();
+        return summary.isCompatible() && !compat.systemsIncompatible() && !compat.simulationIncompatible()
+                && !compat.mappingIncompatible();
     }
 }

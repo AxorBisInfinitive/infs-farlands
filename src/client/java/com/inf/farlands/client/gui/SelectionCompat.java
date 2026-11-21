@@ -19,4 +19,12 @@ public interface SelectionCompat {
 
     /** 该世界的 simulation.dat 存在但读不出来。文件不存在不算。 */
     boolean simulationIncompatible();
+
+    /**
+     * 该世界的模拟 Section 映射不可用：任一维度的 ssa 表是旧格式、读不出来，或段文件在而表不在。
+     *
+     * <p>
+     * 与总开关无关：判据照样跑，即使 {@code enableSimulation} 关着时那一步读表不会发生。
+     */
+    boolean mappingIncompatible();
 }
