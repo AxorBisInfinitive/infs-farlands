@@ -26,6 +26,7 @@
   "commands.infs-farlands.chunky.farlands.band": "Section 预生成范围 %s..%s",
   "commands.infs-farlands.chunky.farlands.minY.range": "minY 必须 <= maxY(%s)，且落在 Section 范围内",
   "commands.infs-farlands.chunky.farlands.maxY.range": "maxY 必须 >= minY(%s)，且落在 Section 范围内",
+  "selectWorld.infs-farlands.incompatible": "不兼容",
   "selectWorld.infs-farlands.incompatible.systems": "不兼容的系统配置",
   "selectWorld.infs-farlands.incompatible.simulation": "不兼容的模拟配置",
   "selectWorld.infs-farlands.incompatible.mapping": "不兼容的模拟 Section 映射",

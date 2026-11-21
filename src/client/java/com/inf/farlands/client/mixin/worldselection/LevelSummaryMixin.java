@@ -41,10 +41,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(LevelSummary.class)
 public abstract class LevelSummaryMixin implements SelectionCompat {
 
-    /** 描述行追加的那段文案的键。 */
-    @Unique
-    private static final String FARLANDS_INCOMPATIBLE_KEY = "selectWorld.infs-farlands.incompatible.systems";
-
     /** 世界目录下的图标路径，构造器入参。它的父目录就是世界根目录。 */
     @Shadow
     @Final
@@ -61,15 +57,6 @@ public abstract class LevelSummaryMixin implements SelectionCompat {
     /** 该世界的模拟 Section 映射不可用：旧格式、读不出来，或段文件在而表不在。 */
     @Unique
     private boolean farlands$mappingIncompatible;
-
-    /** 模拟层那段红字的键。 */
-    @Unique
-    private static final String SIMULATION_INCOMPATIBLE_KEY =
-            "selectWorld.infs-farlands.incompatible.simulation";
-
-    /** 模拟 Section 映射那段红字的键。 */
-    @Unique
-    private static final String MAPPING_INCOMPATIBLE_KEY = "selectWorld.infs-farlands.incompatible.mapping";
 
     /**
      * 构造末尾探测一次。此处 {@code icon} 已赋值，而 {@code isDisabled} 与 {@code getInfo} 都在构造之后
@@ -100,28 +87,21 @@ public abstract class LevelSummaryMixin implements SelectionCompat {
     }
 
     /**
-     * 三层各追加一段红字，顺序固定为 farlands、模拟配置、模拟 Section 映射。
+     * 行内只追加一个短标记，三层细节留给悬浮。
      *
      * <p>
-     * 三段必须在同一个注入器里顺序追加：两个 {@code @Inject} 在同一 RETURN 处的执行顺序不保证，而后一段
-     * 要基于前一段的结果。
+     * 三段曾都在这里追加。行内是单行 {@code StringWidget}，超宽即按宽度截断接省略号，切点落在中文词中间；悬浮那边
+     * 三段中文没有空格，断行器只能硬切。现在行内只要一个「不兼容」，细节由 {@code WorldListEntryMixin} 挂在
+     * tooltip 上，每层一行。
      */
     @Inject(method = "getInfo", at = @At("RETURN"), cancellable = true)
     private void farlands$markInfo(CallbackInfoReturnable<Component> cir) {
-        Component info = cir.getReturnValue();
-        if (this.farlands$systemsIncompatible) {
-            info = info.copy().append(CommonComponents.SPACE)
-                    .append(Component.translatable(FARLANDS_INCOMPATIBLE_KEY).withStyle(ChatFormatting.RED));
+        if (!this.farlands$systemsIncompatible && !this.farlands$simulationIncompatible
+                && !this.farlands$mappingIncompatible) {
+            return;
         }
-        if (this.farlands$simulationIncompatible) {
-            info = info.copy().append(CommonComponents.SPACE)
-                    .append(Component.translatable(SIMULATION_INCOMPATIBLE_KEY).withStyle(ChatFormatting.RED));
-        }
-        if (this.farlands$mappingIncompatible) {
-            info = info.copy().append(CommonComponents.SPACE)
-                    .append(Component.translatable(MAPPING_INCOMPATIBLE_KEY).withStyle(ChatFormatting.RED));
-        }
-        cir.setReturnValue(info);
+        cir.setReturnValue(cir.getReturnValue().copy().append(CommonComponents.SPACE)
+                .append(Component.translatable(SelectionCompat.INCOMPATIBLE_KEY).withStyle(ChatFormatting.RED)));
     }
 
     @Override

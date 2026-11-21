@@ -14,6 +14,18 @@ package com.inf.farlands.client.gui;
  */
 public interface SelectionCompat {
 
+    /** 行内那一个短标记的键。细节不在这里，见下三个键。 */
+    String INCOMPATIBLE_KEY = "selectWorld.infs-farlands.incompatible";
+
+    /** 悬浮里第一层细节的键。 */
+    String SYSTEMS_KEY = "selectWorld.infs-farlands.incompatible.systems";
+
+    /** 悬浮里第二层细节的键。 */
+    String SIMULATION_KEY = "selectWorld.infs-farlands.incompatible.simulation";
+
+    /** 悬浮里第三层细节的键。 */
+    String MAPPING_KEY = "selectWorld.infs-farlands.incompatible.mapping";
+
     /** 该世界的 systems.dat 存在但读不出来。文件不存在不算。 */
     boolean systemsIncompatible();
 
