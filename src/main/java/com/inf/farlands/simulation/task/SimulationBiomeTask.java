@@ -13,7 +13,7 @@ import net.minecraft.server.level.ServerLevel;
  * 一段的群系填充任务，跑在 {@code farlands-sim} 上。
  *
  * <p>
- * 与 {@link SimulationNoiseTask} 同一个规矩：只做纯计算，写自己那一段的容器，不碰段表、不升档、不碰网络。收尾
+ * 与 {@link SimulationTerrainTask} 同一个规矩：只做纯计算，写自己那一段的容器，不碰段表、不升档、不碰网络。收尾
  * 由提交方的回调在主线程做，因为档位推进与段表的读写都要求主线程。
  *
  * <p>

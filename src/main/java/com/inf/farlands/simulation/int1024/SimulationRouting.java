@@ -33,8 +33,8 @@ public final class SimulationRouting {
      *
      * <p>
      * 取用点拿到的类型是基接口 {@link SimulationTerrainSystem}，与 terrain 层 {@code LevelSystems.terrainSystem()}
-     * 的形状一致。登记面只收噪声一族，所以这里是全仓唯一把基接口收窄到 {@link SimulationNoiseSystem} 的地方：
-     * 将来加逐块或逐段范式时，补在填充器的范式分派与这里各一处，缺一处就会在这里响亮失败，不会静默跑错范式。
+     * 的形状一致。登记面收噪声一族，所以这里是把基接口收窄到 {@link SimulationNoiseSystem} 的唯一入口；逐段范式
+     * 在填充器的分派里先认领，走不到这里。缺一处就会在这里响亮失败，不会静默跑错范式。
      */
     public static SimulationNoiseSystem noiseSystem(ServerLevel level) {
         SimulationTerrainSystem system = ((SimulationLevels) level).simulationTerrainSystem();
@@ -46,12 +46,17 @@ public final class SimulationRouting {
     }
 
     /**
-     * 该 level 的噪声系统给出的整条路由。
+     * 该 level 的地形系统给出的整条路由。
      *
      * <p>
      * 每段可能被取两次，群系一次、方块一次。这就是 {@code createRouter} 的调用约定，覆写它的系统按无副作用写。
+     *
+     * <p>
+     * 密度链那一族自己换 {@code finalDensity}；逐段那一族没有密度链，六条气候密度就停在 {@link #BASE} 的占位值上。
+     * 要它交真值，接口面还没有那一处。
      */
     public static Router router(ServerLevel level) {
-        return noiseSystem(level).createRouter(BASE);
+        SimulationTerrainSystem system = ((SimulationLevels) level).simulationTerrainSystem();
+        return system instanceof SimulationNoiseSystem noise ? noise.createRouter(BASE) : BASE;
     }
 }

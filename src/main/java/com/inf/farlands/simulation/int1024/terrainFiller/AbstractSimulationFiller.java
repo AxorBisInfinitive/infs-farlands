@@ -1,7 +1,11 @@
 package com.inf.farlands.simulation.int1024.terrainFiller;
 
+import com.inf.farlands.simulation.SimulationLevels;
 import com.inf.farlands.simulation.int1024.SimulationNoiseSystem;
 import com.inf.farlands.simulation.int1024.SimulationRouting;
+import com.inf.farlands.simulation.int1024.SimulationSectionContext;
+import com.inf.farlands.simulation.int1024.SimulationSectionSystem;
+import com.inf.farlands.simulation.int1024.SimulationTerrainSystem;
 import com.inf.farlands.simulation.int1024.noise.Aquifer;
 import com.inf.farlands.simulation.int1024.noise.CellSampler;
 import com.inf.farlands.simulation.int1024.noise.Density;
@@ -18,10 +22,13 @@ import com.inf.farlands.simulation.model.SimulationSectionData;
 import com.inf.farlands.simulation.model.SimulationSectionKey;
 import love.crysh.long2.ints.Int1024;
 
+import net.minecraft.core.Holder;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.chunk.PalettedContainerRO;
 
 /**
  * 段填充的全部逻辑，与 terrain 的 {@code AbstractTerrainFiller} 同形。
@@ -53,9 +60,16 @@ public abstract class AbstractSimulationFiller implements SimulationFiller {
     }
 
     @Override
-    public void fill(ServerLevel level, SimulationSectionKey key, SimulationSectionData data) {
-        // 取用点拿的是基接口 SimulationTerrainSystem，收窄到噪声族在 SimulationRouting.noiseSystem 一处。
-        // 逐块与逐段两种范式在模拟层还没有实现类，将来加的时候这里照 AbstractTerrainFiller 补 instanceof 分支。
+    public void fill(ServerLevel level, SimulationSectionKey key, SimulationSectionData data,
+            PalettedContainerRO<Holder<Biome>>[] biomes) {
+        // 范式分派照 AbstractTerrainFiller：逐段那一族先认领，认不到再走密度链。
+        SimulationTerrainSystem base = ((SimulationLevels) level).simulationTerrainSystem();
+        if (base instanceof SimulationSectionSystem sections) {
+            sections.fillSection(new SimulationSectionContext(level, key, data.section, key.x().shift(4),
+                    key.y().shift(4), key.z().shift(4), biomes));
+            return;
+        }
+        // 密度链那一支只用得上噪声系统：收窄点收在 SimulationRouting.noiseSystem 一处。
         SimulationNoiseSystem system = SimulationRouting.noiseSystem(level);
         Settings settings = prototypeFor(system).withRange(key.y().shift(4), SectionBox.SIZE);
         Router router = SimulationRouting.router(level);

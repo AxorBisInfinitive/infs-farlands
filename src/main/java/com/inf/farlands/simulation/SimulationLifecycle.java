@@ -12,6 +12,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.PalettedContainerFactory;
 
 import com.inf.farlands.InfsFarlands;
+import com.inf.farlands.simulation.int1024.SimulationSectionContext;
 import com.inf.farlands.simulation.int1024.terrainFiller.SimulationFiller;
 import com.inf.farlands.simulation.int1024.terrainFiller.StandardSimulationFiller;
 import com.inf.farlands.simulation.model.SimulationSectionData;
@@ -23,7 +24,7 @@ import com.inf.farlands.simulation.serialize.SimulationSerializer;
 import com.inf.farlands.simulation.serialize.SimulationStorage;
 import com.inf.farlands.simulation.serialize.SsaMappingException;
 import com.inf.farlands.simulation.task.SimulationBiomeTask;
-import com.inf.farlands.simulation.task.SimulationNoiseTask;
+import com.inf.farlands.simulation.task.SimulationTerrainTask;
 import com.inf.farlands.simulation.task.SimulationPool;
 
 /**
@@ -387,8 +388,10 @@ public final class SimulationLifecycle {
      */
     private static void produceNoise(ServerLevel level, SimulationSectionKey key, SimulationSectionData data) {
         data.advanceTo(SimulationSectionStage.NOISE);
+        // 邻域快照必须在主线程拍：段表是普通 map。不是逐段范式时它是 null，密度链那一支不看。
+        var biomes = SimulationSectionContext.snapshot(level, key);
         boolean submitted = SimulationPool.submitProduction(level,
-                new SimulationNoiseTask(level, key, data, FILLER),
+                new SimulationTerrainTask(level, key, data, biomes, FILLER),
                 success -> finishNoise(level, key, data, success));
         if (!submitted) {
             SimulationStore.removeIfSame(level.dimension(), key, data);

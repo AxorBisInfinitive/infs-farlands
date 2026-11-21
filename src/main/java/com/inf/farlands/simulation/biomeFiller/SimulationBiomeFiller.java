@@ -12,8 +12,8 @@ import net.minecraft.server.level.ServerLevel;
  * 一段的群系写入：按 4x4x4 的 quart 网格问系统要群系，写进段容器。
  *
  * <p>
- * 单独一档而不是并进方块链：群系的单位成本远低于方块，而方块链失败时群系的成果不该跟着丢。两档的推进与收尾都在
- * {@code SimulationLifecycle}，本类只做纯写入。
+ * 单独一档而不是并进方块链：群系是上游，NOISE 与逐段范式都要读它，方块链失败时群系的成果也不该跟着丢。两档的
+ * 推进与收尾都在 {@code SimulationLifecycle}，本类只做纯写入。
  *
  * <p>
  * 空段也写：客户端的群系混合取样会在混合半径内跨段取群系，空段留在 void 上会让贴着它的那一圈方块取到 void 的色。

@@ -63,6 +63,7 @@
   "createWorld.tab.infs-farlands.system.infs-farlands.the_nether_vanilla_decoration_system": "下界",
   "createWorld.tab.infs-farlands.system.infs-farlands.the_end_vanilla_decoration_system": "末地",
   "createWorld.tab.infs-farlands.system.infs-farlands.simulation_void_noise_system": "虚空",
+  "createWorld.tab.infs-farlands.system.infs-farlands.simulation_void_section_system": "虚空 Section",
   "createWorld.tab.infs-farlands.system.infs-farlands.simulation_void_biome_system": "虚空",
   "createWorld.tab.infs-farlands.error.read.title": "系统配置读取失败",
   "createWorld.tab.infs-farlands.error.read.message": "已改用默认值：%s",

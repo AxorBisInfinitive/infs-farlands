@@ -11,8 +11,13 @@ import net.minecraft.world.level.biome.Biome;
  * 模拟层的群系系统，与 terrain 的 {@code BiomeSystem} 同职责。
  *
  * <p>
- * 只有单点问法：批量填由填充器按 4x4x4 的 quart 网格循环调用。模拟层没有 surface 与 carver 那种要读群系的下游，
- * 所以 terrain 那边由 {@code layout} 派生的批量填与 {@code BiomeManager} 这里都不需要。
+ * 群系在管线里是上游，不是叶子。先 BIOME 后 NOISE 的档序出自这个方向：NOISE 可以依赖 BIOME，逐段范式通过
+ * {@code SimulationSectionContext.biomeAt} 读群系的格值，反过来没有这条依赖。密度链现在读不到，因为本族的接口
+ * 面只给 {@code Router} 与 {@code Settings}，拿不到段容器。
+ *
+ * <p>
+ * 本族不给 {@code layout} 与 {@code BiomeManager}：模拟层没有 surface 与 carver 这两个消费者，群系取值也只有段
+ * 容器里那一格一条路，没有按源重算的需要。
  *
  * <p>
  * 气候密度不从本族取：六条密度由 noise 族经 {@link Router} 交出，填充器在填一段时把那一份透传进来。这一条与

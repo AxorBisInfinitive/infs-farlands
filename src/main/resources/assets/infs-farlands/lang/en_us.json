@@ -63,6 +63,7 @@
   "createWorld.tab.infs-farlands.system.infs-farlands.the_nether_vanilla_decoration_system": "Vanilla Nether",
   "createWorld.tab.infs-farlands.system.infs-farlands.the_end_vanilla_decoration_system": "Vanilla End",
   "createWorld.tab.infs-farlands.system.infs-farlands.simulation_void_noise_system": "Void",
+  "createWorld.tab.infs-farlands.system.infs-farlands.simulation_void_section_system": "Void Section",
   "createWorld.tab.infs-farlands.system.infs-farlands.simulation_void_biome_system": "Void",
   "createWorld.tab.infs-farlands.error.read.title": "Failed to read the system config",
   "createWorld.tab.infs-farlands.error.read.message": "Defaults are used instead: %s",

@@ -1,7 +1,7 @@
 package com.inf.farlands.simulation.registry;
 
 import com.inf.farlands.simulation.int1024.SimulationBiomeSystem;
-import com.inf.farlands.simulation.int1024.SimulationNoiseSystem;
+import com.inf.farlands.simulation.int1024.SimulationTerrainSystem;
 import com.inf.farlands.terrain.registry.SystemId;
 
 /**
@@ -16,7 +16,8 @@ public final class SimulationSystems {
     private SimulationSystems() {
     }
 
-    public static void registerNoise(SystemId id, Class<? extends SimulationNoiseSystem> type) {
+    /** 登记一个地形实现类，密度链与逐段两种范式都从这里进；范式之分在填充器的分派里。 */
+    public static void registerTerrain(SystemId id, Class<? extends SimulationTerrainSystem> type) {
         verifyConstructor(id, type);
         SimulationRegistries.register(id, type);
     }
