@@ -14,7 +14,7 @@ import net.minecraft.world.level.Level;
  * 模拟之地的 ssa 文件名取值，供坐标调试面板的 Section Z 行使用。
  *
  * <p>
- * 文件名里的编号来自该维度目录下的 {@code mapping.json}，那份表由服务端独占，类注释写明只在服务端主线程读写。所以
+ * 文件名里的编号来自该维度目录下的 {@code mapping.dat}，那份表由服务端独占，类注释写明只在服务端主线程读写。所以
  * 这里不在渲染线程读它：缓存一个不可变条目，键是维度加区域号；键变了就把条目换成隐藏并跳一次服务端线程去查，查回来
  * 再换。渲染线程因此永远只碰 {@link #cache} 这一个引用。
  *
@@ -71,7 +71,7 @@ public final class SsaFileLabel {
                 String id = SimulationFileIndex.of(level).find(region);
                 text = id == null ? null : SimulationSectionIO.fileName(id);
             } catch (RuntimeException e) {
-                // mapping.json 读失败是服务端自己的口径，面板这一侧只收起文本。
+                // mapping.dat 读失败是服务端自己的口径，面板这一侧只收起文本。
                 text = null;
             }
             cache = new Entry(dimension, region, text);

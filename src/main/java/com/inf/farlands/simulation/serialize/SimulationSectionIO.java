@@ -41,8 +41,8 @@ import love.crysh.long2.ints.Int1024;
  * 先完成再 close。
  *
  * <p>
- * 路径是 {@code <维度目录>/ssa/s.<16 位十六进制>.ssa}。编号不来自坐标，来自同目录的 {@code mapping.json}：
- * 坐标直接编进文件名会随位宽增长，段号拓到 1024 位时一段就三百多位，路径必然越限。映射表与它的四条不变式见
+ * 路径是 {@code <维度目录>/ssa/s.<16 位十六进制>.ssa}。编号不来自坐标，来自同目录的 {@code mapping.dat}：
+ * 坐标直接编进文件名会随位宽增长，段号拓到 1024 位时一段就三百多位，路径必然越限。映射表与它的六条不变式见
  * {@link SimulationFileIndex}。
  *
  * <p>

@@ -1,31 +1,31 @@
 package com.inf.farlands.simulation.serialize;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.regex.Pattern;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
+import net.jpountz.lz4.LZ4BlockInputStream;
+import net.jpountz.lz4.LZ4BlockOutputStream;
 
 import net.minecraft.server.level.ServerLevel;
 
 import com.inf.farlands.InfsFarlands;
 import love.crysh.long2.ints.Int1024;
-import love.crysh.long2.ints.Int1024Strict;
 
 /**
  * ssa 文件名的映射表：三个区域坐标到 16 位小写十六进制编号。
@@ -36,25 +36,33 @@ import love.crysh.long2.ints.Int1024Strict;
  * {@code s.<16 位>.ssa} 恒为 26 个字符，路径总长因此与坐标位宽无关。
  *
  * <p>
- * 表在 {@code <维度目录>/ssa/mapping.json}，一个维度一份，形状是
- * {@code {"mapping": {"<0x…>.<0x…>.<0x…>": "<16 位十六进制>"}}}。key 是区域坐标，不是段号：一个 ssa 文件覆盖
- * 32 乘 32 乘 32 个段，键的粒度必须与文件粒度一致。段号到区域号的换算收在
- * {@code SimulationSectionIO.regionOf} 一处。
+ * 表在 {@code <维度目录>/ssa/mapping.dat}，一个维度一份。格式是二进制，头部 16 字节加 lz4 压缩的定长记录区：
+ *
+ * <pre>
+ * 0   int   magic 0x5353414D 即 "SSAM"
+ * 4   int   格式版本 1
+ * 8   int   条目数
+ * 12  int   压缩后记录区的字节数
+ * 16  记录区，每条 392 字节：三轴各 128 字节大端补码，加 8 字节编号
+ * </pre>
  *
  * <p>
- * 键用十六进制而不是十进制：单键 776 字符，十进制要 929；更关键的是 1024 位上的十进制解析与格式化要反复做乘除，
- * 十六进制只是逐组移位与 {@code %016x}。解析走 {@link Int1024Strict#parseHexStrict}，有效位超宽即抛。
+ * 记录区先按三轴排序再压缩，因此文件内容与插入顺序无关。三轴用 {@link Int1024#toBytes()} 与
+ * {@link Int1024#of(byte[])}，与 ssa 条目里的坐标同一个编码，逐位互逆。
  *
  * <p>
- * 四条不变式：
+ * 六条不变式：
  *
  * <ol>
  * <li>编号只增，永不复用。复用会让两个区域指向同一个文件，那是不可恢复的数据污染。</li>
- * <li>{@code next} 从表里最大的编号加一推导，不另存字段，因此文件形状与约定完全一致。</li>
+ * <li>{@code next} 从表里最大的编号加一推导，不另存字段。</li>
  * <li>落盘先于建文件：只有原子替换成功、{@link #ensure} 交回编号之后，调用方才建文件；替换失败时 {@link #ensure}
- * 返回 null，一个文件也不建。崩溃的后果只允许是「文件在、表里没有」，那是一个没人引用的孤儿文件；反向
- * 「表里有、文件没有」无害，读回按无数据处理。</li>
- * <li>读失败即抛，不重建。丢表等于把段数据变成不可达，静默重置是必须避免的形态。</li>
+ * 返回 null，一个文件也不建。崩溃的后果只允许是「文件在、表里没有」，那是一个没人引用的孤儿文件。</li>
+ * <li>读失败即抛，不重建。丢表等于把段数据变成不可达。</li>
+ * <li>结构错一律抛 {@link SsaMappingException}，不许当作空表继续。magic、版本、文件长度、条目数与压缩长度的对齐、
+ * 解压后的长度，五道判据都过才逐条读。</li>
+ * <li>旧档以明确异常失败。{@code mapping.json} 在而没有 {@code mapping.dat} 时抛，不静默重建：重建会让编号从零
+ * 开始，新编号撞上旧的 {@code s.<id>.ssa}，读到坐标不符即当作未命中重生成，然后覆写旧文件。</li>
  * </ol>
  *
  * <p>
@@ -62,25 +70,44 @@ import love.crysh.long2.ints.Int1024Strict;
  */
 public final class SimulationFileIndex {
 
-    private static final String FILE_NAME = "mapping.json";
+    private static final String FILE_NAME = "mapping.dat";
 
-    private static final String ROOT_KEY = "mapping";
+    /** 旧档的表名。只用于拒绝，不读它。 */
+    private static final String LEGACY_FILE_NAME = "mapping.json";
 
-    private static final Pattern ID_PATTERN = Pattern.compile("[0-9a-f]{16}");
+    private static final int MAGIC = 0x5353414D;
+
+    private static final int FORMAT_VERSION = 1;
+
+    /** 头部：magic、版本、条目数、压缩长度，各 4 字节。 */
+    private static final int HEADER_BYTES = 16;
+
+    /** 一轴坐标的字节数，与 ssa 条目的 X、Y、Z 同宽。 */
+    private static final int COORD_BYTES = 128;
+
+    /** 一条记录：三轴坐标加编号。 */
+    private static final int RECORD_BYTES = COORD_BYTES * 3 + Long.BYTES;
+
+    /** lz4 单块的最大膨胀倍数，用来在分配之前挡住坏条目数。 */
+    private static final long MAX_EXPANSION = 255L;
 
     private static final String ID_FORMAT = "%016x";
 
-    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
+    /** 记录区的排序，三轴依次比。 */
+    private static final Comparator<Region> REGION_ORDER = (a, b) -> {
+        int compared = a.x().compareTo(b.x());
+        if (compared != 0) {
+            return compared;
+        }
+        compared = a.y().compareTo(b.y());
+        return compared != 0 ? compared : a.z().compareTo(b.z());
+    };
 
     /**
      * 一个 ssa 文件覆盖的区域：三段都是段号右移五位的结果。
      *
      * <p>
-     * 键文本是十六进制，构造时不生成，首次 {@link #key()} 时才格式化并缓存。读路每段都要按区域查表，若在构造时算
-     * 文本，一次查询就多出三段共 776 个字符的格式化；写路每分配一个新区域都要全表重写，缓存之后第二次起只是引用。
-     *
-     * <p>
-     * 相等与哈希只看三轴，不看文本：文本只是三轴的派生。
+     * 相等与哈希只看三轴。坐标是 1024 位值，哈希在构造时算一次。
      */
     public static final class Region {
 
@@ -91,9 +118,6 @@ public final class SimulationFileIndex {
         private final Int1024 z;
 
         private final int hash;
-
-        /** 十六进制键文本，首次 {@link #key()} 时生成。 */
-        private String text;
 
         public Region(Int1024 x, Int1024 y, Int1024 z) {
             this.x = Objects.requireNonNull(x);
@@ -114,16 +138,6 @@ public final class SimulationFileIndex {
 
         public Int1024 z() {
             return this.z;
-        }
-
-        /** 表里的键形状，三段定宽十六进制用点连接。 */
-        String key() {
-            String cached = this.text;
-            if (cached == null) {
-                cached = this.x.toHexString() + "." + this.y.toHexString() + "." + this.z.toHexString();
-                this.text = cached;
-            }
-            return cached;
         }
 
         @Override
@@ -153,7 +167,7 @@ public final class SimulationFileIndex {
 
     private final Path tmp;
 
-    /** 区域到编号，保插入顺序，落盘时按它写。 */
+    /** 区域到编号，保插入顺序，落盘时按三轴排序写出。 */
     private final Map<Region, String> byRegion = new LinkedHashMap<>();
 
     /** 编号到区域，读表时用来查重。 */
@@ -199,6 +213,9 @@ public final class SimulationFileIndex {
         if (have != null) {
             return have;
         }
+        if (this.next < 0L) {
+            throw new SsaMappingException("farlands: ssa mapping id space exhausted at " + this.file);
+        }
         String id = String.format(ID_FORMAT, this.next);
         this.byRegion.put(region, id);
         this.byId.put(id, region);
@@ -227,73 +244,115 @@ public final class SimulationFileIndex {
      * <p>
      * 空表不落盘是刻意的：读路也会调到这里，若在装载时写一次，任何只是被查询过的维度都会凭空多出一个文件。
      * 第一次真正分配编号时才写出，见 {@link #ensure}。
+     *
+     * <p>
+     * 旧格式的表存在而新表不存在时抛：那是不可兼容的旧档，静默重建会覆写旧 ssa。
      */
     private static SimulationFileIndex load(Path dir) {
         SimulationFileIndex index = new SimulationFileIndex(dir);
         if (!Files.exists(index.file)) {
+            Path legacy = dir.resolve(LEGACY_FILE_NAME);
+            if (Files.exists(legacy)) {
+                throw new SsaMappingException("farlands: ssa mapping is in the removed json format at " + legacy
+                        + ", delete it with the old ssa files or start a new world");
+            }
             return index;
         }
-        String text;
+        long size;
         try {
-            text = Files.readString(index.file, StandardCharsets.UTF_8);
+            size = Files.size(index.file);
         } catch (IOException e) {
-            throw new RuntimeException("farlands: failed to read ssa mapping " + index.file, e);
+            throw new SsaMappingException("farlands: failed to stat ssa mapping " + index.file, e);
         }
-        JsonElement parsed;
+        if (size < HEADER_BYTES) {
+            throw new SsaMappingException("farlands: ssa mapping is shorter than its header at " + index.file);
+        }
+        byte[] bytes;
         try {
-            parsed = JsonParser.parseString(text);
-        } catch (RuntimeException e) {
-            throw new RuntimeException("farlands: malformed JSON in ssa mapping " + index.file, e);
+            bytes = Files.readAllBytes(index.file);
+        } catch (IOException e) {
+            throw new SsaMappingException("farlands: failed to read ssa mapping " + index.file, e);
         }
-        if (!parsed.isJsonObject()) {
-            throw new RuntimeException("farlands: ssa mapping root must be a JSON object: " + index.file);
+        ByteBuffer header = ByteBuffer.wrap(bytes, 0, HEADER_BYTES);
+        int magic = header.getInt();
+        if (magic != MAGIC) {
+            throw new SsaMappingException("farlands: ssa mapping has no SSAM magic at " + index.file);
         }
-        JsonElement mapping = parsed.getAsJsonObject().get(ROOT_KEY);
-        if (mapping == null || !mapping.isJsonObject()) {
-            throw new RuntimeException("farlands: ssa mapping needs an object under \"" + ROOT_KEY + "\": "
-                    + index.file);
+        int version = header.getInt();
+        if (version != FORMAT_VERSION) {
+            throw new SsaMappingException("farlands: ssa mapping version " + version + " is not "
+                    + FORMAT_VERSION + " at " + index.file);
         }
-        for (Map.Entry<String, JsonElement> entry : mapping.getAsJsonObject().entrySet()) {
-            Region region = parseRegion(entry.getKey(), index.file);
-            JsonElement value = entry.getValue();
-            if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) {
-                throw new RuntimeException("farlands: ssa mapping value must be a string at " + entry.getKey()
-                        + " in " + index.file);
+        int count = header.getInt();
+        int payloadLength = header.getInt();
+        if (count < 0 || payloadLength < 0) {
+            throw new SsaMappingException("farlands: ssa mapping has a negative count or length at " + index.file);
+        }
+        if (size != (long) HEADER_BYTES + payloadLength) {
+            throw new SsaMappingException("farlands: ssa mapping length " + size + " does not match its header "
+                    + ((long) HEADER_BYTES + payloadLength) + " at " + index.file);
+        }
+        byte[] records = decodeRecords(bytes, payloadLength, count, index.file);
+        ByteBuffer buffer = ByteBuffer.wrap(records);
+        for (int i = 0; i < count; i++) {
+            byte[] rawX = new byte[COORD_BYTES];
+            byte[] rawY = new byte[COORD_BYTES];
+            byte[] rawZ = new byte[COORD_BYTES];
+            buffer.get(rawX);
+            buffer.get(rawY);
+            buffer.get(rawZ);
+            long id = buffer.getLong();
+            Region region = new Region(Int1024.of(rawX), Int1024.of(rawY), Int1024.of(rawZ));
+            if (id < 0L || id == Long.MAX_VALUE) {
+                // 编号高位置位或已到 long 上界即视作空间耗尽：再加一就回绕，会撞上已发出的号。
+                throw new SsaMappingException("farlands: ssa mapping id space exhausted at " + index.file);
             }
-            String id = value.getAsString();
-            if (!ID_PATTERN.matcher(id).matches()) {
-                throw new RuntimeException("farlands: ssa mapping id must be 16 lowercase hex chars, got " + id
-                        + " at " + entry.getKey() + " in " + index.file);
+            String text = String.format(ID_FORMAT, id);
+            if (index.byId.putIfAbsent(text, region) != null) {
+                throw new SsaMappingException("farlands: duplicate ssa mapping id " + text + " in " + index.file);
             }
-            if (index.byId.putIfAbsent(id, region) != null) {
-                throw new RuntimeException("farlands: duplicate ssa mapping id " + id + " in " + index.file);
+            if (index.byRegion.put(region, text) != null) {
+                throw new SsaMappingException("farlands: duplicate ssa mapping region at entry " + i + " in "
+                        + index.file);
             }
-            index.byRegion.put(region, id);
-            long value2 = Long.parseUnsignedLong(id, 16);
-            if (value2 < 0L) {
-                // 编号高位置位即视作空间耗尽：再加一就回绕，会撞上已发出的号。
-                throw new RuntimeException("farlands: ssa mapping id space exhausted at " + id + " in " + index.file);
-            }
-            if (value2 + 1L > index.next) {
-                index.next = value2 + 1L;
+            if (id + 1L > index.next) {
+                index.next = id + 1L;
             }
         }
         return index;
     }
 
-    /** {@code 0x….0x….0x…} 三段十六进制，逐段严格解析；超出定宽或旧十进制一律抛。 */
-    private static Region parseRegion(String key, Path file) {
-        String[] parts = key.split("\\.", -1);
-        if (parts.length != 3) {
-            throw new SsaMappingException("farlands: ssa mapping key must be x.y.z, got " + key + " in " + file);
+    /**
+     * 解压记录区，并核对长度。
+     *
+     * <p>
+     * 先在分配之前挡住坏条目数：lz4 单块的膨胀上限是 255 倍，超过这个上界就说明头部是坏的，不能照着它分配。
+     * 解压之后还要求恰好读完，多一个字节都算坏：条目数被改小时，多出来的记录会落在后面。
+     */
+    private static byte[] decodeRecords(byte[] file, int payloadLength, int count, Path path) {
+        long expected = (long) count * RECORD_BYTES;
+        if (expected > Integer.MAX_VALUE || expected > MAX_EXPANSION * payloadLength) {
+            throw new SsaMappingException("farlands: ssa mapping count " + count + " does not fit "
+                    + payloadLength + " compressed bytes at " + path);
         }
+        byte[] records = new byte[(int) expected];
         try {
-            return new Region(Int1024Strict.parseHexStrict(parts[0]), Int1024Strict.parseHexStrict(parts[1]),
-                    Int1024Strict.parseHexStrict(parts[2]));
-        } catch (NumberFormatException e) {
-            throw new SsaMappingException(
-                    "farlands: ssa mapping key is not three hex ints, got " + key + " in " + file, e);
+            LZ4BlockInputStream compressed = new LZ4BlockInputStream(
+                    new ByteArrayInputStream(file, HEADER_BYTES, payloadLength));
+            try {
+                DataInputStream in = new DataInputStream(compressed);
+                in.readFully(records);
+                if (in.read() != -1) {
+                    throw new SsaMappingException("farlands: ssa mapping holds more records than its count at "
+                            + path);
+                }
+            } finally {
+                compressed.close();
+            }
+        } catch (IOException e) {
+            throw new SsaMappingException("farlands: failed to decompress ssa mapping " + path, e);
         }
+        return records;
     }
 
     /**
@@ -304,20 +363,22 @@ public final class SimulationFileIndex {
      * 替换。非原子那一支的窗口是「旧文件已删、新文件未就位」，只在替换瞬间崩溃时出现。
      */
     private void save() {
-        JsonObject mapping = new JsonObject();
-        for (Map.Entry<Region, String> entry : this.byRegion.entrySet()) {
-            mapping.addProperty(entry.getKey().key(), entry.getValue());
-        }
-        JsonObject root = new JsonObject();
-        root.add(ROOT_KEY, mapping);
-        byte[] text = GSON.toJson(root).getBytes(StandardCharsets.UTF_8);
+        List<Region> ordered = new ArrayList<>(this.byRegion.keySet());
+        ordered.sort(REGION_ORDER);
+        byte[] payload = encodeRecords(ordered);
+        ByteBuffer header = ByteBuffer.allocate(HEADER_BYTES);
+        header.putInt(MAGIC);
+        header.putInt(FORMAT_VERSION);
+        header.putInt(ordered.size());
+        header.putInt(payload.length);
+        ByteBuffer content = ByteBuffer.allocate(HEADER_BYTES + payload.length);
+        content.put(header.array()).put(payload).flip();
         try {
             Files.createDirectories(this.dir);
             try (FileChannel channel = FileChannel.open(this.tmp, StandardOpenOption.CREATE,
                     StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING)) {
-                ByteBuffer buffer = ByteBuffer.wrap(text);
-                while (buffer.hasRemaining()) {
-                    channel.write(buffer);
+                while (content.hasRemaining()) {
+                    channel.write(content);
                 }
                 channel.force(true);
             }
@@ -329,6 +390,26 @@ public final class SimulationFileIndex {
             }
         } catch (IOException e) {
             throw new RuntimeException("farlands: failed to write ssa mapping " + this.file, e);
+        }
+    }
+
+    /** 按给定顺序把区域与编号摊成定长记录，再整段 lz4。 */
+    private byte[] encodeRecords(List<Region> ordered) {
+        ByteBuffer raw = ByteBuffer.allocate(ordered.size() * RECORD_BYTES);
+        for (Region region : ordered) {
+            raw.put(region.x().toBytes());
+            raw.put(region.y().toBytes());
+            raw.put(region.z().toBytes());
+            raw.putLong(Long.parseUnsignedLong(this.byRegion.get(region), 16));
+        }
+        try {
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream(Math.max(64, raw.capacity() / 4));
+            LZ4BlockOutputStream compressed = new LZ4BlockOutputStream(bytes);
+            compressed.write(raw.array());
+            compressed.close();
+            return bytes.toByteArray();
+        } catch (IOException e) {
+            throw new RuntimeException("farlands: failed to encode ssa mapping " + this.file, e);
         }
     }
 }
