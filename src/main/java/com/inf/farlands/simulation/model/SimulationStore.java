@@ -15,7 +15,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Biomes;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.DataLayer;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.PalettedContainer;
@@ -72,7 +71,12 @@ public final class SimulationStore {
         if (existing != null) {
             return existing;
         }
-        SimulationSectionData data = new SimulationSectionData(newSection(level));
+        // 群系容器与段容器各留一份引用：写入面用前者，落盘与下发读的是后者里的同一个对象。
+        PalettedContainerFactory factory = level.palettedContainerFactory();
+        PalettedContainer<Holder<Biome>> biomes = new PalettedContainer<>(voidBiome(level),
+                factory.biomeStrategy());
+        LevelChunkSection section = new LevelChunkSection(factory.createForBlockStates(), biomes);
+        SimulationSectionData data = new SimulationSectionData(section, biomes);
         sections.put(key, data);
         return data;
     }
@@ -88,7 +92,8 @@ public final class SimulationStore {
      */
     public static SimulationSectionData putDecoded(ResourceKey<Level> dimension, SimulationSectionKey key,
             LevelChunkSection section, int shapeMode, DataLayer blockLight, DataLayer skyLight, int stage) {
-        SimulationSectionData data = new SimulationSectionData(section);
+        // 群系容器不从盘上带回来：这一段的群系已经是终态，没有第二个写入方。
+        SimulationSectionData data = new SimulationSectionData(section, null);
         data.setShapeMode(shapeMode);
         if (blockLight != null) {
             data.blockLight = blockLight;
@@ -128,14 +133,6 @@ public final class SimulationStore {
         }
         data.clearReleasing();
         return true;
-    }
-
-    /** 新段的容器：块用工厂的默认空气，群系用 void。 */
-    private static LevelChunkSection newSection(ServerLevel level) {
-        PalettedContainerFactory factory = level.palettedContainerFactory();
-        PalettedContainer<BlockState> states = factory.createForBlockStates();
-        PalettedContainer<Holder<Biome>> biomes = new PalettedContainer<>(voidBiome(level), factory.biomeStrategy());
-        return new LevelChunkSection(states, biomes);
     }
 
     /**

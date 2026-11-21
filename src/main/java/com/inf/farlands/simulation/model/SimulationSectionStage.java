@@ -1,11 +1,14 @@
 package com.inf.farlands.simulation.model;
 
 /**
- * 模拟段的阶段，三档单值，比较用 {@code >=}。
+ * 模拟段的阶段，四档单值，比较用 {@code >=}。
  *
  * <p>
- * 0 UNPROCESSED 段已建，内容未定；1 NOISE 生产在途，内容正在被池线程写；2 LIGHTED 内容已定、
- * 统一光照已写，此后不再变。
+ * 0 UNPROCESSED 段已建，什么都没有；1 BIOME 4x4x4 群系网格已写，方块未定；2 NOISE 方块生产在途或已写完，
+ * 光照未定；3 LIGHTED 内容已定、统一光照已写，此后不再变。
+ *
+ * <p>
+ * 群系与方块分成两档，因为它们是两件事：群系的单位成本远低于方块，而方块链失败时群系的成果不该一起丢。
  *
  * <p>
  * 两条门要读它：只有 {@code LIGHTED} 的段可以下发，也只有它可以落盘。这与地形侧
@@ -16,19 +19,27 @@ package com.inf.farlands.simulation.model;
  * {@code isTerminal} 为前置，晚于升档就会漏出「已终态而光是空的」的窗口。
  *
  * <p>
- * 档位单调不减，推进走 {@code SimulationSectionData.advanceTo}。生产失败不升档，段停在
- * {@code NOISE}，等它离开视距时被丢弃。
+ * 档位单调不减，推进走 {@code SimulationSectionData.advanceTo}。失败不升档：群系失败停在 {@code UNPROCESSED}，
+ * 方块失败停在 {@code NOISE}，两种都在段离开视距时被丢弃。
+ *
+ * <p>
+ * 档位是持久化值，随每段一起写进 ssa 条目。改这张表等于让旧档失效，而这条失效是安全的、也不需要版本字段：落盘
+ * 只发生在终态，所以盘上的值只有旧 {@code LIGHTED} 一个，重排之后它落在非终态上，读回时按未命中重生成。这条推理
+ * 依赖「只有终态段落盘」，那道守卫在 {@code SimulationLifecycle.persistSection} 的入口。
  */
 public final class SimulationSectionStage {
 
-    /** 段已建，内容未定。 */
+    /** 段已建，什么都没有。 */
     public static final int UNPROCESSED = 0;
 
-    /** 生产在途，内容正在被池线程写。 */
-    public static final int NOISE = 1;
+    /** 群系网格已写，方块未定。 */
+    public static final int BIOME = 1;
+
+    /** 方块生产在途或已写完，光照未定。 */
+    public static final int NOISE = 2;
 
     /** 内容已定、统一光照已写，此后不再变。 */
-    public static final int LIGHTED = 2;
+    public static final int LIGHTED = 3;
 
     private SimulationSectionStage() {
     }

@@ -22,15 +22,20 @@ import com.inf.farlands.simulation.serialize.SimulationSectionIO;
 import com.inf.farlands.simulation.serialize.SimulationSerializer;
 import com.inf.farlands.simulation.serialize.SimulationStorage;
 import com.inf.farlands.simulation.serialize.SsaMappingException;
-import com.inf.farlands.simulation.terrain.SimulationPool;
-import com.inf.farlands.simulation.terrain.SimulationTask;
+import com.inf.farlands.simulation.task.SimulationBiomeTask;
+import com.inf.farlands.simulation.task.SimulationNoiseTask;
+import com.inf.farlands.simulation.task.SimulationPool;
 
 /**
  * 模拟段的生命周期编排：读回优先、生产入池、释放落盘、周期刷盘、关服收尾。
  *
  * <p>
- * 与地形侧的 {@code SectionLifecycle} 是同一类职责，但只有三档阶段，所以没有候选表也没有准入：谁该开工由
+ * 与地形侧的 {@code SectionLifecycle} 是同一类职责，但没有候选表也没有准入：谁该开工由
  * {@link SimulationServer} 的视距并集决定，本类只在段进入与离开并集时被调。
+ *
+ * <p>
+ * 生产分两级：先群系、后方块，两段都在 {@code farlands-sim} 上跑，收尾都投回主线程。级与级之间只经档位交接，
+ * 群系失败不牵连方块，方块失败也不回退群系。
  *
  * <p>
  * 两条门。下发门在 {@code SimulationServer.send}，判据是 {@link SimulationSectionStage#isTerminal}；落盘门
@@ -84,19 +89,19 @@ public final class SimulationLifecycle {
             InfsFarlands.LOGGER.error("farlands: ssa slot lookup failed section={},{},{}", key.x(), key.y(),
                     key.z(), e);
             LOADING.remove(pending);
-            produce(level, key);
+            produceBiomes(level, key);
             return;
         }
         if (ref == null) {
             LOADING.remove(pending);
-            produce(level, key);
+            produceBiomes(level, key);
             return;
         }
         Path path = SimulationSectionIO.findPath(level, key.x(), key.y(), key.z());
         if (path == null) {
             // 槽位查得到就说明映射里有这个区域，这里落空只可能是表在两次调用之间被换掉。
             LOADING.remove(pending);
-            produce(level, key);
+            produceBiomes(level, key);
             return;
         }
         List<SimulationSectionIO.SlotKey> keys = List
@@ -110,7 +115,7 @@ public final class SimulationLifecycle {
             InfsFarlands.LOGGER.error("farlands: ssa read submit failed section={},{},{}", key.x(), key.y(),
                     key.z(), e);
             LOADING.remove(pending);
-            produce(level, key);
+            produceBiomes(level, key);
         }
     }
 
@@ -147,8 +152,16 @@ public final class SimulationLifecycle {
      * <p>
      * 文件侧的失败不抛：解析路径与开文件都可能被一次瞬时拒绝打断，而本方法跑在服务端 tick 里。命中时清掉
      * releasing 标记、保留 persistDirty，段留在表里，由下一次 {@link #flushAllDirty} 重试。
+     *
+     * <p>
+     * 入口判终态：盘上只该有终态段，这条不变量是档表可重排的前提，档位是持久化值，见
+     * {@link SimulationSectionStage} 的类注释。调用点各自也判，这里再判一次是为了让不变量落在方法自身，将来多
+     * 一个调用点也不会破掉它。
      */
     public static boolean persistSection(ServerLevel level, SimulationSectionKey key, SimulationSectionData data) {
+        if (!SimulationSectionStage.isTerminal(data.stage())) {
+            return false;
+        }
         ResourceKey<Level> dimension = level.dimension();
         Path path;
         try {
@@ -316,37 +329,88 @@ public final class SimulationLifecycle {
             SimulationServer.noteDirty(dimension, key);
             return;
         }
-        produce(level, key);
+        produceBiomes(level, key);
     }
 
     /**
-     * 建空壳、标 {@code NOISE}、把生产交给池。
+     * 建空壳、把群系交给池。
      *
      * <p>
      * 提交被拒时要摘掉这一格：池只在关闭时拒绝，而那一格之后再没有别的出口会碰它，留着就是一个永久的死档。
      * 摘掉之后，下一次 {@code ensureSection} 的 {@code contains} 变假，会重新建壳入池，因此是自愈的。
+     *
+     * <p>
+     * 不在这里置档：群系写完才推到 {@code BIOME}，所以「群系在途」在档位上仍是 {@code UNPROCESSED}，与
+     * 「还没开工」同值。这两者靠任务在途区分，档位只记成果。
      */
-    private static void produce(ServerLevel level, SimulationSectionKey key) {
+    private static void produceBiomes(ServerLevel level, SimulationSectionKey key) {
         SimulationSectionData data = SimulationStore.createEmpty(level, key);
-        data.advanceTo(SimulationSectionStage.NOISE);
-        boolean submitted = SimulationPool.submitProduction(level,
-                new SimulationTask(level, key, data, FILLER),
-                success -> finishProduction(level, key, data, success));
+        boolean submitted = SimulationPool.submitProduction(level, new SimulationBiomeTask(level, key, data),
+                success -> finishBiomes(level, key, data, success));
         if (!submitted) {
             SimulationStore.removeIfSame(level.dimension(), key, data);
         }
     }
 
     /**
-     * 生产收尾，主线程。失败不升档，段停在 {@code NOISE}，等它离开视距时由 {@link #release} 丢弃。
+     * 群系收尾，主线程。失败不升档，段停在 {@code UNPROCESSED}，等它离开视距时由 {@link #release} 丢弃。
      *
      * <p>
-     * 顺序是契约：判身份、写光、升档、置落盘位与待下发登记。判身份在前，否则会往已经被替换掉的旧对象上白写一份；写光
-     * 在升档之前，因为唯一读光的两处都以终态为前置，反过来就会漏出「已终态而光是空的」的窗口。
+     * 线程判据在前：它挡的是 {@code SimulationSectionIO.runOnMainThread} 的内联兜底，反射取不到主线程执行器时
+     * 它会就地跑；判假即放弃这一段，连段表都不读。后果与生产失败同径。
+     *
+     * <p>
+     * 身份判据在后，否则会往已经被替换掉的旧对象上升档，并把方块任务排给一个已经不在表里的段。
      */
-    private static void finishProduction(ServerLevel level, SimulationSectionKey key, SimulationSectionData data,
+    private static void finishBiomes(ServerLevel level, SimulationSectionKey key, SimulationSectionData data,
             boolean success) {
         if (!success) {
+            return;
+        }
+        if (!SimulationSectionIO.isMainThread(level)) {
+            InfsFarlands.LOGGER.error("farlands: simulation biome finish outside the main thread section={},{},{}",
+                    key.x(), key.y(), key.z());
+            return;
+        }
+        if (SimulationStore.get(level.dimension(), key) != data) {
+            return;
+        }
+        data.advanceTo(SimulationSectionStage.BIOME);
+        produceNoise(level, key, data);
+    }
+
+    /**
+     * 把方块生产交给池，入池那一刻把档位推到 {@code NOISE}。
+     *
+     * <p>
+     * 置档在入池处，与拆分之前同义：在途的段就是 {@code NOISE}。提交被拒时摘掉这一格，与群系那一步同规。
+     */
+    private static void produceNoise(ServerLevel level, SimulationSectionKey key, SimulationSectionData data) {
+        data.advanceTo(SimulationSectionStage.NOISE);
+        boolean submitted = SimulationPool.submitProduction(level,
+                new SimulationNoiseTask(level, key, data, FILLER),
+                success -> finishNoise(level, key, data, success));
+        if (!submitted) {
+            SimulationStore.removeIfSame(level.dimension(), key, data);
+        }
+    }
+
+    /**
+     * 方块生产收尾，主线程。失败不升档，段停在 {@code NOISE}，等它离开视距时由 {@link #release} 丢弃。
+     *
+     * <p>
+     * 顺序是契约：判线程、判身份、写光、升档、置落盘位与待下发登记。判线程在前，理由与 {@link #finishBiomes}
+     * 同一条；判身份在写光之前，否则会往已经被替换掉的旧对象上白写一份；写光在升档之前，因为唯一读光的两处都以
+     * 终态为前置，反过来就会漏出「已终态而光是空的」的窗口。
+     */
+    private static void finishNoise(ServerLevel level, SimulationSectionKey key, SimulationSectionData data,
+            boolean success) {
+        if (!success) {
+            return;
+        }
+        if (!SimulationSectionIO.isMainThread(level)) {
+            InfsFarlands.LOGGER.error("farlands: simulation noise finish outside the main thread section={},{},{}",
+                    key.x(), key.y(), key.z());
             return;
         }
         if (SimulationStore.get(level.dimension(), key) != data) {

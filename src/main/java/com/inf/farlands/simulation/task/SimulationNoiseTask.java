@@ -1,4 +1,4 @@
-package com.inf.farlands.simulation.terrain;
+package com.inf.farlands.simulation.task;
 
 import com.inf.farlands.simulation.int1024.terrainFiller.SimulationFiller;
 import com.inf.farlands.simulation.model.SimulationSectionData;
@@ -7,7 +7,7 @@ import com.inf.farlands.simulation.model.SimulationSectionKey;
 import net.minecraft.server.level.ServerLevel;
 
 /**
- * 一段的填充任务，跑在 {@code farlands-sim} 上。
+ * 一段的噪声填充任务，跑在 {@code farlands-sim} 上。
  *
  * <p>
  * 只做纯计算：把段交给填充器，填充器写自己那一段的容器，不碰段表、不升档、不碰网络。收尾在主线程由提交方给的
@@ -21,7 +21,7 @@ import net.minecraft.server.level.ServerLevel;
  * 写容器要显式走五参 {@code setBlockState} 的 {@code false} 一档，或直接写容器的其它无锁入口。理由与地形侧
  * 填段相同：带检测的那一档会取容器自己的线程检测器，而主线程的打包与落盘编码也要取它。
  */
-public final class SimulationTask implements Runnable {
+public final class SimulationNoiseTask implements SimulationWork {
 
     private final ServerLevel level;
 
@@ -31,7 +31,7 @@ public final class SimulationTask implements Runnable {
 
     private final SimulationFiller filler;
 
-    public SimulationTask(ServerLevel level, SimulationSectionKey key, SimulationSectionData data,
+    public SimulationNoiseTask(ServerLevel level, SimulationSectionKey key, SimulationSectionData data,
             SimulationFiller filler) {
         this.level = level;
         this.key = key;
@@ -39,12 +39,9 @@ public final class SimulationTask implements Runnable {
         this.filler = filler;
     }
 
+    @Override
     public SimulationSectionKey key() {
         return this.key;
-    }
-
-    public SimulationSectionData data() {
-        return this.data;
     }
 
     @Override

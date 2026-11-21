@@ -21,7 +21,7 @@ import com.inf.farlands.simulation.SimulationServer;
 import com.inf.farlands.simulation.model.SimulationConfig;
 import com.inf.farlands.simulation.model.SimulationStore;
 import com.inf.farlands.simulation.serialize.SimulationIO;
-import com.inf.farlands.simulation.terrain.SimulationPool;
+import com.inf.farlands.simulation.task.SimulationPool;
 import com.inf.farlands.terrain.pipeline.OwnershipTable;
 import com.inf.farlands.terrain.pipeline.Scheduler;
 import com.inf.farlands.terrain.pipeline.SpawnPreload;

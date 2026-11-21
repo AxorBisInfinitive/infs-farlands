@@ -1,7 +1,10 @@
 package com.inf.farlands.simulation.model;
 
+import net.minecraft.core.Holder;
+import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.chunk.DataLayer;
 import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.chunk.PalettedContainer;
 
 /**
  * 服务端的一段模拟数据：块与群系容器，加两层光照与形状模式。
@@ -27,6 +30,16 @@ public final class SimulationSectionData {
 
     public final LevelChunkSection section;
 
+    /**
+     * 段内 4x4x4 的群系网格，写入面用。读回路径为 null：那种段的群系本来就来自盘上，不再改。
+     *
+     * <p>
+     * 与 {@link #section} 里的群系容器是同一个对象，写进去的格在 {@code section.getBiomes()} 上可见，落盘与下发
+     * 因此不必再取一次。写走 {@code getAndSetUnchecked}，那一档不取容器自己的线程检测器，所以在
+     * {@code farlands-sim} 上写是合法的，与 vanilla 的 {@code fillBiomesFromNoise} 同一档。
+     */
+    private final PalettedContainer<Holder<Biome>> biomes;
+
     public DataLayer blockLight = new DataLayer();
 
     public DataLayer skyLight = new DataLayer();
@@ -51,8 +64,17 @@ public final class SimulationSectionData {
 
     private int shapeMode;
 
-    public SimulationSectionData(LevelChunkSection section) {
+    public SimulationSectionData(LevelChunkSection section, PalettedContainer<Holder<Biome>> biomes) {
         this.section = section;
+        this.biomes = biomes;
+    }
+
+    /** 写一格群系，局部坐标 0 到 3。读回路径的段没有写入面，这里静默跳过。 */
+    public void setBiome(int localX, int localY, int localZ, Holder<Biome> biome) {
+        if (this.biomes == null) {
+            return;
+        }
+        this.biomes.getAndSetUnchecked(localX, localY, localZ, biome);
     }
 
     public int shapeMode() {

@@ -1,6 +1,7 @@
 package com.inf.farlands.register;
 
 import com.inf.farlands.InfsFarlands;
+import com.inf.farlands.simulation.int1024.system.biome.misc.Void.VoidSimulationBiomeSystem;
 import com.inf.farlands.simulation.int1024.system.terrain.noise.misc.Void.VoidSimulationNoiseSystem;
 import com.inf.farlands.simulation.registry.SimulationRegistries;
 import com.inf.farlands.command.FarlandsCommandRegistry;
@@ -71,8 +72,9 @@ public class FarlandsRegister {
 
     /** 内置系统按族登记，id 与实现类的对应关系集中在此。 */
     private static void registerSystems() {
-        // 模拟层一个内置系统。登记必须在世界加载之前：档案在 level 构造时才解析。
+        // 模拟层两族各一个内置系统。登记必须在世界加载之前：档案在 level 构造时才解析。
         SimulationRegistries.register(SimulationRegistries.NOISE_VOID, VoidSimulationNoiseSystem.class);
+        SimulationRegistries.registerBiome(SimulationRegistries.BIOME_VOID, VoidSimulationBiomeSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_VOID_NOISE_SYSTEM, VoidNoiseSystem.class);
         SystemRegistries.registerTerrain(SystemRegistries.TERRAIN_MISC_VOID_SECTION_SYSTEM,
                 VoidSectionSystem.class);

@@ -3,6 +3,7 @@ package com.inf.farlands.client.register.packet;
 import com.inf.farlands.client.network.ClientPacketHandlers;
 import com.inf.farlands.client.network.ClientSimulationSystems;
 import com.inf.farlands.network.simulation.SimulationSystemsPacket;
+import com.inf.farlands.simulation.model.SimulationData;
 
 public class SimulationSystemsPacketRegister {
 
@@ -10,6 +11,6 @@ public class SimulationSystemsPacketRegister {
         ClientPacketHandlers.register(
                 SimulationSystemsPacket.TYPE,
                 (payload, context) -> ClientSimulationSystems.put(payload.dimension().identifier(),
-                        payload.selection()));
+                        new SimulationData.LevelSelection(payload.noise(), payload.biome())));
     }
 }

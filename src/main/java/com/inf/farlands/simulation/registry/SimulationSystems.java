@@ -1,5 +1,6 @@
 package com.inf.farlands.simulation.registry;
 
+import com.inf.farlands.simulation.int1024.SimulationBiomeSystem;
 import com.inf.farlands.simulation.int1024.SimulationNoiseSystem;
 import com.inf.farlands.terrain.registry.SystemId;
 
@@ -18,6 +19,11 @@ public final class SimulationSystems {
     public static void registerNoise(SystemId id, Class<? extends SimulationNoiseSystem> type) {
         verifyConstructor(id, type);
         SimulationRegistries.register(id, type);
+    }
+
+    public static void registerBiome(SystemId id, Class<? extends SimulationBiomeSystem> type) {
+        verifyConstructor(id, type);
+        SimulationRegistries.registerBiome(id, type);
     }
 
     /**

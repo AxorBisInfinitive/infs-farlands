@@ -10,7 +10,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import com.inf.farlands.network.simulation.SimulationSystemsPacket;
 import com.inf.farlands.simulation.model.SimulationData;
 import com.inf.farlands.simulation.serialize.SimulationIO;
-import com.inf.farlands.terrain.registry.SystemsData;
 
 import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
 import net.minecraft.resources.ResourceKey;
@@ -47,9 +46,9 @@ public final class SimulationSystemsSender {
                 if (dimension.equals(SENT_DIMENSIONS.get(player.getUUID()))) {
                     continue;
                 }
-                SystemsData.SystemSelection selection = SimulationIO.selection(data, dimension.identifier());
+                SimulationData.LevelSelection selection = SimulationIO.selection(data, dimension.identifier());
                 player.connection.send(new ClientboundCustomPayloadPacket(
-                        new SimulationSystemsPacket(dimension, selection)));
+                        new SimulationSystemsPacket(dimension, selection.noise(), selection.biome())));
                 SENT_DIMENSIONS.put(player.getUUID(), dimension);
             }
         }

@@ -7,8 +7,9 @@ import java.util.Map;
 
 import com.inf.farlands.InfsFarlands;
 import com.inf.farlands.client.network.ClientSimulationSystems;
+import com.inf.farlands.simulation.model.SimulationData;
+import com.inf.farlands.terrain.registry.SystemsData;
 import com.inf.farlands.terrain.registry.SystemsData.Arg;
-import com.inf.farlands.terrain.registry.SystemsData.SystemSelection;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.debug.DebugScreenDisplayer;
@@ -18,7 +19,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.LevelChunk;
 
 /**
- * 调试界面上的当前 level 模拟层系统。模拟层按维度只有一个选择，所以只有一族 terrain。
+ * 调试界面上的当前 level 模拟层系统。模拟层按维度两族，噪声与群系各占一行。
  *
  * <p>
  * 只读客户端收到的那份，服务端在玩家进服或换维度后下发一次。查不到就明写未收到，不做本地回退，于是包没发、
@@ -30,8 +31,8 @@ import net.minecraft.world.level.chunk.LevelChunk;
  * 右列的行从 guiWidth 减行宽起画。整块放在一个组里，组数为 1 时它落左列。
  *
  * <p>
- * 族列表写死一族。模拟层扩族时，这里与 {@code SimulationData} 的形状要一起改，只改一边会让选择的落盘与
- * 显示对不上。
+ * 族列表与 {@code SimulationData.LevelSelection} 的字段一一对应。加族时两处要一起改，只改一边会让选择的落盘
+ * 与显示对不上。
  *
  * <p>
  * 布局按选择实例与上限缓存，只在收到新的系统包或窗口尺寸变化时重算；display 只在渲染线程调用，缓存不需要
@@ -42,7 +43,7 @@ public class SimulationSystemsDebugEntry implements DebugScreenEntry {
     public static final Identifier ID = Identifier.fromNamespaceAndPath(InfsFarlands.MOD_ID, "simulation_systems");
 
     /** 上一次算好的布局。 */
-    private static SystemSelection cachedSelection;
+    private static SimulationData.LevelSelection cachedSelection;
     private static int cachedLimit = Integer.MIN_VALUE;
     private static List<String> cachedLines = List.of();
 
@@ -53,7 +54,7 @@ public class SimulationSystemsDebugEntry implements DebugScreenEntry {
         if (level == null) {
             return;
         }
-        SystemSelection selection = ClientSimulationSystems.get(level.dimension().identifier());
+        SimulationData.LevelSelection selection = ClientSimulationSystems.get(level.dimension().identifier());
         if (selection == null) {
             displayer.addToGroup(ID, "simulation: not received");
             return;
@@ -67,15 +68,16 @@ public class SimulationSystemsDebugEntry implements DebugScreenEntry {
         displayer.addToGroup(ID, cachedLines);
     }
 
-    private static List<String> layout(SystemSelection selection, int limit) {
+    private static List<String> layout(SimulationData.LevelSelection selection, int limit) {
         List<String> lines = new ArrayList<>();
-        addFamily(lines, limit, "terrain", selection);
+        addFamily(lines, limit, "noise", selection.noise());
+        addFamily(lines, limit, "biome", selection.biome());
         return lines;
     }
 
     /** 追加一族：族名加系统 id 一行，其后是按行宽最匀切出来的参数行。 */
     private static void addFamily(List<String> lines, int limit, String family,
-            SystemSelection selection) {
+            SystemsData.SystemSelection selection) {
         lines.add(family + ": " + selection.id());
         List<String> tokens = new ArrayList<>(selection.args().size());
         for (Map.Entry<String, Arg> entry : selection.args().entrySet()) {

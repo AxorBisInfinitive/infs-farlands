@@ -1,7 +1,7 @@
 package com.inf.farlands.simulation.int1024.terrainFiller;
 
-import com.inf.farlands.simulation.SimulationLevels;
 import com.inf.farlands.simulation.int1024.SimulationNoiseSystem;
+import com.inf.farlands.simulation.int1024.SimulationRouting;
 import com.inf.farlands.simulation.int1024.noise.Aquifer;
 import com.inf.farlands.simulation.int1024.noise.CellSampler;
 import com.inf.farlands.simulation.int1024.noise.Density;
@@ -11,7 +11,6 @@ import com.inf.farlands.simulation.int1024.noise.Router;
 import com.inf.farlands.simulation.int1024.noise.Sampler;
 import com.inf.farlands.simulation.int1024.noise.Settings;
 import com.inf.farlands.simulation.int1024.noise.instance.Aquifers;
-import com.inf.farlands.simulation.int1024.noise.instance.Constant;
 import com.inf.farlands.simulation.int1024.noise.instance.FluidPickers;
 import com.inf.farlands.simulation.int1024.util.SectionBox;
 import com.inf.farlands.simulation.int1024.util.Sink;
@@ -31,13 +30,16 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
  * 遍历求值，最后由材质规则定方块。材质规则照抄 vanilla：含水层返回 {@code null} 表示实方块，取
  * {@code defaultBlock}；空气不写。
  *
+ * <p>只写方块。群系在它自己那一档，由 {@code SimulationBiomeFiller} 写，两者只共用 {@code SimulationRouting}
+ * 给出的同一份路由。
+ *
  * <p>遍历有两条路径，由密度自己声明：实现 {@link InterpolatedDensity} 的走 {@link CellSampler}，
  * 先按 cell 网格算角点、再块内三线性插值；其余走 {@link Sampler} 的逐块求值。两条路径喂同一个
  * {@code SectionSink}，写入面完全相同。cell 路径要求 cell 边长整除一段，不成立时退回逐块。
  *
  * <p>系统按入参 {@code level} 取，本类不认识当前是哪一个。取数点只有一处，是
- * {@code SimulationLevels.of(level)}：那边的实例由该维度的落盘选择反射新建，与 farlands 的
- * {@code SystemsHolder} 同一职责。
+ * {@code SimulationLevels.simulationTerrainSystem()}：那边返回基接口，实例由该维度的落盘选择反射新建，与 farlands
+ * 的 {@code SystemsHolder} 同一职责；收窄到噪声族在 {@code SimulationRouting.noiseSystem}。
  *
  * <p>跑在 {@code farlands-sim} 上，所以段写入只用五参 {@code setBlockState} 的 {@code false} 一档，不碰阶段、
  * 不碰段表、不标脏，那三件由 {@code SimulationLifecycle} 在主线程做。
@@ -47,25 +49,16 @@ public abstract class AbstractSimulationFiller implements SimulationFiller {
     /** 段内下标掩码，取低四位。 */
     private static final Int1024 LOCAL_MASK = Int1024.of(15L);
 
-    /**
-     * 占位路由：十五个常量，只有 {@code finalDensity} 会被系统换掉。
-     *
-     * <p>仿真层没有维度给定的 vanilla 路由，而 {@code createRouter} 需要一份入参。今天没有任何系统读另外
-     * 十四个字段；接真实含水层时按当时的口径重填。
-     */
-    private static final Router BASE_ROUTER = new Router(
-            new Constant(0.0), new Constant(0.0), new Constant(0.0), new Constant(0.0), new Constant(0.0),
-            new Constant(0.0), new Constant(0.0), new Constant(0.0), new Constant(0.0), new Constant(0.0),
-            new Constant(0.0), new Constant(0.0), new Constant(0.0), new Constant(0.0), new Constant(0.0));
-
     protected AbstractSimulationFiller() {
     }
 
     @Override
     public void fill(ServerLevel level, SimulationSectionKey key, SimulationSectionData data) {
-        SimulationNoiseSystem system = ((SimulationLevels) level).simulationSystem();
+        // 取用点拿的是基接口 SimulationTerrainSystem，收窄到噪声族在 SimulationRouting.noiseSystem 一处。
+        // 逐块与逐段两种范式在模拟层还没有实现类，将来加的时候这里照 AbstractTerrainFiller 补 instanceof 分支。
+        SimulationNoiseSystem system = SimulationRouting.noiseSystem(level);
         Settings settings = prototypeFor(system).withRange(key.y().shift(4), SectionBox.SIZE);
-        Router router = system.createRouter(BASE_ROUTER);
+        Router router = SimulationRouting.router(level);
         Density density = router.finalDensity();
         FluidPicker picker = system.createFluidPicker(settings);
         if (picker == null) {
@@ -92,7 +85,7 @@ public abstract class AbstractSimulationFiller implements SimulationFiller {
     private static Settings prototypeFor(SimulationNoiseSystem system) {
         return new Settings(Int1024.ZERO, SectionBox.SIZE, resolveSize(system.noiseSizeXZ()),
                 resolveSize(system.noiseSizeY()), Blocks.STONE.defaultBlockState(),
-                Blocks.WATER.defaultBlockState(), BASE_ROUTER, Int1024.of(63L), true, false);
+                Blocks.WATER.defaultBlockState(), SimulationRouting.BASE, Int1024.of(63L), true, false);
     }
 
     /** 0 表示用原型那一份。非 0 时它是 cell 网格的分量，cell 边长等于它乘 4。 */

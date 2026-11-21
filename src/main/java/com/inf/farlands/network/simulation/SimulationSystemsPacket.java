@@ -14,10 +14,10 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 
 /**
- * 某维度模拟层系统选择的下发包。
+ * 某维度模拟层系统选择的下发包，两族。
  *
  * <p>
- * 只带一族：模拟层按维度只有一个选择。合进 farlands 五族那个包有两条路都不成立，改
+ * 带两族：模拟层按维度有两个选择，噪声与群系。合进 farlands 五族那个包有两条路都不成立，改
  * {@link SystemsData.LevelSelection} 会把两层的磁盘格式绑死，在外层再包一个 record 则每次都要背五个族字段。
  * 两层的族数将来不同，共用一个包会让字段长期错位。
  *
@@ -28,8 +28,8 @@ import net.minecraft.world.level.Level;
  * <p>
  * 带维度字段，接收端按维度入表，跨维度在途的旧包因此顶不掉当前维度的显示。
  */
-public record SimulationSystemsPacket(ResourceKey<Level> dimension, SystemsData.SystemSelection selection)
-        implements CustomPacketPayload {
+public record SimulationSystemsPacket(ResourceKey<Level> dimension, SystemsData.SystemSelection noise,
+        SystemsData.SystemSelection biome) implements CustomPacketPayload {
 
     public static final Type<SimulationSystemsPacket> TYPE = new Type<>(
             Identifier.fromNamespaceAndPath(InfsFarlands.MOD_ID, "simulation_systems"));
@@ -44,12 +44,15 @@ public record SimulationSystemsPacket(ResourceKey<Level> dimension, SystemsData.
 
     public static void writeTo(FriendlyByteBuf buffer, SimulationSystemsPacket pkt) {
         buffer.writeResourceKey(pkt.dimension());
-        SELECTION_CODEC.encode(buffer, pkt.selection());
+        SELECTION_CODEC.encode(buffer, pkt.noise());
+        SELECTION_CODEC.encode(buffer, pkt.biome());
     }
 
     public static SimulationSystemsPacket readFrom(FriendlyByteBuf buffer) {
         ResourceKey<Level> dimension = buffer.readResourceKey(Registries.DIMENSION);
-        return new SimulationSystemsPacket(dimension, SELECTION_CODEC.decode(buffer));
+        SystemsData.SystemSelection noise = SELECTION_CODEC.decode(buffer);
+        SystemsData.SystemSelection biome = SELECTION_CODEC.decode(buffer);
+        return new SimulationSystemsPacket(dimension, noise, biome);
     }
 
     @Override

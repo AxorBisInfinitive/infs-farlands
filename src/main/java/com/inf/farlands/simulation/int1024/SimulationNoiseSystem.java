@@ -13,7 +13,13 @@ public interface SimulationNoiseSystem extends SimulationTerrainSystem {
 
     Density createFinalDensity(Router router);
 
-    /** 整条路由。默认只把 finalDensity 换成本系统的，其余字段照抄。 */
+    /**
+     * 整条路由。默认只把 finalDensity 换成本系统的，其余字段照抄。
+     *
+     * <p>
+     * 每段可能被调两次：群系那一档要六条气候密度，方块那一档要 {@code finalDensity}，两处各取一次。覆写者按
+     * 无副作用写，别在这里记状态或做一次性初始化。
+     */
     default Router createRouter(Router vanilla) {
         return vanilla.withFinalDensity(createFinalDensity(vanilla));
     }

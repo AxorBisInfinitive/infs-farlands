@@ -1,4 +1,4 @@
-package com.inf.farlands.simulation.terrain;
+package com.inf.farlands.simulation.task;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -49,13 +49,16 @@ public final class SimulationPool {
     }
 
     /**
-     * 提交一段的生产。返回假表示池已关闭，即停服中；调用方据此撤销它做的认领并留待下次。
+     * 提交一次生产。返回假表示池已关闭，即停服中；调用方据此撤销它做的认领并留待下次。
+     *
+     * <p>
+     * 群系与噪声两种任务共用本方法：它们只差跑什么，在途计数、失败日志与主线程收尾是同一套。
      *
      * <p>
      * {@code onDoneMainThread} 在主线程执行，且先于在途计数递减，入参是本次生产成没成。失败也要回调，
      * 否则调用方无从区分「还在生产」与「生产失败」；回调抛异常同样保证计数递减。
      */
-    public static boolean submitProduction(ServerLevel level, SimulationTask task,
+    public static boolean submitProduction(ServerLevel level, SimulationWork task,
             Consumer<Boolean> onDoneMainThread) {
         IN_FLIGHT.incrementAndGet();
         try {

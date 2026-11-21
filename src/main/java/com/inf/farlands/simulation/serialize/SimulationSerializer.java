@@ -94,6 +94,7 @@ public final class SimulationSerializer {
             tag.putByteArray("SkyLight", ChunkDataPacket.rawLightBytes(skyLight));
         }
         tag.putInt("shapeMode", shapeMode);
+        // 档位是持久化值。改档表等于让旧档失效，这条失效靠「只有终态段落盘」保证，见 SimulationSectionStage。
         tag.putInt("stage", stage);
 
         try {

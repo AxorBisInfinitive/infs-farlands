@@ -3,7 +3,7 @@ package com.inf.farlands.client.network;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-import com.inf.farlands.terrain.registry.SystemsData;
+import com.inf.farlands.simulation.model.SimulationData;
 
 import net.minecraft.resources.Identifier;
 
@@ -13,19 +13,22 @@ import net.minecraft.resources.Identifier;
  * <p>
  * 只进不出：调试条目按当前维度查它，查不到就显示未收到，不做任何本地推断。键取维度而不是只留最后一包，
  * 跨维度在途的旧包因此不会顶掉当前维度的显示。
+ *
+ * <p>
+ * 值是两族的选择，与 {@code simulation.dat} 同形：线上、盘上、显示三处读的是同一个记录。
  */
 public final class ClientSimulationSystems {
 
     private ClientSimulationSystems() {
     }
 
-    private static final Map<Identifier, SystemsData.SystemSelection> BY_DIMENSION = new ConcurrentHashMap<>();
+    private static final Map<Identifier, SimulationData.LevelSelection> BY_DIMENSION = new ConcurrentHashMap<>();
 
-    public static void put(Identifier dimension, SystemsData.SystemSelection selection) {
+    public static void put(Identifier dimension, SimulationData.LevelSelection selection) {
         BY_DIMENSION.put(dimension, selection);
     }
 
-    public static SystemsData.SystemSelection get(Identifier dimension) {
+    public static SimulationData.LevelSelection get(Identifier dimension) {
         return BY_DIMENSION.get(dimension);
     }
 }

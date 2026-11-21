@@ -15,7 +15,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 
 /**
- * 创建世界页的模拟之地页签：与边境之地同级，每个维度一页，每页只有地形一族。
+ * 创建世界页的模拟之地页签：与边境之地同级，每个维度一页，每页两族，噪声与群系各一行。
  *
  * <p>
  * 内容与边境之地同源：选项、标题、默认项都经 {@link DimensionTab} 那一份，族行的校验链也同一条，所以参数
@@ -55,17 +55,21 @@ public final class SimulationLandsTab extends DimensionTab {
 
     @Override
     protected List<SystemId> ids(FamilyKind kind) {
-        return SimulationRegistries.ids();
+        return switch (kind) {
+            case TERRAIN -> SimulationRegistries.ids();
+            case BIOME -> SimulationRegistries.biomeIds();
+            default -> List.of();
+        };
     }
 
     @Override
     protected Function<SystemId, Class<?>> classOf(FamilyKind kind) {
-        return SimulationRegistries.classLookup();
+        return id -> SimulationIO.classOf(kind, id);
     }
 
     @Override
     protected SystemId defaultId(Identifier page, FamilyKind kind) {
-        return SimulationIO.defaultId();
+        return SimulationIO.defaultId(kind);
     }
 
     @Override

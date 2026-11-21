@@ -8,8 +8,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import com.inf.farlands.FarlandsTick;
 import com.inf.farlands.simulation.SimulationLevels;
-import com.inf.farlands.simulation.int1024.SimulationNoiseSystem;
+import com.inf.farlands.simulation.int1024.SimulationBiomeSystem;
+import com.inf.farlands.simulation.int1024.SimulationTerrainSystem;
 import com.inf.farlands.simulation.model.SimulationConfig;
+import com.inf.farlands.simulation.model.SimulationData;
 import com.inf.farlands.simulation.registry.SimulationRegistries;
 import com.inf.farlands.simulation.serialize.SimulationFileIndex;
 import com.inf.farlands.simulation.serialize.SimulationIO;
@@ -20,6 +22,7 @@ import com.inf.farlands.terrain.LevelSystems;
 import com.inf.farlands.terrain.SurfaceSystem;
 import com.inf.farlands.terrain.TerrainSystem;
 import com.inf.farlands.terrain.biomeSource.BiomeSourceFilter;
+import com.inf.farlands.terrain.registry.FamilyKind;
 import com.inf.farlands.terrain.registry.SystemId;
 import com.inf.farlands.terrain.registry.SystemsData;
 import com.inf.farlands.terrain.registry.SystemsHolder;
@@ -64,10 +67,12 @@ public abstract class ServerLevelMixin implements LevelSystems, SystemsHolder, S
     private TerrainFiller farlandsTerrainFiller;
 
     /**
-     * 该 level 的模拟系统。构造末尾写一次，池线程上的填充任务只读，因此 volatile。
+     * 该 level 的模拟地形系统与群系系统。构造末尾各写一次，池线程上的填充任务只读，因此 volatile。
      */
     @Unique
-    private volatile SimulationNoiseSystem farlandsSimulationSystem;
+    private volatile SimulationTerrainSystem farlandsSimulationTerrainSystem;
+    @Unique
+    private volatile SimulationBiomeSystem farlandsSimulationBiomeSystem;
     @Unique
     private SystemsData farlandsSystems;
 
@@ -96,12 +101,16 @@ public abstract class ServerLevelMixin implements LevelSystems, SystemsHolder, S
         this.farlandsCarverSystem = SystemsIO.carver(selection);
         this.farlandsDecorationSystem = SystemsIO.decoration(selection);
         this.farlandsTerrainFiller = new StandardTerrainFiller();
-        // 模拟层的选择与实例在同一处解析与新建。此处仍在世界初始化之前，新世界因此能落到暂存或默认并写盘；
-        // 若推到首个 tick 才解析，那时 worlds 已 initialized，缺档会被判成「旧世界缺档案」而抛。
-        SystemsData.SystemSelection simulationSelection = SimulationIO.selection(
+        // 模拟层的选择与实例在同一处解析与新建，两族各一份。此处仍在世界初始化之前，新世界因此能落到暂存或默认
+        // 并写盘；若推到首个 tick 才解析，那时 worlds 已 initialized，缺档会被判成「旧世界缺档案」而抛。
+        SimulationData.LevelSelection simulationSelection = SimulationIO.selection(
                 SimulationIO.systemsFor(server), level.dimension().identifier());
-        this.farlandsSimulationSystem = SimulationRegistries.newInstance(
-                new SystemId(simulationSelection.id()), SimulationIO.args(simulationSelection));
+        this.farlandsSimulationTerrainSystem = SimulationRegistries.newInstance(
+                new SystemId(simulationSelection.noise().id()),
+                SimulationIO.args(FamilyKind.TERRAIN, simulationSelection.noise()));
+        this.farlandsSimulationBiomeSystem = SimulationRegistries.biome(
+                new SystemId(simulationSelection.biome().id()),
+                SimulationIO.args(FamilyKind.BIOME, simulationSelection.biome()));
         // 开启时映射表在这里读一次，触发点因此前移到打开世界：键形状与代码约定不符时世界打不开，而不是先进去、每段
         // 一次抛出、被薄封装吞成刷屏加静默重建。例外是本类的 SsaMappingException，它不被任何 catch 接住。
         // 关闭时不碰 ssa，映射表留到真正建段时再读。
@@ -129,8 +138,13 @@ public abstract class ServerLevelMixin implements LevelSystems, SystemsHolder, S
     }
 
     @Override
-    public SimulationNoiseSystem simulationSystem() {
-        return this.farlandsSimulationSystem;
+    public SimulationTerrainSystem simulationTerrainSystem() {
+        return this.farlandsSimulationTerrainSystem;
+    }
+
+    @Override
+    public SimulationBiomeSystem simulationBiomeSystem() {
+        return this.farlandsSimulationBiomeSystem;
     }
 
     @Override

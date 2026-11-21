@@ -10,7 +10,6 @@ import java.util.function.Function;
 
 import com.inf.farlands.client.gui.page.FamilySelectionStore;
 import com.inf.farlands.simulation.model.SimulationData;
-import com.inf.farlands.simulation.registry.SimulationRegistries;
 import com.inf.farlands.simulation.serialize.SimulationIO;
 import com.inf.farlands.terrain.registry.FamilyKind;
 import com.inf.farlands.terrain.registry.SystemId;
@@ -22,18 +21,18 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 
 /**
- * 创建世界页里模拟层那一层的可编辑暂存：每个维度页一个地形族的选择与参数文本。
+ * 创建世界页里模拟层那一层的可编辑暂存：每个维度页两族的选择与参数文本。
  *
  * <p>
  * 簿记与校验都在 {@link CreatingWorldSelections}，与 farlands 那一层共用同一份实现。本类只提供这一层的族表、
- * 取实现类的办法，即模拟注册表，默认项一律 VOID，以及落盘结构 {@link SimulationData}。
+ * 按族取实现类的办法，即模拟注册表的两张表，默认项一律 VOID，以及落盘结构 {@link SimulationData}。
+ *
+ * <p>
+ * 族表顺序是噪声在前、群系在后：噪声是这一层原有的一行，加族不改它的位置。
  */
 public final class CreatingWorldSimulationConfig {
 
-    /** 唯一的族标签。模拟层只有地形一族。 */
-    public static final FamilyKind FAMILY = FamilyKind.TERRAIN;
-
-    private static final List<FamilyKind> FAMILIES = List.of(FAMILY);
+    private static final List<FamilyKind> FAMILIES = List.of(FamilyKind.TERRAIN, FamilyKind.BIOME);
 
     /** 本层的暂存。 */
     private static final CreatingWorldSelections STATE = new CreatingWorldSelections();
@@ -41,13 +40,13 @@ public final class CreatingWorldSimulationConfig {
     /** 页签用的单例。 */
     public static final FamilySelectionStore STORE = STATE;
 
-    /** 该维度的默认：模拟层没有维度原生系统，一律 VOID。 */
+    /** 该族的默认：模拟层没有维度原生系统，一律 VOID。 */
     private static final BiFunction<Identifier, FamilyKind, SystemId> DEFAULT =
-            (page, kind) -> SimulationIO.defaultId();
+            (page, kind) -> SimulationIO.defaultId(kind);
 
-    /** 模拟层的取类办法，与 farlands 那边的 {@code classOf(kind)} 同形。 */
+    /** 模拟层按族取实现类的办法，与 farlands 那边的 {@code classOf(kind)} 同形。 */
     private static final Function<FamilyKind, Function<SystemId, Class<?>>> CLASS_OF =
-            kind -> SimulationRegistries.classLookup();
+            kind -> id -> SimulationIO.classOf(kind, id);
 
     private CreatingWorldSimulationConfig() {
     }
@@ -80,9 +79,11 @@ public final class CreatingWorldSimulationConfig {
         if (!violations().isEmpty()) {
             throw new IllegalStateException("farlands: invalid simulation params at world creation");
         }
-        Map<Identifier, SystemsData.SystemSelection> levels = new LinkedHashMap<>();
+        Map<Identifier, SimulationData.LevelSelection> levels = new LinkedHashMap<>();
         for (Identifier page : STATE.dimensions()) {
-            levels.put(page, STATE.selection(page, FAMILY, SimulationRegistries.classLookup(), DEFAULT));
+            levels.put(page, new SimulationData.LevelSelection(
+                    STATE.selection(page, FamilyKind.TERRAIN, CLASS_OF.apply(FamilyKind.TERRAIN), DEFAULT),
+                    STATE.selection(page, FamilyKind.BIOME, CLASS_OF.apply(FamilyKind.BIOME), DEFAULT)));
         }
         return new SimulationData(levels);
     }
@@ -104,9 +105,14 @@ public final class CreatingWorldSimulationConfig {
     }
 
     private static void apply(SimulationData data) {
-        for (Map.Entry<Identifier, SystemsData.SystemSelection> entry : data.systems().entrySet()) {
-            STATE.put(entry.getKey(), FAMILY, new SystemId(entry.getValue().id()),
-                    SimulationIO.texts(entry.getValue()));
+        for (Map.Entry<Identifier, SimulationData.LevelSelection> entry : data.levels().entrySet()) {
+            Identifier page = entry.getKey();
+            apply(page, FamilyKind.TERRAIN, entry.getValue().noise());
+            apply(page, FamilyKind.BIOME, entry.getValue().biome());
         }
+    }
+
+    private static void apply(Identifier page, FamilyKind kind, SystemsData.SystemSelection selection) {
+        STATE.put(page, kind, new SystemId(selection.id()), SimulationIO.texts(kind, selection));
     }
 }
