@@ -5,11 +5,18 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
 
 import com.inf.farlands.InfsFarlands;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.Dynamic;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
+import love.crysh.long2.binaries.binary1280.Binary1280;
+import love.crysh.long2.binaries.binary256.Binary256;
+import love.crysh.long2.binaries.binary640.Binary640;
+import love.crysh.long2.ints.Int1024;
+import love.crysh.long2.ints.Int256;
+import love.crysh.long2.ints.Int512;
 
 import net.minecraft.nbt.NbtOps;
 import net.minecraft.resources.Identifier;
@@ -143,6 +150,54 @@ public final class SystemsData extends SavedData {
                     Optional.empty());
         }
 
+        /** 256 位整数，存十进制文本。与浮点两项同式，解析推迟到取值时。 */
+        public static Arg ofInt256(Int256 value) {
+            return new Arg(ArgType.INT256,
+                    new Dynamic<>(NbtOps.INSTANCE, NbtOps.INSTANCE.createString(value.toString())),
+                    Optional.empty());
+        }
+
+        /** 512 位整数，存十进制文本。 */
+        public static Arg ofInt512(Int512 value) {
+            return new Arg(ArgType.INT512,
+                    new Dynamic<>(NbtOps.INSTANCE, NbtOps.INSTANCE.createString(value.toString())),
+                    Optional.empty());
+        }
+
+        /** 1024 位整数，存十进制文本。最坏 310 个字符，含符号。 */
+        public static Arg ofInt1024(Int1024 value) {
+            return new Arg(ArgType.INT1024,
+                    new Dynamic<>(NbtOps.INSTANCE, NbtOps.INSTANCE.createString(value.toString())),
+                    Optional.empty());
+        }
+
+        /** 256 位浮点，存科学计数法文本。最坏约 86 个字符。 */
+        public static Arg ofBinary256(Binary256 value) {
+            return new Arg(ArgType.BINARY256,
+                    new Dynamic<>(NbtOps.INSTANCE, NbtOps.INSTANCE.createString(value.toScientificString())),
+                    Optional.empty());
+        }
+
+        /** 640 位浮点，存科学计数法文本。最坏约 200 个字符。 */
+        public static Arg ofBinary640(Binary640 value) {
+            return new Arg(ArgType.BINARY640,
+                    new Dynamic<>(NbtOps.INSTANCE, NbtOps.INSTANCE.createString(value.toScientificString())),
+                    Optional.empty());
+        }
+
+        /**
+         * 1280 位浮点，存科学计数法文本。最坏约 392 个字符。
+         *
+         * <p>
+         * 这里必须是 {@code toScientificString()}：{@code toString()} 是完整定点，本类型的指数上界约 1.34 亿，
+         * 最坏输出四千万位，落盘能写出去但界面输入框读不回来。
+         */
+        public static Arg ofBinary1280(Binary1280 value) {
+            return new Arg(ArgType.BINARY1280,
+                    new Dynamic<>(NbtOps.INSTANCE, NbtOps.INSTANCE.createString(value.toScientificString())),
+                    Optional.empty());
+        }
+
         /**
          * 浮点参数的取值。
          *
@@ -167,6 +222,45 @@ public final class SystemsData extends SavedData {
                         "farlands: system arg " + key + " out of float range: " + value);
             }
             return (float) value;
+        }
+
+        /** 256 位整数。文本由 {@link #ofInt256} 写入，越界回绕的语义与库的 {@code parseInt} 一致。 */
+        public Int256 asInt256(String key) {
+            return parseWidth(key, value -> Int256.parseInt(value));
+        }
+
+        /** 512 位整数。 */
+        public Int512 asInt512(String key) {
+            return parseWidth(key, value -> Int512.parseInt(value));
+        }
+
+        /** 1024 位整数。 */
+        public Int1024 asInt1024(String key) {
+            return parseWidth(key, value -> Int1024.parseInt(value));
+        }
+
+        /** 256 位浮点。文本是科学计数法，越界饱和成正负无穷的语义与库的 {@code of(String)} 一致。 */
+        public Binary256 asBinary256(String key) {
+            return parseWidth(key, value -> Binary256.of(value));
+        }
+
+        /** 640 位浮点。 */
+        public Binary640 asBinary640(String key) {
+            return parseWidth(key, value -> Binary640.of(value));
+        }
+
+        /** 1280 位浮点。 */
+        public Binary1280 asBinary1280(String key) {
+            return parseWidth(key, value -> Binary1280.of(value));
+        }
+
+        /** 宽度类型的取值：文本交给库的解析器，失败带上键名，不返回默认值。 */
+        private <T> T parseWidth(String key, Function<String, T> parser) {
+            try {
+                return parser.apply(text(key, this.value));
+            } catch (NumberFormatException e) {
+                throw new IllegalStateException("farlands: system arg " + key + " is not a valid number", e);
+            }
         }
 
         private String numberText(String key) {
@@ -198,9 +292,22 @@ public final class SystemsData extends SavedData {
         }
     }
 
-    /** 参数声明类型。文件里写小写名，未知名直接抛。 */
+    /**
+     * 参数声明类型。文件里写小写名，未知名直接抛。
+     *
+     * <p>
+     * 六个宽度类型各有自己的位宽，值一律以文本存：整数族存十进制，浮点族存科学计数法。越界不判，也不设判据：
+     * 整数族由 {@code Int*.parseInt} 按位宽回绕，浮点族由 {@code Binary*.of(String)} 在十进制指数超限时饱和成
+     * 正负无穷、下溢成零，两者都不抛异常。所以界面不会因为越界标红，落盘与读回的也是回绕或饱和之后的值。
+     *
+     * <p>
+     * 浮点族必须走 {@code toScientificString()}，不能走 {@code toString()}：后者是完整定点，{@code Binary640} 与
+     * {@code Binary1280} 的指数上界分别是 8388607 与 1.34 亿，最坏输出在百万到四千万位，会破界面输入框的 1024
+     * 字符上限，被静默截断。
+     */
     public enum ArgType {
-        INT, LONG, SHORT, BYTE, FLOAT, DOUBLE, BOOLEAN, STRING, ENUM;
+        INT, LONG, SHORT, BYTE, FLOAT, DOUBLE, INT256, INT512, INT1024, BINARY256, BINARY640, BINARY1280, BOOLEAN,
+        STRING, ENUM;
 
         public static final Codec<ArgType> CODEC = Codec.STRING.xmap(ArgType::of, ArgType::id);
 

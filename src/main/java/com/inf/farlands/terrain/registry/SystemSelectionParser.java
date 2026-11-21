@@ -5,10 +5,17 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
 import com.inf.farlands.terrain.registry.SystemsData.Arg;
 import com.inf.farlands.terrain.registry.SystemsData.ArgType;
 import com.inf.farlands.terrain.registry.SystemsData.SystemSelection;
+import love.crysh.long2.binaries.binary1280.Binary1280;
+import love.crysh.long2.binaries.binary256.Binary256;
+import love.crysh.long2.binaries.binary640.Binary640;
+import love.crysh.long2.ints.Int1024;
+import love.crysh.long2.ints.Int256;
+import love.crysh.long2.ints.Int512;
 
 import net.minecraft.network.chat.Component;
 
@@ -132,6 +139,12 @@ public final class SystemSelectionParser {
             case BYTE -> Arg.ofByte((byte) integral(spec.key(), text, Byte.MIN_VALUE, Byte.MAX_VALUE));
             case FLOAT -> Arg.ofFloatText(checkedDoubleText(spec.key(), text, Float.MAX_VALUE));
             case DOUBLE -> Arg.ofDoubleText(checkedDoubleText(spec.key(), text, Double.MAX_VALUE));
+            case INT256 -> Arg.ofInt256(newDecimal(spec.key(), text, value -> Int256.parseInt(value)));
+            case INT512 -> Arg.ofInt512(newDecimal(spec.key(), text, value -> Int512.parseInt(value)));
+            case INT1024 -> Arg.ofInt1024(newDecimal(spec.key(), text, value -> Int1024.parseInt(value)));
+            case BINARY256 -> Arg.ofBinary256(newDecimal(spec.key(), text, value -> Binary256.of(value)));
+            case BINARY640 -> Arg.ofBinary640(newDecimal(spec.key(), text, value -> Binary640.of(value)));
+            case BINARY1280 -> Arg.ofBinary1280(newDecimal(spec.key(), text, value -> Binary1280.of(value)));
             case BOOLEAN -> Arg.ofBoolean(bool(spec.key(), text));
             case STRING -> Arg.ofString(text);
             case ENUM -> throw new SystemArgProblem(
@@ -182,6 +195,28 @@ public final class SystemSelectionParser {
                     Component.translatable("createWorld.tab.infs-farlands.param.error.out_of_range", key, text));
         }
         return trimmed;
+    }
+
+    /**
+     * 宽度数值的文本解析：trim 后交给库的解析器，语法错包成界面可显示的错因。
+     *
+     * <p>
+     * 只拦语法，值域不判。整数族由 {@code parseInt} 按位宽回绕，浮点族由 {@code of(String)} 在十进制指数超限时
+     * 饱和成正负无穷、下溢成零，两者都不抛异常，所以越界不会让界面标红，也不会拦住创建。这是类型自身的位宽语义，
+     * 不是缺口。
+     *
+     * <p>
+     * 不收十六进制：{@code IntText.scanDecimal} 与 {@code Binary*Decimal.scan} 都只认十进制，带 0x 前缀的文本会
+     * 在解析时抛出来，走同一支错因。
+     */
+    private static <T> T newDecimal(String key, String text, Function<String, T> parser) {
+        String trimmed = text.trim();
+        try {
+            return parser.apply(trimmed);
+        } catch (NumberFormatException e) {
+            throw new SystemArgProblem("farlands: system arg " + key + " is not a valid number: " + text,
+                    Component.translatable("createWorld.tab.infs-farlands.param.error.not_number", key, text), e);
+        }
     }
 
     private static boolean bool(String key, String text) {

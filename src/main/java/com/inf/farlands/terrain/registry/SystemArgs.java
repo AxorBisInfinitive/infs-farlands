@@ -7,6 +7,12 @@ import java.util.Map;
 
 import com.mojang.serialization.Dynamic;
 import com.inf.farlands.terrain.registry.SystemsData.Arg;
+import love.crysh.long2.binaries.binary1280.Binary1280;
+import love.crysh.long2.binaries.binary256.Binary256;
+import love.crysh.long2.binaries.binary640.Binary640;
+import love.crysh.long2.ints.Int1024;
+import love.crysh.long2.ints.Int256;
+import love.crysh.long2.ints.Int512;
 
 /**
  * 系统构造参数的键值视图。
@@ -48,9 +54,17 @@ public final class SystemArgs {
             case BYTE -> args.setByte(key, (byte) range(key, arg, Byte.MIN_VALUE, Byte.MAX_VALUE));
             case FLOAT -> args.setFloat(key, arg.asFloat(key));
             case DOUBLE -> args.setDouble(key, arg.asDouble(key));
+            case INT256 -> args.setInt256(key, arg.asInt256(key));
+            case INT512 -> args.setInt512(key, arg.asInt512(key));
+            case INT1024 -> args.setInt1024(key, arg.asInt1024(key));
+            case BINARY256 -> args.setBinary256(key, arg.asBinary256(key));
+            case BINARY640 -> args.setBinary640(key, arg.asBinary640(key));
+            case BINARY1280 -> args.setBinary1280(key, arg.asBinary1280(key));
             case BOOLEAN -> args.setBoolean(key, number(key, arg).longValue() != 0L);
             case STRING -> args.setString(key, string(key, arg));
             case ENUM -> setEnum(args, key, arg);
+            // 兜底：漏一个分支的后果是这个参数静默不进视图，症状推迟到系统构造时抛缺失键。这里让它当场炸。
+            default -> throw new IllegalStateException("farlands: unhandled system arg type " + arg.type());
         }
     }
 
@@ -163,6 +177,30 @@ public final class SystemArgs {
         put(key, value);
     }
 
+    public void setInt256(String key, Int256 value) {
+        put(key, value);
+    }
+
+    public void setInt512(String key, Int512 value) {
+        put(key, value);
+    }
+
+    public void setInt1024(String key, Int1024 value) {
+        put(key, value);
+    }
+
+    public void setBinary256(String key, Binary256 value) {
+        put(key, value);
+    }
+
+    public void setBinary640(String key, Binary640 value) {
+        put(key, value);
+    }
+
+    public void setBinary1280(String key, Binary1280 value) {
+        put(key, value);
+    }
+
     public int getInt(String key) {
         return (Integer) get(key, Integer.class);
     }
@@ -197,6 +235,30 @@ public final class SystemArgs {
 
     public <E extends Enum<E>> E getEnum(String key, Class<E> type) {
         return type.cast(get(key, type));
+    }
+
+    public Int256 getInt256(String key) {
+        return (Int256) get(key, Int256.class);
+    }
+
+    public Int512 getInt512(String key) {
+        return (Int512) get(key, Int512.class);
+    }
+
+    public Int1024 getInt1024(String key) {
+        return (Int1024) get(key, Int1024.class);
+    }
+
+    public Binary256 getBinary256(String key) {
+        return (Binary256) get(key, Binary256.class);
+    }
+
+    public Binary640 getBinary640(String key) {
+        return (Binary640) get(key, Binary640.class);
+    }
+
+    public Binary1280 getBinary1280(String key) {
+        return (Binary1280) get(key, Binary1280.class);
     }
 
     private void put(String key, Object value) {

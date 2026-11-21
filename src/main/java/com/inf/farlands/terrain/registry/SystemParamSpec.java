@@ -10,6 +10,12 @@ import java.util.function.Supplier;
 import com.mojang.serialization.Dynamic;
 import com.inf.farlands.terrain.registry.SystemsData.Arg;
 import com.inf.farlands.terrain.registry.SystemsData.ArgType;
+import love.crysh.long2.binaries.binary1280.Binary1280;
+import love.crysh.long2.binaries.binary256.Binary256;
+import love.crysh.long2.binaries.binary640.Binary640;
+import love.crysh.long2.ints.Int1024;
+import love.crysh.long2.ints.Int256;
+import love.crysh.long2.ints.Int512;
 
 import net.minecraft.network.chat.Component;
 
@@ -121,6 +127,7 @@ public final class SystemParamSpec {
         return switch (type) {
             case INT, SHORT, BYTE, LONG -> Long.toString(number(key, value).longValue());
             case FLOAT, DOUBLE -> string(key, value);
+            case INT256, INT512, INT1024, BINARY256, BINARY640, BINARY1280 -> string(key, value);
             case BOOLEAN -> number(key, value).longValue() != 0L ? "true" : "false";
             case STRING, ENUM -> string(key, value);
         };
@@ -162,6 +169,30 @@ public final class SystemParamSpec {
 
     public static DoubleBuilder ofDouble(String key) {
         return new DoubleBuilder(key);
+    }
+
+    public static Int256Builder ofInt256(String key) {
+        return new Int256Builder(key);
+    }
+
+    public static Int512Builder ofInt512(String key) {
+        return new Int512Builder(key);
+    }
+
+    public static Int1024Builder ofInt1024(String key) {
+        return new Int1024Builder(key);
+    }
+
+    public static Binary256Builder ofBinary256(String key) {
+        return new Binary256Builder(key);
+    }
+
+    public static Binary640Builder ofBinary640(String key) {
+        return new Binary640Builder(key);
+    }
+
+    public static Binary1280Builder ofBinary1280(String key) {
+        return new Binary1280Builder(key);
     }
 
     public static BoolBuilder ofBoolean(String key) {
@@ -409,6 +440,186 @@ public final class SystemParamSpec {
 
         /** 字面文本的便捷重载。文本不随语言切换，只用于诊断或没有语言文件的第三方系统。 */
         public DoubleBuilder check(Predicate<Double> test, String literal) {
+            return check(test, value -> Component.literal(literal));
+        }
+    }
+
+    public static final class Int256Builder extends Builder<Int256Builder> {
+        Int256Builder(String key) {
+            super(key, ArgType.INT256, null);
+        }
+
+        @Override
+        public Int256Builder self() {
+            return this;
+        }
+
+        public Int256Builder define(Int256 value) {
+            this.defaultValue = Arg.ofInt256(value);
+            return this;
+        }
+
+        /** 单值语义检查。通过返回 null，否则返回错因。逐键执行，失败只标红这一个框。 */
+        public Int256Builder check(Predicate<Int256> test, Function<Int256, Component> message) {
+            this.check = arg -> {
+                Int256 value = arg.asInt256(this.key);
+                return test.test(value) ? null : message.apply(value);
+            };
+            return this;
+        }
+
+        /** 字面文本的便捷重载。文本不随语言切换，只用于诊断或没有语言文件的第三方系统。 */
+        public Int256Builder check(Predicate<Int256> test, String literal) {
+            return check(test, value -> Component.literal(literal));
+        }
+    }
+
+    public static final class Int512Builder extends Builder<Int512Builder> {
+        Int512Builder(String key) {
+            super(key, ArgType.INT512, null);
+        }
+
+        @Override
+        public Int512Builder self() {
+            return this;
+        }
+
+        public Int512Builder define(Int512 value) {
+            this.defaultValue = Arg.ofInt512(value);
+            return this;
+        }
+
+        /** 单值语义检查。通过返回 null，否则返回错因。 */
+        public Int512Builder check(Predicate<Int512> test, Function<Int512, Component> message) {
+            this.check = arg -> {
+                Int512 value = arg.asInt512(this.key);
+                return test.test(value) ? null : message.apply(value);
+            };
+            return this;
+        }
+
+        /** 字面文本的便捷重载。文本不随语言切换，只用于诊断或没有语言文件的第三方系统。 */
+        public Int512Builder check(Predicate<Int512> test, String literal) {
+            return check(test, value -> Component.literal(literal));
+        }
+    }
+
+    public static final class Int1024Builder extends Builder<Int1024Builder> {
+        Int1024Builder(String key) {
+            super(key, ArgType.INT1024, null);
+        }
+
+        @Override
+        public Int1024Builder self() {
+            return this;
+        }
+
+        public Int1024Builder define(Int1024 value) {
+            this.defaultValue = Arg.ofInt1024(value);
+            return this;
+        }
+
+        /** 单值语义检查。通过返回 null，否则返回错因。 */
+        public Int1024Builder check(Predicate<Int1024> test, Function<Int1024, Component> message) {
+            this.check = arg -> {
+                Int1024 value = arg.asInt1024(this.key);
+                return test.test(value) ? null : message.apply(value);
+            };
+            return this;
+        }
+
+        /** 字面文本的便捷重载。文本不随语言切换，只用于诊断或没有语言文件的第三方系统。 */
+        public Int1024Builder check(Predicate<Int1024> test, String literal) {
+            return check(test, value -> Component.literal(literal));
+        }
+    }
+
+    public static final class Binary256Builder extends Builder<Binary256Builder> {
+        Binary256Builder(String key) {
+            super(key, ArgType.BINARY256, null);
+        }
+
+        @Override
+        public Binary256Builder self() {
+            return this;
+        }
+
+        public Binary256Builder define(Binary256 value) {
+            this.defaultValue = Arg.ofBinary256(value);
+            return this;
+        }
+
+        /** 单值语义检查。通过返回 null，否则返回错因。 */
+        public Binary256Builder check(Predicate<Binary256> test, Function<Binary256, Component> message) {
+            this.check = arg -> {
+                Binary256 value = arg.asBinary256(this.key);
+                return test.test(value) ? null : message.apply(value);
+            };
+            return this;
+        }
+
+        /** 字面文本的便捷重载。文本不随语言切换，只用于诊断或没有语言文件的第三方系统。 */
+        public Binary256Builder check(Predicate<Binary256> test, String literal) {
+            return check(test, value -> Component.literal(literal));
+        }
+    }
+
+    public static final class Binary640Builder extends Builder<Binary640Builder> {
+        Binary640Builder(String key) {
+            super(key, ArgType.BINARY640, null);
+        }
+
+        @Override
+        public Binary640Builder self() {
+            return this;
+        }
+
+        public Binary640Builder define(Binary640 value) {
+            this.defaultValue = Arg.ofBinary640(value);
+            return this;
+        }
+
+        /** 单值语义检查。通过返回 null，否则返回错因。 */
+        public Binary640Builder check(Predicate<Binary640> test, Function<Binary640, Component> message) {
+            this.check = arg -> {
+                Binary640 value = arg.asBinary640(this.key);
+                return test.test(value) ? null : message.apply(value);
+            };
+            return this;
+        }
+
+        /** 字面文本的便捷重载。文本不随语言切换，只用于诊断或没有语言文件的第三方系统。 */
+        public Binary640Builder check(Predicate<Binary640> test, String literal) {
+            return check(test, value -> Component.literal(literal));
+        }
+    }
+
+    public static final class Binary1280Builder extends Builder<Binary1280Builder> {
+        Binary1280Builder(String key) {
+            super(key, ArgType.BINARY1280, null);
+        }
+
+        @Override
+        public Binary1280Builder self() {
+            return this;
+        }
+
+        public Binary1280Builder define(Binary1280 value) {
+            this.defaultValue = Arg.ofBinary1280(value);
+            return this;
+        }
+
+        /** 单值语义检查。通过返回 null，否则返回错因。 */
+        public Binary1280Builder check(Predicate<Binary1280> test, Function<Binary1280, Component> message) {
+            this.check = arg -> {
+                Binary1280 value = arg.asBinary1280(this.key);
+                return test.test(value) ? null : message.apply(value);
+            };
+            return this;
+        }
+
+        /** 字面文本的便捷重载。文本不随语言切换，只用于诊断或没有语言文件的第三方系统。 */
+        public Binary1280Builder check(Predicate<Binary1280> test, String literal) {
             return check(test, value -> Component.literal(literal));
         }
     }
